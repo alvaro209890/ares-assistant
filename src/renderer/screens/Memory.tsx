@@ -20,7 +20,7 @@ export default function Memory(): JSX.Element {
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -12 }}
-      className="grid h-full grid-cols-[minmax(320px,420px)_1fr] gap-4 px-7 pb-6"
+      className="grid h-full min-h-[680px] gap-4 p-5 lg:grid-cols-[minmax(320px,420px)_minmax(0,1fr)]"
     >
       <section className="glass flex min-h-0 flex-col rounded-2xl p-4">
         <div className="mb-3 flex items-center justify-between">
@@ -29,7 +29,7 @@ export default function Memory(): JSX.Element {
             NOVA
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
           {sessions.map((s) => (
             <SessionRow
               key={s.id}
@@ -58,7 +58,7 @@ export default function Memory(): JSX.Element {
             ADICIONAR
           </button>
         </div>
-        <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
+        <div className="mt-4 min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
           {memory.length === 0 ? (
             <div className="grid h-full place-items-center text-sm text-cyan-200/40">Nenhum fato salvo ainda.</div>
           ) : (

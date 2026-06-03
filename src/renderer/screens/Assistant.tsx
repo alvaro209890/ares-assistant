@@ -30,9 +30,9 @@ export default function Assistant(): JSX.Element {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="grid h-full grid-cols-[minmax(0,1fr)_420px] gap-4 px-7 pb-6"
+      className="grid h-full min-h-[760px] gap-4 p-5 lg:grid-cols-[minmax(0,1fr)_400px]"
     >
-      <section className="ares-orb-stage glass relative min-w-0 overflow-hidden rounded-2xl">
+      <section className="ares-orb-stage glass relative min-h-[620px] min-w-0 overflow-hidden rounded-2xl">
         <div className="ares-stage-grid" />
         <div className="ares-stage-vignette" />
         <div className="ares-stage-scan" />
@@ -86,7 +86,7 @@ export default function Assistant(): JSX.Element {
         </div>
       </section>
 
-      <aside className="glass flex min-w-0 flex-col rounded-2xl p-4">
+      <aside className="glass flex min-h-[420px] min-w-0 flex-col rounded-2xl p-4 lg:min-h-0">
         <div className="mb-3 flex items-center justify-between px-1">
           <h3 className="text-xs title-track text-cyan-300/60">CONVERSA</h3>
           <button onClick={() => createSession()} className="text-xs text-cyan-200/60 hover:text-cyan-100">

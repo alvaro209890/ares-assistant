@@ -1,73 +1,149 @@
+import { useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useAres } from '../lib/store'
 
+type Screen = 'assistant' | 'tasks' | 'calendar' | 'memory'
+
+const tabs: { id: Screen; label: string; hint: string; icon: JSX.Element }[] = [
+  { id: 'assistant', label: 'Assistente', hint: 'Alt+1', icon: <AssistantIcon /> },
+  { id: 'tasks', label: 'Tarefas', hint: 'Alt+2', icon: <TasksIcon /> },
+  { id: 'calendar', label: 'Calendário', hint: 'Alt+3', icon: <CalendarIcon /> },
+  { id: 'memory', label: 'Memória', hint: 'Alt+4', icon: <MemoryIcon /> }
+]
+
 export default function TopBar(): JSX.Element {
   const { screen, navigate, openSettings, config, saveConfig } = useAres()
-  const tabs: { id: 'assistant' | 'tasks' | 'calendar' | 'memory'; label: string }[] = [
-    { id: 'assistant', label: 'ASSISTENTE' },
-    { id: 'tasks', label: 'TAREFAS' },
-    { id: 'calendar', label: 'CALENDÁRIO' },
-    { id: 'memory', label: 'MEMÓRIA' }
-  ]
   const muted = !config?.tts.enabled
 
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      const editing =
+        target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable
+      if (editing || !event.altKey) return
+      const index = Number(event.key) - 1
+      const tab = tabs[index]
+      if (!tab) return
+      event.preventDefault()
+      navigate(tab.id)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [navigate])
+
   return (
-    <header className="relative z-10 flex items-center justify-between px-7 py-4">
-      <div className="flex items-center gap-3">
-        <div className="relative h-7 w-7">
-          <span className="absolute inset-0 rounded-full border border-cyan-300/60 animate-pulse-ring" />
-          <span className="absolute inset-1.5 rounded-full bg-cyan-300 shadow-glow" />
+    <aside className="relative z-20 flex h-full w-[224px] shrink-0 flex-col border-r border-cyan-300/10 bg-[#030814]/70 px-4 py-5 backdrop-blur-xl">
+      <div className="mb-6 flex items-center gap-3 px-1">
+        <div className="relative h-9 w-9">
+          <span className="absolute inset-0 rounded-full border border-cyan-300/55 animate-pulse-ring" />
+          <span className="absolute inset-2 rounded-full bg-cyan-300 shadow-glow" />
         </div>
-        <span className="font-display text-xl title-track text-cyan-100 neon-text">ARES</span>
+        <div className="min-w-0">
+          <div className="font-display text-xl text-cyan-100 neon-text">ARES</div>
+          <div className="text-[11px] text-cyan-200/45">LOCAL CORE</div>
+        </div>
       </div>
 
-      <nav className="glass flex items-center gap-1 rounded-full p-1">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => navigate(t.id)}
-            className={`relative rounded-full px-5 py-1.5 text-xs title-track transition ${
-              screen === t.id ? 'text-cyan-50' : 'text-cyan-200/50 hover:text-cyan-100'
-            }`}
-          >
-            {screen === t.id && (
-              <motion.span
-                layoutId="tab-pill"
-                className="absolute inset-0 rounded-full bg-cyan-400/15 border border-cyan-300/40"
-              />
-            )}
-            <span className="relative">{t.label}</span>
-          </button>
-        ))}
+      <nav className="grid gap-2" aria-label="Navegação principal">
+        {tabs.map((t) => {
+          const active = screen === t.id
+          return (
+            <button
+              key={t.id}
+              onClick={() => navigate(t.id)}
+              className={`relative flex min-h-[48px] items-center gap-3 overflow-hidden rounded-xl border px-3 text-left transition ${
+                active
+                  ? 'border-cyan-300/45 bg-cyan-400/12 text-cyan-50 shadow-glow'
+                  : 'border-cyan-300/10 bg-white/[0.03] text-cyan-200/62 hover:border-cyan-300/28 hover:text-cyan-50'
+              }`}
+              title={`${t.label} (${t.hint})`}
+            >
+              {active && (
+                <motion.span
+                  layoutId="side-nav-active"
+                  className="absolute inset-0 bg-gradient-to-r from-cyan-400/16 to-blue-500/5"
+                />
+              )}
+              <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-cyan-300/15 bg-black/24">
+                {t.icon}
+              </span>
+              <span className="relative min-w-0 flex-1">
+                <span className="block truncate text-sm">{t.label}</span>
+                <span className="block text-[10px] text-cyan-200/35">{t.hint}</span>
+              </span>
+            </button>
+          )
+        })}
       </nav>
 
-      <div className="flex items-center gap-2">
+      <div className="mt-auto grid gap-2">
         {config && (
           <button
             onClick={() => saveConfig({ tts: { ...config.tts, enabled: muted } })}
-            className={`glass flex h-9 w-9 items-center justify-center rounded-full transition ${
-              muted ? 'text-amber-200/80' : 'text-cyan-200/70 hover:text-cyan-100'
+            className={`flex min-h-[42px] items-center gap-3 rounded-xl border px-3 text-sm transition ${
+              muted
+                ? 'border-amber-300/30 bg-amber-400/8 text-amber-100'
+                : 'border-cyan-300/12 bg-white/[0.03] text-cyan-200/70 hover:text-cyan-50'
             }`}
-            title={muted ? 'Ativar fala' : 'Silenciar ARES'}
+            title={muted ? 'Ativar fala' : 'Silenciar Ares'}
           >
-            {muted ? <SpeakerOffIcon /> : <SpeakerIcon />}
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-current/20">
+              {muted ? <SpeakerOffIcon /> : <SpeakerIcon />}
+            </span>
+            <span>{muted ? 'Fala muda' : 'Fala ativa'}</span>
           </button>
         )}
         <button
           onClick={() => openSettings(true)}
-          className="glass flex h-9 w-9 items-center justify-center rounded-full text-cyan-200/70 transition hover:text-cyan-100"
+          className="flex min-h-[42px] items-center gap-3 rounded-xl border border-cyan-300/12 bg-white/[0.03] px-3 text-sm text-cyan-200/70 transition hover:text-cyan-50"
           title="Configurações"
         >
-          <GearIcon />
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-cyan-300/15">
+            <GearIcon />
+          </span>
+          <span>Configurações</span>
         </button>
       </div>
-    </header>
+    </aside>
+  )
+}
+
+function AssistantIcon(): JSX.Element {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function TasksIcon(): JSX.Element {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+      <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function CalendarIcon(): JSX.Element {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+      <path d="M7 3v4M17 3v4M4 9h16M5 5h14v15H5z" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function MemoryIcon(): JSX.Element {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+      <path d="M8 8h8v8H8zM4 10h4M16 10h4M4 14h4M16 14h4M10 4v4M14 4v4M10 16v4M14 16v4" strokeLinecap="round" />
+    </svg>
   )
 }
 
 function SpeakerIcon(): JSX.Element {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
       <path d="M4 9v6h4l5 4V5L8 9H4z" strokeLinejoin="round" />
       <path d="M16 8a5 5 0 0 1 0 8M19 5a9 9 0 0 1 0 14" strokeLinecap="round" />
     </svg>
@@ -76,7 +152,7 @@ function SpeakerIcon(): JSX.Element {
 
 function SpeakerOffIcon(): JSX.Element {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
       <path d="M4 9v6h4l5 4V5L9 8" strokeLinejoin="round" />
       <path d="M3 3l18 18M17 9l4 4M21 9l-4 4" strokeLinecap="round" />
     </svg>
@@ -85,7 +161,7 @@ function SpeakerOffIcon(): JSX.Element {
 
 function GearIcon(): JSX.Element {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
       <circle cx="12" cy="12" r="3" />
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>

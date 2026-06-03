@@ -34,7 +34,7 @@ export default function ColumnView(props: Props): JSX.Element {
   }
 
   return (
-    <motion.div layout className="glass flex max-h-full w-[320px] shrink-0 flex-col rounded-2xl p-3">
+    <motion.div layout className="glass flex h-full max-h-full w-[320px] shrink-0 flex-col rounded-2xl p-3">
       <div className="mb-3 flex items-center gap-2 px-1">
         {editingTitle ? (
           <input
@@ -61,7 +61,7 @@ export default function ColumnView(props: Props): JSX.Element {
           <div
             ref={provided.innerRef}
             {...provided.droppableProps}
-            className={`min-h-[12px] flex-1 overflow-y-auto rounded-xl p-1 transition ${
+            className={`min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-xl p-1 transition ${
               snapshot.isDraggingOver ? 'bg-cyan-400/5' : ''
             }`}
           >

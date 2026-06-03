@@ -140,7 +140,7 @@ export default function KanbanBoard(): JSX.Element {
   return (
     <DragDropContext onDragEnd={onDragEnd}>
       <div className="flex h-full min-h-0 flex-col">
-        <div className="mx-7 mb-4 grid grid-cols-[minmax(220px,1fr)_repeat(4,150px)] gap-2">
+        <div className="mb-4 grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-[minmax(220px,1fr)_repeat(4,minmax(132px,150px))]">
           <input
             className="input"
             placeholder="Buscar por título ou descrição"
@@ -172,7 +172,7 @@ export default function KanbanBoard(): JSX.Element {
           </select>
         </div>
 
-        <div className="flex min-h-0 flex-1 items-start gap-4 overflow-x-auto px-7 pb-6">
+        <div className="kanban-scroll flex min-h-0 flex-1 items-stretch gap-4 overflow-x-auto overflow-y-hidden pb-2">
           {visibleColumns.map(({ col, cards }) => (
             <ColumnView
               key={col.id}

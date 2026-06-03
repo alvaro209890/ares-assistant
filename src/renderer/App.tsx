@@ -18,9 +18,9 @@ export default function App(): JSX.Element {
       {!ready ? (
         <Boot />
       ) : (
-        <div className="relative z-10 flex h-full flex-col">
+        <div className="relative z-10 flex h-full min-h-0">
           <TopBar />
-          <main className="min-h-0 flex-1">
+          <main className="main-scroll min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
             <AnimatePresence mode="wait">
               {screen === 'assistant' && <Assistant key="a" />}
               {screen === 'tasks' && <Tasks key="t" />}

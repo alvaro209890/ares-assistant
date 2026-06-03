@@ -17,7 +17,7 @@ export default function Controls(): JSX.Element {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 items-center gap-3">
         {/* Push-to-talk */}
         <motion.button
           whileTap={{ scale: 0.94 }}
@@ -48,7 +48,7 @@ export default function Controls(): JSX.Element {
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && submit()}
           placeholder="Digite para o Ares… (ou segure o microfone)"
-          className="h-12 flex-1 rounded-xl border border-cyan-300/20 bg-black/30 px-4 text-cyan-50 outline-none placeholder:text-cyan-200/30 focus:border-cyan-300/50"
+          className="h-12 min-w-0 flex-1 rounded-xl border border-cyan-300/20 bg-black/30 px-4 text-cyan-50 outline-none placeholder:text-cyan-200/30 focus:border-cyan-300/50"
         />
 
         <button

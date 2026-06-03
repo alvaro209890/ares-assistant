@@ -30,6 +30,17 @@ body {
   user-select: none;
 }
 
+.main-scroll {
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+}
+
+.kanban-scroll {
+  scrollbar-gutter: stable both-edges;
+  overscroll-behavior-x: contain;
+}
+
 /* Fundo profundo com atmosfera (não um cinza chapado). */
 .ares-bg {
   position: fixed;

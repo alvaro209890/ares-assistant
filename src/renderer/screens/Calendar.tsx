@@ -27,9 +27,9 @@ export default function Calendar(): JSX.Element {
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -12 }}
-      className="flex h-full gap-4 px-7 pb-6"
+      className="grid h-full min-h-[680px] gap-4 p-5 lg:grid-cols-[360px_minmax(0,1fr)]"
     >
-      <section className="glass flex w-[360px] shrink-0 flex-col rounded-2xl p-4">
+      <section className="glass flex min-w-0 flex-col rounded-2xl p-4">
         <h2 className="font-display text-sm title-track text-cyan-100">AGENDA LOCAL</h2>
         <div className="mt-4 flex flex-col gap-3">
           <input className="input" placeholder="Título do evento" value={title} onChange={(e) => setTitle(e.target.value)} />
@@ -46,12 +46,12 @@ export default function Calendar(): JSX.Element {
         </div>
       </section>
 
-      <section className="glass flex min-w-0 flex-1 flex-col rounded-2xl p-4">
+      <section className="glass flex min-h-0 min-w-0 flex-col rounded-2xl p-4">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="font-display text-sm title-track text-cyan-100">EVENTOS</h2>
           <span className="rounded-full bg-cyan-400/10 px-2 py-0.5 text-xs text-cyan-200/60">{ordered.length}</span>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
           {ordered.length === 0 ? (
             <div className="grid h-full place-items-center text-sm text-cyan-200/40">Nenhum evento local.</div>
           ) : (

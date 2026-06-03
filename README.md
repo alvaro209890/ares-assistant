@@ -142,6 +142,19 @@ Estados visuais:
 - `thinking`: rotação e deformação mais intensa;
 - `speaking`: pulsos sincronizados com a fala.
 
+## Navegação e Scroll
+
+O app usa um dock lateral fixo para evitar que a navegação dispute espaço vertical com o conteúdo. A área principal é a única região de scroll da janela, e listas internas usam scroll próprio apenas quando necessário.
+
+Atalhos:
+
+- `Alt+1`: Assistente.
+- `Alt+2`: Tarefas.
+- `Alt+3`: Calendário.
+- `Alt+4`: Memória.
+
+As telas foram estruturadas com `min-h-0`, `overflow-y-auto` e `overscroll-contain` para evitar travamento de rolagem dentro do Electron. O Kanban mantém rolagem horizontal própria para colunas e rolagem vertical por coluna para cartões.
+
 ## Kanban
 
 Persistência:
