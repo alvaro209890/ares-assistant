@@ -1,0 +1,39 @@
+{
+  "_comentario": "Template de configuração do Ares. A config REAL fica em userData (Linux: ~/.config/ares/config.json) e é criada automaticamente no 1º uso.",
+
+  "nineRouter": {
+    "_doc": "Cérebro (LLM). 9 Router local. Em localhost não precisa de chave.",
+    "baseUrl": "http://localhost:20128/v1",
+    "apiKey": "",
+    "model": "cx/gpt-5.5"
+  },
+
+  "grog": {
+    "_doc": "Voz->texto (STT) via Groq, modelo Whisper. A apiKey é preenchida automaticamente a partir da chave Groq já existente no PC quando possível.",
+    "baseUrl": "https://api.groq.com/openai/v1",
+    "apiKey": "COLE_AQUI_SUA_CHAVE_GROQ_gsk_...",
+    "sttModel": "whisper-large-v3-turbo"
+  },
+
+  "tts": {
+    "_doc": "Texto->voz. No Linux, use engine auto/piper para Piper neural local; Web Speech/Chromium fica como fallback.",
+    "enabled": true,
+    "engine": "auto",
+    "piperVoice": "pt_BR-faber-medium",
+    "webVoiceURI": "",
+    "rate": 1.0,
+    "pitch": 1.0,
+    "volume": 1.0
+  },
+
+  "integrations": {
+    "_doc": "Integrações sem chave: clima Open-Meteo, busca DuckDuckGo HTML, notícias Google News RSS.",
+    "weatherCity": "São Paulo",
+    "newsTopic": ""
+  },
+
+  "ui": {
+    "_doc": "Preferências de interface.",
+    "continuousMode": false
+  }
+}

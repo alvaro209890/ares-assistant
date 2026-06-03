@@ -1,0 +1,7 @@
+node_modules
+out
+dist
+*.log
+.DS_Store
+# Config local com a chave real fica fora do versionamento (a real vive em userData).
+config.json
