@@ -12,7 +12,7 @@ const sameDay = (iso: string, ref = new Date()) => {
 }
 
 export default function Assistant(): JSX.Element {
-  const { aresState, conversation, status, weather, events, board, createSession } = useAres()
+  const { aresState, conversation, status, weather, events, board, createSession, openBriefing } = useAres()
   const todayEvents = useMemo(() => events.filter((e) => sameDay(e.whenISO)).slice(0, 3), [events])
   const reminders = useMemo(
     () =>
@@ -37,9 +37,21 @@ export default function Assistant(): JSX.Element {
         <div className="ares-stage-vignette" />
         <div className="ares-stage-scan" />
 
+        <button
+          onClick={() => openBriefing(true)}
+          className="absolute right-5 top-[78px] z-30 rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-[11px] title-track text-cyan-100 transition hover:bg-cyan-400/20"
+          title="Briefing do dia (clima, agenda, tarefas, notícias)"
+        >
+          ☀ BRIEFING
+        </button>
+
         <div className="absolute inset-x-5 top-5 z-20 grid grid-cols-3 gap-3">
-          <Metric title="CLIMA" value={weather ? `${weather.current.temp}°C` : 'OFFLINE'}>
-            {weather ? `${weather.city} · ${weather.current.desc}` : 'Sem dados externos'}
+          <Metric
+            title="CLIMA"
+            value={weather ? `${weather.current.temp}°C` : 'OFFLINE'}
+            alert={weather?.alert}
+          >
+            {weather ? `${weather.city} · ${weather.current.desc} · 💧${weather.today.precipProb}%` : 'Sem dados externos'}
           </Metric>
           <Metric title="AGENDA" value={String(todayEvents.length).padStart(2, '0')}>
             {todayEvents[0]
@@ -101,12 +113,22 @@ export default function Assistant(): JSX.Element {
   )
 }
 
-function Metric({ title, value, children }: { title: string; value: string; children: React.ReactNode }): JSX.Element {
+function Metric({
+  title,
+  value,
+  alert,
+  children
+}: {
+  title: string
+  value: string
+  alert?: string
+  children: React.ReactNode
+}): JSX.Element {
   return (
-    <div className="ares-metric-panel min-w-0 rounded-xl px-3 py-2.5">
+    <div className="ares-metric-panel min-w-0 rounded-xl px-3 py-2.5" title={alert || undefined}>
       <div className="flex items-center justify-between gap-2">
         <span className="text-[10px] text-cyan-300/50">{title}</span>
-        <span className="h-1.5 w-1.5 rounded-full bg-cyan-300 shadow-glow" />
+        <span className={`h-1.5 w-1.5 rounded-full shadow-glow ${alert ? 'bg-amber-300' : 'bg-cyan-300'}`} />
       </div>
       <div className="mt-1 truncate font-display text-xl text-cyan-50 neon-text">{value}</div>
       <div className="mt-0.5 truncate text-[11px] text-cyan-200/50">{children}</div>

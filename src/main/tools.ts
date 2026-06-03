@@ -1,4 +1,4 @@
-import type { ReverseGeocodeResult, UserLocation, WeatherResult, NewsItem, WebResult } from '../shared/types'
+import type { ReverseGeocodeResult, UserLocation, WeatherResult, WeatherPeriod, NewsItem, WebResult } from '../shared/types'
 
 // Ferramentas de consulta externas (sem chave de API):
 // - Clima: Open-Meteo (geocoding + forecast)
@@ -40,29 +40,99 @@ const WEATHER_CODES: Record<number, string> = {
   99: 'tempestade forte com granizo'
 }
 
+/** Média arredondada de uma lista de números (ignora nulos). */
+function avg(values: number[]): number {
+  const valid = values.filter((v) => typeof v === 'number' && !Number.isNaN(v))
+  if (!valid.length) return 0
+  return Math.round(valid.reduce((a, b) => a + b, 0) / valid.length)
+}
+function maxOf(values: number[]): number {
+  const valid = values.filter((v) => typeof v === 'number' && !Number.isNaN(v))
+  return valid.length ? Math.max(...valid) : 0
+}
+
+// Quebra as horas de HOJE em manhã (06-12), tarde (12-18) e noite (18-24).
+function buildPeriods(hourly: any): WeatherPeriod[] {
+  const times: string[] = hourly?.time || []
+  if (!times.length) return []
+  const today = new Date().toISOString().slice(0, 10)
+  const slots: { key: WeatherPeriod['key']; label: string; from: number; to: number }[] = [
+    { key: 'manha', label: 'Manhã', from: 6, to: 12 },
+    { key: 'tarde', label: 'Tarde', from: 12, to: 18 },
+    { key: 'noite', label: 'Noite', from: 18, to: 24 }
+  ]
+  const periods: WeatherPeriod[] = []
+  for (const s of slots) {
+    const idx: number[] = []
+    for (let i = 0; i < times.length; i++) {
+      if (!times[i].startsWith(today)) continue
+      const hour = Number(times[i].slice(11, 13))
+      if (hour >= s.from && hour < s.to) idx.push(i)
+    }
+    if (!idx.length) continue
+    const codes = idx.map((i) => hourly.weather_code?.[i]).filter((c: unknown) => typeof c === 'number')
+    const code = maxOf(codes) // o código mais "severo" tende a ter número maior
+    periods.push({
+      key: s.key,
+      label: s.label,
+      temp: avg(idx.map((i) => hourly.temperature_2m?.[i])),
+      code,
+      desc: WEATHER_CODES[code] || 'tempo indefinido',
+      precipProb: maxOf(idx.map((i) => hourly.precipitation_probability?.[i] ?? 0))
+    })
+  }
+  return periods
+}
+
+function buildAlert(
+  current: WeatherResult['current'],
+  today: WeatherResult['today'],
+  periods: WeatherPeriod[]
+): string | undefined {
+  const rain = Math.max(today.precipProb, ...periods.map((p) => p.precipProb), current.precipProb)
+  if (rain >= 70) return 'Alta chance de chuva hoje — leve guarda-chuva.'
+  if (current.code >= 95) return 'Risco de tempestade na região.'
+  if (current.wind >= 45) return 'Ventos fortes na região.'
+  if (today.max >= 36) return 'Calor intenso — hidrate-se e evite sol forte.'
+  if (today.min <= 5) return 'Frio intenso — agasalhe-se bem.'
+  if (rain >= 50) return 'Pode chover hoje — considere levar guarda-chuva.'
+  return undefined
+}
+
 async function forecastByCoords(lat: number, lon: number, label: string): Promise<WeatherResult> {
   const fTxt = await fetchText(
     `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
-      `&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m` +
-      `&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto`
+      `&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,precipitation_probability` +
+      `&hourly=temperature_2m,precipitation_probability,weather_code` +
+      `&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&forecast_days=2&timezone=auto`
   )
   const f = JSON.parse(fTxt)
   const code = f.current.weather_code
+  const current = {
+    temp: Math.round(f.current.temperature_2m),
+    feels: Math.round(f.current.apparent_temperature),
+    code,
+    desc: WEATHER_CODES[code] || 'tempo indefinido',
+    wind: Math.round(f.current.wind_speed_10m),
+    humidity: Math.round(f.current.relative_humidity_2m),
+    precipProb: Math.round(f.current.precipitation_probability ?? 0)
+  }
+  const today = {
+    min: Math.round(f.daily.temperature_2m_min[0]),
+    max: Math.round(f.daily.temperature_2m_max[0]),
+    precipProb: f.daily.precipitation_probability_max?.[0] ?? 0
+  }
+  const periods = buildPeriods(f.hourly)
   return {
     city: label,
-    current: {
-      temp: Math.round(f.current.temperature_2m),
-      feels: Math.round(f.current.apparent_temperature),
-      code,
-      desc: WEATHER_CODES[code] || 'tempo indefinido',
-      wind: Math.round(f.current.wind_speed_10m),
-      humidity: Math.round(f.current.relative_humidity_2m)
-    },
-    today: {
-      min: Math.round(f.daily.temperature_2m_min[0]),
-      max: Math.round(f.daily.temperature_2m_max[0]),
-      precipProb: f.daily.precipitation_probability_max?.[0] ?? 0
-    }
+    source: 'Open-Meteo',
+    updatedAt: Date.now(),
+    latitude: lat,
+    longitude: lon,
+    current,
+    today,
+    periods,
+    alert: buildAlert(current, today, periods)
   }
 }
 

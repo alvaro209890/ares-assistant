@@ -3,7 +3,7 @@ import { useAres } from '../lib/store'
 import { ptVoices } from '../lib/tts'
 
 export default function SettingsPanel(): JSX.Element {
-  const { settingsOpen, openSettings, config, voices, piper, saveConfig, testVoice, locateUser } = useAres()
+  const { settingsOpen, openSettings, config, voices, piper, saveConfig, testVoice, locateUser, navigate } = useAres()
   const pt = ptVoices(voices)
 
   return (
@@ -115,6 +115,65 @@ export default function SettingsPanel(): JSX.Element {
               </button>
             </Section>
 
+            <Section title="CONVERSA CONTÍNUA">
+              <Slider
+                label={`Sensibilidade do microfone: ${Math.round(config.ui.micSensitivity * 100)}%`}
+                min={0}
+                max={1}
+                step={0.05}
+                value={config.ui.micSensitivity}
+                onChange={(v) => saveConfig({ ui: { micSensitivity: v } })}
+              />
+              <Slider
+                label={`Silêncio para encerrar a fala: ${(config.ui.silenceMs / 1000).toFixed(2)}s`}
+                min={600}
+                max={3000}
+                step={50}
+                value={config.ui.silenceMs}
+                onChange={(v) => saveConfig({ ui: { silenceMs: v } })}
+              />
+              <Slider
+                label={`Pausa após o Ares falar: ${(config.ui.postSpeechPauseMs / 1000).toFixed(2)}s`}
+                min={0}
+                max={2000}
+                step={50}
+                value={config.ui.postSpeechPauseMs}
+                onChange={(v) => saveConfig({ ui: { postSpeechPauseMs: v } })}
+              />
+              <p className="text-[11px] text-cyan-200/45">
+                Mais sensibilidade capta vozes baixas; mais silêncio evita cortar frases. A pausa após a fala impede o Ares de se
+                ouvir.
+              </p>
+            </Section>
+
+            <Section title="MEMÓRIA">
+              <Toggle
+                label="Extrair fatos automaticamente"
+                checked={config.memory.autoExtract}
+                onChange={(v) => saveConfig({ memory: { autoExtract: v } })}
+              />
+              <Toggle
+                label="Aprovar fatos automaticamente"
+                checked={config.memory.autoApprove}
+                onChange={(v) => saveConfig({ memory: { autoApprove: v } })}
+              />
+              <p className="text-[11px] text-cyan-200/45">
+                Com aprovação automática desligada, os fatos extraídos ficam em “Para revisar” na tela Memória antes de serem
+                salvos.
+              </p>
+            </Section>
+
+            <Section title="PROATIVIDADE">
+              <Toggle
+                label="Sugestões proativas no briefing"
+                checked={config.ui.proactiveSuggestions}
+                onChange={(v) => saveConfig({ ui: { proactiveSuggestions: v } })}
+              />
+              <p className="text-[11px] text-cyan-200/45">
+                Sugestões discretas sobre tarefas vencidas, eventos próximos, chuva e conflitos de agenda.
+              </p>
+            </Section>
+
             <Section title="CÉREBRO - 9 ROUTER">
               <Field label="URL base">
                 <input
@@ -210,6 +269,16 @@ export default function SettingsPanel(): JSX.Element {
                 />
               </Field>
             </Section>
+
+            <button
+              onClick={() => {
+                openSettings(false)
+                navigate('system')
+              }}
+              className="btn-ghost mb-2 w-full justify-center text-center"
+            >
+              ABRIR DIAGNÓSTICO DO SISTEMA
+            </button>
           </motion.aside>
         </>
       )}

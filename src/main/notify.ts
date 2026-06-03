@@ -1,6 +1,7 @@
 import { Notification, BrowserWindow } from 'electron'
 import { loadBoard, saveBoard } from './tasks'
 import { loadEvents, setEvents } from './data'
+import { advanceISO } from './board'
 
 // Lembretes locais: varre periodicamente tarefas (reminderAt) e eventos (whenISO).
 // Ao chegar a hora, mostra notificação nativa e avisa o renderer (que fala, se a
@@ -38,9 +39,18 @@ function tick(): void {
   const events = loadEvents()
   let changedEvents = false
   for (const e of events) {
-    if (!e.reminded && new Date(e.whenISO).getTime() <= now) {
-      fire('Evento', e.title)
-      e.reminded = true
+    const lead = (e.remindMinutes || 0) * 60_000
+    const fireAt = new Date(e.whenISO).getTime() - lead
+    if (!e.reminded && fireAt <= now) {
+      const when = new Date(e.whenISO).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+      fire(e.remindMinutes ? `Evento em ${e.remindMinutes} min` : 'Evento', `${e.title} (${when})`)
+      if (e.recurrence && e.recurrence !== 'none') {
+        // Recorrente: reagenda para a próxima ocorrência em vez de silenciar.
+        e.whenISO = advanceISO(e.whenISO, e.recurrence)
+        e.reminded = false
+      } else {
+        e.reminded = true
+      }
       changedEvents = true
     }
   }

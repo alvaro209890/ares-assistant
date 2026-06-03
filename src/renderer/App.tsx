@@ -3,10 +3,12 @@ import { useAres } from './lib/store'
 import Background from './components/Background'
 import TopBar from './components/TopBar'
 import SettingsPanel from './components/SettingsPanel'
+import BriefingPanel from './components/BriefingPanel'
 import Assistant from './screens/Assistant'
 import Tasks from './screens/Tasks'
 import Calendar from './screens/Calendar'
 import Memory from './screens/Memory'
+import System from './screens/System'
 
 export default function App(): JSX.Element {
   const { ready, screen, error, clearError, actionToast } = useAres()
@@ -26,12 +28,14 @@ export default function App(): JSX.Element {
               {screen === 'tasks' && <Tasks key="t" />}
               {screen === 'calendar' && <Calendar key="c" />}
               {screen === 'memory' && <Memory key="m" />}
+              {screen === 'system' && <System key="s" />}
             </AnimatePresence>
           </main>
         </div>
       )}
 
       <SettingsPanel />
+      <BriefingPanel />
 
       {/* Toast de ação de tarefas */}
       <AnimatePresence>

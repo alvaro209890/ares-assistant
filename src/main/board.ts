@@ -1,4 +1,4 @@
-import type { Acao, Board, Card, CardColor, Column, Priority, Subtask } from '../shared/types'
+import type { Acao, Board, Card, CardColor, CardLink, Column, Priority, Recurrence, Subtask } from '../shared/types'
 
 // Aplica uma ação estruturada (tarefa.*/coluna.*) ao quadro Kanban, no processo main.
 // Funções puras: recebem o board, devolvem um novo board + uma nota curta.
@@ -11,6 +11,41 @@ const asColor = (c: unknown): CardColor | undefined =>
   ['cyan', 'blue', 'green', 'amber', 'pink'].includes(String(c)) ? (c as CardColor) : undefined
 const asPriority = (p: unknown): Priority | undefined =>
   ['baixa', 'media', 'alta'].includes(String(p)) ? (p as Priority) : undefined
+const asRecurrence = (r: unknown): Recurrence | undefined =>
+  ['none', 'daily', 'weekly', 'monthly'].includes(String(r)) ? (r as Recurrence) : undefined
+const asLabels = (v: unknown): string[] | undefined => {
+  if (Array.isArray(v)) {
+    const arr = v.map((x) => String(x).trim()).filter(Boolean)
+    return arr.length ? Array.from(new Set(arr)) : undefined
+  }
+  if (typeof v === 'string' && v.trim()) {
+    const arr = v.split(',').map((x) => x.trim()).filter(Boolean)
+    return arr.length ? Array.from(new Set(arr)) : undefined
+  }
+  return undefined
+}
+const asLinks = (v: unknown): CardLink[] | undefined => {
+  if (!Array.isArray(v)) return undefined
+  const out: CardLink[] = []
+  for (const item of v) {
+    if (typeof item === 'string' && item.trim()) out.push({ label: item.trim(), url: item.trim() })
+    else if (item && typeof item === 'object') {
+      const url = String((item as any).url || '').trim()
+      if (url) out.push({ label: String((item as any).label || url).trim(), url })
+    }
+  }
+  return out.length ? out : undefined
+}
+
+/** Avança uma data ISO conforme a recorrência (próxima ocorrência). */
+export function advanceISO(iso: string, rec: Recurrence): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  if (rec === 'daily') d.setDate(d.getDate() + 1)
+  else if (rec === 'weekly') d.setDate(d.getDate() + 7)
+  else if (rec === 'monthly') d.setMonth(d.getMonth() + 1)
+  return d.toISOString()
+}
 
 function findColumn(board: Board, name: unknown): Column | undefined {
   const n = norm(name)
@@ -66,6 +101,9 @@ export function applyBoardAction(input: Board, a: Acao): { board: Board; note?: 
         due: get('prazo') ? String(get('prazo')) : undefined,
         reminderAt: get('lembrete') ? String(get('lembrete')) : undefined,
         subtasks: subs,
+        labels: asLabels(get('etiquetas') ?? get('labels')),
+        links: asLinks(get('links') ?? get('anexos')),
+        recurrence: asRecurrence(get('repetir') ?? get('recorrencia')),
         done: false,
         createdAt: Date.now()
       }
@@ -89,6 +127,22 @@ export function applyBoardAction(input: Board, a: Acao): { board: Board; note?: 
         board.cards[f.card.id] = { ...f.card, done: true }
         const dc = doneColumn(board)
         if (dc) moveTo(f.card.id, dc)
+        // Tarefa recorrente: gera a próxima ocorrência (aberta) na coluna original.
+        if (f.card.recurrence && f.card.recurrence !== 'none') {
+          const next: Card = {
+            ...f.card,
+            id: uid('card'),
+            done: false,
+            reminded: false,
+            due: f.card.due ? advanceISO(f.card.due, f.card.recurrence) : undefined,
+            reminderAt: f.card.reminderAt ? advanceISO(f.card.reminderAt, f.card.recurrence) : undefined,
+            subtasks: f.card.subtasks?.map((s) => ({ ...s, done: false })),
+            createdAt: Date.now()
+          }
+          board.cards[next.id] = next
+          f.col.cardIds.unshift(next.id)
+          return { board, note: `✓ "${f.card.title}" · próxima recorrência criada` }
+        }
         return { board, note: `✓ "${f.card.title}"` }
       }
       break
@@ -119,7 +173,9 @@ export function applyBoardAction(input: Board, a: Acao): { board: Board; note?: 
           description: get('descricao') !== undefined ? String(get('descricao')) : f.card.description,
           priority: asPriority(get('prioridade')) ?? f.card.priority,
           color: asColor(get('cor')) ?? f.card.color,
-          due: get('prazo') !== undefined ? String(get('prazo')) : f.card.due
+          due: get('prazo') !== undefined ? String(get('prazo')) : f.card.due,
+          labels: asLabels(get('etiquetas') ?? get('labels')) ?? f.card.labels,
+          recurrence: asRecurrence(get('repetir') ?? get('recorrencia')) ?? f.card.recurrence
         }
         return { board, note: `✎ "${f.card.title}"` }
       }

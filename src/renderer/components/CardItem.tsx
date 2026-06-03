@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { Draggable } from '@hello-pangea/dnd'
 import { motion } from 'framer-motion'
-import type { Card, CardColor, Priority, Subtask } from '../../shared/types'
+import type { Card, CardColor, CardLink, Priority, Recurrence, Subtask } from '../../shared/types'
 import { uid } from '../lib/actions'
+
+const REC_LABEL: Record<Recurrence, string> = { none: '', daily: 'diário', weekly: 'semanal', monthly: 'mensal' }
 
 export const COLOR_BAR: Record<CardColor, string> = {
   cyan: 'from-cyan-400 to-sky-500',
@@ -52,13 +54,22 @@ export default function CardItem({ card, index, onSave, onDelete, onToggle }: Pr
   const [reminder, setReminder] = useState(toInputDate(card.reminderAt))
   const [priority, setPriority] = useState<Priority>(card.priority ?? 'media')
   const [color, setColor] = useState<CardColor>(card.color ?? 'cyan')
+  const [labels, setLabels] = useState((card.labels ?? []).join(', '))
+  const [recurrence, setRecurrence] = useState<Recurrence>(card.recurrence ?? 'none')
   const [newSubtask, setNewSubtask] = useState('')
+  const [linkLabel, setLinkLabel] = useState('')
+  const [linkUrl, setLinkUrl] = useState('')
 
   const subtasks = card.subtasks ?? []
   const doneSubs = subtasks.filter((s) => s.done).length
   const progress = subtasks.length ? Math.round((doneSubs / subtasks.length) * 100) : 0
+  const links = card.links ?? []
 
   const save = () => {
+    const parsedLabels = labels
+      .split(',')
+      .map((l) => l.trim())
+      .filter(Boolean)
     onSave({
       title: title.trim() || card.title,
       description: desc.trim() || undefined,
@@ -66,10 +77,22 @@ export default function CardItem({ card, index, onSave, onDelete, onToggle }: Pr
       reminderAt: fromInputDate(reminder),
       reminded: reminder !== toInputDate(card.reminderAt) ? false : card.reminded,
       priority,
-      color
+      color,
+      labels: parsedLabels.length ? Array.from(new Set(parsedLabels)) : undefined,
+      recurrence: recurrence !== 'none' ? recurrence : undefined
     })
     setEditing(false)
   }
+
+  const addLink = () => {
+    const url = linkUrl.trim()
+    if (!url) return
+    onSave({ links: [...links, { label: linkLabel.trim() || url, url }] })
+    setLinkLabel('')
+    setLinkUrl('')
+  }
+  const removeLink = (i: number) => onSave({ links: links.filter((_, idx) => idx !== i) })
+  const openLink = (l: CardLink) => void window.ares.system.openExternal(l.url)
 
   const saveSubtasks = (next: Subtask[]) => onSave({ subtasks: next })
   const addSubtask = () => {
@@ -129,6 +152,58 @@ export default function CardItem({ card, index, onSave, onDelete, onToggle }: Pr
                     ))}
                   </div>
                 </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="text-[11px] text-cyan-200/60">
+                    Etiquetas (vírgula)
+                    <input
+                      className="input mt-1"
+                      placeholder="casa, urgente"
+                      value={labels}
+                      onChange={(e) => setLabels(e.target.value)}
+                    />
+                  </label>
+                  <label className="text-[11px] text-cyan-200/60">
+                    Repetir
+                    <select className="input mt-1" value={recurrence} onChange={(e) => setRecurrence(e.target.value as Recurrence)}>
+                      <option value="none">não repetir</option>
+                      <option value="daily">diário</option>
+                      <option value="weekly">semanal</option>
+                      <option value="monthly">mensal</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div className="rounded-lg border border-cyan-300/10 bg-black/20 p-2">
+                  <div className="mb-1 text-[11px] text-cyan-200/55">Links / anexos</div>
+                  {links.length > 0 && (
+                    <div className="mb-2 grid gap-1">
+                      {links.map((l, i) => (
+                        <div key={i} className="flex items-center gap-2 text-xs text-cyan-100/80">
+                          <button type="button" onClick={() => openLink(l)} className="min-w-0 flex-1 truncate text-left hover:text-cyan-50" title={l.url}>
+                            ↗ {l.label}
+                          </button>
+                          <button type="button" onClick={() => removeLink(i)} className="text-cyan-200/45 hover:text-red-300">
+                            x
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex gap-1">
+                    <input className="input flex-1 py-1" placeholder="nome" value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} />
+                    <input
+                      className="input flex-[2] py-1"
+                      placeholder="https:// ou file://"
+                      value={linkUrl}
+                      onChange={(e) => setLinkUrl(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && addLink()}
+                    />
+                    <button onClick={addLink} className="btn-ghost px-2">
+                      +
+                    </button>
+                  </div>
+                </div>
+
                 <div className="flex items-center gap-2">
                   <input
                     className="input flex-1"
@@ -205,6 +280,16 @@ export default function CardItem({ card, index, onSave, onDelete, onToggle }: Pr
                     </div>
                   )}
                   <div className="mt-2 flex flex-wrap gap-1 text-[11px]">
+                    {(card.labels ?? []).map((l) => (
+                      <span key={l} className="rounded-full border border-cyan-300/25 bg-cyan-400/5 px-2 py-0.5 text-cyan-100/80">
+                        #{l}
+                      </span>
+                    ))}
+                    {card.recurrence && card.recurrence !== 'none' && (
+                      <span className="rounded-full border border-indigo-300/30 px-2 py-0.5 text-indigo-200/80">
+                        ↻ {REC_LABEL[card.recurrence]}
+                      </span>
+                    )}
                     {card.due && (
                       <span className="rounded-full border border-amber-300/20 px-2 py-0.5 text-amber-200/75">
                         {new Date(card.due).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
@@ -216,6 +301,20 @@ export default function CardItem({ card, index, onSave, onDelete, onToggle }: Pr
                       </span>
                     )}
                   </div>
+                  {links.length > 0 && (
+                    <div className="mt-1.5 flex flex-wrap gap-1 text-[11px]">
+                      {links.map((l, i) => (
+                        <button
+                          key={i}
+                          onClick={() => openLink(l)}
+                          title={l.url}
+                          className="rounded-full border border-cyan-300/20 px-2 py-0.5 text-cyan-200/70 hover:text-cyan-50"
+                        >
+                          ↗ {l.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div className="flex shrink-0 gap-1 opacity-0 transition group-hover:opacity-100">
                   <button onClick={() => setEditing(true)} className="text-cyan-200/50 hover:text-cyan-100" title="Editar">

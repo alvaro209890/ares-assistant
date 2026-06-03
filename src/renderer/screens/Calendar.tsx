@@ -1,24 +1,68 @@
 import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useAres } from '../lib/store'
+import type { CalendarEvent, Recurrence } from '../../shared/types'
 
-const fmt = (iso: string) =>
-  new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+const REC_LABEL: Record<Recurrence, string> = { none: 'sem repetição', daily: 'diário', weekly: 'semanal', monthly: 'mensal' }
+const DAY = 86400_000
+
+type View = 'todos' | 'hoje' | 'semana'
+
+const dayKey = (iso: string) => new Date(iso).toISOString().slice(0, 10)
+const sameDay = (iso: string, ref = new Date()) => {
+  const d = new Date(iso)
+  return d.getFullYear() === ref.getFullYear() && d.getMonth() === ref.getMonth() && d.getDate() === ref.getDate()
+}
 
 export default function Calendar(): JSX.Element {
   const { events, addEvent, removeEvent } = useAres()
   const [title, setTitle] = useState('')
   const [when, setWhen] = useState('')
   const [description, setDescription] = useState('')
-  const ordered = useMemo(() => [...events].sort((a, b) => a.whenISO.localeCompare(b.whenISO)), [events])
+  const [remind, setRemind] = useState(0)
+  const [recurrence, setRecurrence] = useState<Recurrence>('none')
+  const [view, setView] = useState<View>('todos')
+
+  const filtered = useMemo(() => {
+    const now = Date.now()
+    const list = [...events].sort((a, b) => a.whenISO.localeCompare(b.whenISO))
+    if (view === 'hoje') return list.filter((e) => sameDay(e.whenISO))
+    if (view === 'semana')
+      return list.filter((e) => {
+        const t = new Date(e.whenISO).getTime()
+        return t >= now - DAY && t <= now + 7 * DAY
+      })
+    return list
+  }, [events, view])
+
+  // Agrupa por dia para "agenda por dia".
+  const groups = useMemo(() => {
+    const map = new Map<string, CalendarEvent[]>()
+    for (const e of filtered) {
+      const k = dayKey(e.whenISO)
+      const arr = map.get(k) || []
+      arr.push(e)
+      map.set(k, arr)
+    }
+    return Array.from(map.entries())
+  }, [filtered])
 
   const submit = () => {
     const t = title.trim()
     if (!t || !when) return
-    void addEvent({ title: t, whenISO: new Date(when).toISOString(), description: description.trim() || undefined })
+    void addEvent({
+      title: t,
+      whenISO: new Date(when).toISOString(),
+      description: description.trim() || undefined,
+      remindMinutes: remind > 0 ? remind : undefined,
+      recurrence: recurrence !== 'none' ? recurrence : undefined
+    })
     setTitle('')
     setWhen('')
     setDescription('')
+    setRemind(0)
+    setRecurrence('none')
   }
 
   return (
@@ -35,11 +79,34 @@ export default function Calendar(): JSX.Element {
           <input className="input" placeholder="Título do evento" value={title} onChange={(e) => setTitle(e.target.value)} />
           <input className="input" type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} />
           <textarea
-            className="input min-h-[86px] resize-none"
+            className="input min-h-[72px] resize-none"
             placeholder="Descrição"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
           />
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-[11px] text-cyan-200/60">
+              Avisar antes
+              <select className="input mt-1" value={remind} onChange={(e) => setRemind(Number(e.target.value))}>
+                <option value={0}>na hora</option>
+                <option value={5}>5 min</option>
+                <option value={10}>10 min</option>
+                <option value={15}>15 min</option>
+                <option value={30}>30 min</option>
+                <option value={60}>1 hora</option>
+                <option value={1440}>1 dia</option>
+              </select>
+            </label>
+            <label className="text-[11px] text-cyan-200/60">
+              Repetir
+              <select className="input mt-1" value={recurrence} onChange={(e) => setRecurrence(e.target.value as Recurrence)}>
+                <option value="none">não repetir</option>
+                <option value="daily">diário</option>
+                <option value="weekly">semanal</option>
+                <option value="monthly">mensal</option>
+              </select>
+            </label>
+          </div>
           <button onClick={submit} disabled={!title.trim() || !when} className="btn-ghost disabled:opacity-40">
             CRIAR EVENTO
           </button>
@@ -47,28 +114,65 @@ export default function Calendar(): JSX.Element {
       </section>
 
       <section className="glass flex min-h-0 min-w-0 flex-col rounded-2xl p-4">
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3 flex items-center justify-between gap-2">
           <h2 className="font-display text-sm title-track text-cyan-100">EVENTOS</h2>
-          <span className="rounded-full bg-cyan-400/10 px-2 py-0.5 text-xs text-cyan-200/60">{ordered.length}</span>
+          <div className="flex gap-1">
+            {(['todos', 'hoje', 'semana'] as View[]).map((v) => (
+              <button
+                key={v}
+                onClick={() => setView(v)}
+                className={`rounded-full border px-2.5 py-0.5 text-[11px] title-track transition ${
+                  view === v ? 'border-cyan-300/50 bg-cyan-400/10 text-cyan-100' : 'border-cyan-300/15 text-cyan-200/55'
+                }`}
+              >
+                {v.toUpperCase()}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
-          {ordered.length === 0 ? (
-            <div className="grid h-full place-items-center text-sm text-cyan-200/40">Nenhum evento local.</div>
+          {groups.length === 0 ? (
+            <div className="grid h-full place-items-center text-sm text-cyan-200/40">Nenhum evento.</div>
           ) : (
-            <div className="grid gap-3">
-              {ordered.map((event) => (
-                <article key={event.id} className="rounded-xl border border-cyan-300/15 bg-black/20 p-3">
-                  <div className="flex items-start gap-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm text-cyan-50">{event.title}</p>
-                      <p className="mt-1 text-xs text-amber-200/80">{fmt(event.whenISO)}</p>
-                      {event.description && <p className="mt-2 text-xs text-cyan-200/55">{event.description}</p>}
-                    </div>
-                    <button onClick={() => removeEvent(event.id)} className="text-cyan-200/50 hover:text-red-300" title="Remover">
-                      <TrashIcon />
-                    </button>
+            <div className="grid gap-4">
+              {groups.map(([key, evs]) => (
+                <div key={key}>
+                  <h3 className="mb-2 text-[11px] capitalize text-cyan-300/55">
+                    {new Date(key + 'T12:00').toLocaleDateString('pt-BR', {
+                      weekday: 'long',
+                      day: '2-digit',
+                      month: 'long'
+                    })}
+                  </h3>
+                  <div className="grid gap-2">
+                    {evs.map((event) => (
+                      <article key={event.id} className="rounded-xl border border-cyan-300/15 bg-black/20 p-3">
+                        <div className="flex items-start gap-3">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm text-cyan-50">{event.title}</p>
+                            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+                              <span className="text-amber-200/80">{fmtTime(event.whenISO)}</span>
+                              {event.recurrence && event.recurrence !== 'none' && (
+                                <span className="rounded-full border border-indigo-300/30 px-1.5 py-0.5 text-indigo-200/80">
+                                  ↻ {REC_LABEL[event.recurrence]}
+                                </span>
+                              )}
+                              {event.remindMinutes ? (
+                                <span className="rounded-full border border-cyan-300/25 px-1.5 py-0.5 text-cyan-200/70">
+                                  avisa {event.remindMinutes >= 60 ? `${event.remindMinutes / 60}h` : `${event.remindMinutes}min`} antes
+                                </span>
+                              ) : null}
+                            </div>
+                            {event.description && <p className="mt-2 text-xs text-cyan-200/55">{event.description}</p>}
+                          </div>
+                          <button onClick={() => removeEvent(event.id)} className="text-cyan-200/50 hover:text-red-300" title="Remover">
+                            <TrashIcon />
+                          </button>
+                        </div>
+                      </article>
+                    ))}
                   </div>
-                </article>
+                </div>
               ))}
             </div>
           )}

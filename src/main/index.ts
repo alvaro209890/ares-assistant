@@ -1,15 +1,19 @@
-import { app, BrowserWindow, ipcMain, session } from 'electron'
+import { app, BrowserWindow, ipcMain, session, shell } from 'electron'
 import { join } from 'path'
 import { ensureConfig, readConfig, updateConfig } from './config'
 import { loadBoard, saveBoard } from './tasks'
 import { transcribe } from './grog'
-import { runTurn } from './agent'
+import { runTurn, extractFacts } from './agent'
+import { buildBriefing } from './briefing'
+import { getDiagnostics } from './diagnostics'
 import { startReminders } from './notify'
 import { synthesize, listPiperVoices, isPiperReady, ensurePiper } from './piper'
 import { getWeather, getWeatherAt, getNews, reverseGeocode } from './tools'
 import {
   loadMemory,
   addFact,
+  updateFact,
+  approveFact,
   removeFact,
   loadEvents,
   addEvent,
@@ -21,7 +25,7 @@ import {
   renameSession,
   deleteSession
 } from './data'
-import type { AppConfig, Board, CalendarEvent, UserLocation } from '../shared/types'
+import type { AppConfig, Board, CalendarEvent, DeepPartial, MemoryCategory, UserLocation } from '../shared/types'
 
 // Nome do app: define userData (Linux: ~/.config/ares) com config/tasks/memória/etc.
 app.setName('ares')
@@ -93,7 +97,7 @@ app.on('window-all-closed', () => {
 function registerIpc(): void {
   // Config
   ipcMain.handle('config:get', (): AppConfig => readConfig())
-  ipcMain.handle('config:update', (_e, patch: Partial<AppConfig>): AppConfig => updateConfig(patch))
+  ipcMain.handle('config:update', (_e, patch: DeepPartial<AppConfig>): AppConfig => updateConfig(patch))
 
   // Tarefas (Kanban) — renderer salva o board após edições/DnD
   ipcMain.handle('tasks:load', (): Board => loadBoard())
@@ -104,12 +108,31 @@ function registerIpc(): void {
 
   // Memória de longo prazo
   ipcMain.handle('memory:load', () => loadMemory())
-  ipcMain.handle('memory:add', (_e, text: string) => addFact(text))
+  ipcMain.handle('memory:add', (_e, text: string, category?: MemoryCategory) =>
+    addFact(text, { category, source: 'manual', status: 'active' })
+  )
+  ipcMain.handle('memory:update', (_e, id: string, patch: { text?: string; category?: MemoryCategory; status?: 'active' | 'pending' }) =>
+    updateFact(id, patch)
+  )
+  ipcMain.handle('memory:approve', (_e, id: string) => approveFact(id))
   ipcMain.handle('memory:remove', (_e, id: string) => removeFact(id))
+  ipcMain.handle('memory:autoExtract', (_e, sessionId: string) => extractFacts(sessionId))
 
   // Calendário
   ipcMain.handle('calendar:load', () => loadEvents())
-  ipcMain.handle('calendar:add', (_e, ev: { title: string; whenISO: string; description?: string }) => addEvent(ev))
+  ipcMain.handle(
+    'calendar:add',
+    (
+      _e,
+      ev: {
+        title: string
+        whenISO: string
+        description?: string
+        remindMinutes?: number
+        recurrence?: CalendarEvent['recurrence']
+      }
+    ) => addEvent(ev)
+  )
   ipcMain.handle('calendar:remove', (_e, id: string) => removeEvent(id))
   ipcMain.handle('calendar:save', (_e, events: CalendarEvent[]) => setEvents(events))
 
@@ -125,9 +148,20 @@ function registerIpc(): void {
     return transcribe(readConfig(), audio, mimeType)
   })
 
-  // Chat (agente): um turno completo com ações
-  ipcMain.handle('chat:ask', async (_e, payload: { sessionId: string; text: string }) => {
-    return runTurn(payload.sessionId, payload.text)
+  // Chat (agente): um turno completo com ações (voice = resposta mais curta)
+  ipcMain.handle('chat:ask', async (_e, payload: { sessionId: string; text: string; voice?: boolean }) => {
+    return runTurn(payload.sessionId, payload.text, !!payload.voice)
+  })
+
+  // Briefing do dia + diagnóstico do sistema
+  ipcMain.handle('briefing:get', async () => buildBriefing(readConfig()))
+  ipcMain.handle('diagnostics:get', async () => getDiagnostics())
+
+  // Abrir link/anexo de cartão no app padrão do sistema (http(s):// ou file://)
+  ipcMain.handle('system:openExternal', async (_e, url: string) => {
+    const u = String(url || '').trim()
+    if (/^(https?:|file:|mailto:)/i.test(u)) await shell.openExternal(u)
+    return true
   })
 
   // TTS Piper (voz neural) -> WAV

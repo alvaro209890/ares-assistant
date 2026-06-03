@@ -1,7 +1,15 @@
 import { app } from 'electron'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
-import type { MemoryFact, CalendarEvent, ChatSession, SessionMeta, StoredMessage } from '../shared/types'
+import type {
+  MemoryFact,
+  MemoryCategory,
+  CalendarEvent,
+  ChatSession,
+  SessionMeta,
+  StoredMessage
+} from '../shared/types'
+import { MEMORY_CATEGORIES, MEMORY_CATEGORY_LABEL } from '../shared/types'
 
 // Persistência local (userData) de: memória de longo prazo, calendário e sessões de
 // conversa. Tudo em JSON simples, sobrevive a fechar/abrir o app.
@@ -28,31 +36,180 @@ function uid(prefix: string): string {
 }
 
 // ---------------- Memória de longo prazo ----------------
-export function loadMemory(): MemoryFact[] {
-  return readJSON<MemoryFact[]>('memory.json', [])
+const normCat = (c: unknown): MemoryCategory =>
+  MEMORY_CATEGORIES.includes(c as MemoryCategory) ? (c as MemoryCategory) : 'outros'
+
+// Migra fatos antigos (sem categoria/origem/status) para o novo formato.
+function normalizeFact(raw: any): MemoryFact {
+  return {
+    id: typeof raw?.id === 'string' ? raw.id : uid('fact'),
+    text: String(raw?.text ?? '').trim(),
+    category: normCat(raw?.category),
+    source: raw?.source === 'auto' ? 'auto' : 'manual',
+    status: raw?.status === 'pending' ? 'pending' : 'active',
+    createdAt: typeof raw?.createdAt === 'number' ? raw.createdAt : Date.now(),
+    updatedAt: typeof raw?.updatedAt === 'number' ? raw.updatedAt : undefined
+  }
 }
-export function addFact(text: string): MemoryFact[] {
+
+export function loadMemory(): MemoryFact[] {
+  return readJSON<any[]>('memory.json', []).map(normalizeFact).filter((f) => f.text)
+}
+
+function saveMemory(facts: MemoryFact[]): void {
+  writeJSON('memory.json', facts)
+}
+
+const tokenize = (s: string): Set<string> =>
+  new Set(
+    s
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length > 3)
+  )
+
+// Sobreposição de tokens (Jaccard) para decidir se um fato é "o mesmo" de outro
+// e deve ser atualizado em vez de duplicado.
+function similarity(a: string, b: string): number {
+  const ta = tokenize(a)
+  const tb = tokenize(b)
+  if (!ta.size || !tb.size) return 0
+  let inter = 0
+  for (const t of ta) if (tb.has(t)) inter++
+  return inter / (ta.size + tb.size - inter)
+}
+
+export interface AddFactOptions {
+  category?: MemoryCategory
+  source?: 'manual' | 'auto'
+  status?: 'active' | 'pending'
+}
+
+/**
+ * Adiciona um fato evitando duplicar: se houver um fato muito parecido, atualiza o
+ * texto/categoria do existente em vez de criar outro. Fatos automáticos pendentes
+ * não substituem fatos já ativos confirmados pelo usuário.
+ */
+export function addFact(text: string, opts: AddFactOptions = {}): MemoryFact[] {
   const t = text.trim()
+  if (!t) return loadMemory()
   const facts = loadMemory()
-  if (t && !facts.some((f) => f.text.toLowerCase() === t.toLowerCase())) {
-    facts.unshift({ id: uid('fact'), text: t, createdAt: Date.now() })
-    writeJSON('memory.json', facts)
+  const category = opts.category ? normCat(opts.category) : undefined
+  const source = opts.source ?? 'manual'
+  const status = opts.status ?? 'active'
+
+  const exact = facts.find((f) => f.text.toLowerCase() === t.toLowerCase())
+  if (exact) {
+    // Já existe igual: só promove de pending->active e ajusta categoria se vier.
+    if (status === 'active') exact.status = 'active'
+    if (category) exact.category = category
+    exact.updatedAt = Date.now()
+    saveMemory(facts)
+    return facts
+  }
+
+  const similar = facts
+    .map((f) => ({ f, score: similarity(f.text, t) }))
+    .filter((x) => x.score >= 0.55)
+    .sort((a, b) => b.score - a.score)[0]
+  if (similar) {
+    // Não sobrescreve um fato manual já confirmado com uma extração automática:
+    // nesse caso ignora a duplicata para não poluir a memória.
+    if (source === 'auto' && similar.f.status === 'active' && similar.f.source === 'manual') return facts
+    similar.f.text = t
+    if (category) similar.f.category = category
+    if (status === 'active') similar.f.status = 'active'
+    similar.f.updatedAt = Date.now()
+    saveMemory(facts)
+    return facts
+  }
+
+  facts.unshift({
+    id: uid('fact'),
+    text: t,
+    category: category ?? 'outros',
+    source,
+    status,
+    createdAt: Date.now()
+  })
+  saveMemory(facts)
+  return facts
+}
+
+export function updateFact(id: string, patch: Partial<Pick<MemoryFact, 'text' | 'category' | 'status'>>): MemoryFact[] {
+  const facts = loadMemory()
+  const f = facts.find((x) => x.id === id)
+  if (f) {
+    if (typeof patch.text === 'string' && patch.text.trim()) f.text = patch.text.trim()
+    if (patch.category) f.category = normCat(patch.category)
+    if (patch.status) f.status = patch.status
+    f.updatedAt = Date.now()
+    saveMemory(facts)
   }
   return facts
 }
+
+export function approveFact(id: string): MemoryFact[] {
+  return updateFact(id, { status: 'active' })
+}
+
 export function removeFact(id: string): MemoryFact[] {
   const facts = loadMemory().filter((f) => f.id !== id)
-  writeJSON('memory.json', facts)
+  saveMemory(facts)
   return facts
+}
+
+/**
+ * Resumo da memória para injetar no prompt, agrupado por categoria e limitado em
+ * tamanho (respeita o orçamento de contexto). Só fatos ativos entram.
+ */
+export function memorySummary(maxChars = 1400): string {
+  const active = loadMemory().filter((f) => f.status === 'active')
+  if (!active.length) return '(nada registrado)'
+  const byCat = new Map<MemoryCategory, string[]>()
+  for (const f of active) {
+    const arr = byCat.get(f.category) || []
+    arr.push(f.text)
+    byCat.set(f.category, arr)
+  }
+  let out = ''
+  for (const cat of MEMORY_CATEGORIES) {
+    const items = byCat.get(cat)
+    if (!items?.length) continue
+    const block = `${MEMORY_CATEGORY_LABEL[cat]}: ${items.join('; ')}`
+    if (out.length + block.length > maxChars) {
+      out += (out ? '\n' : '') + block.slice(0, Math.max(0, maxChars - out.length))
+      break
+    }
+    out += (out ? '\n' : '') + block
+  }
+  return out || '(nada registrado)'
 }
 
 // ---------------- Calendário ----------------
 export function loadEvents(): CalendarEvent[] {
   return readJSON<CalendarEvent[]>('calendar.json', []).sort((a, b) => a.whenISO.localeCompare(b.whenISO))
 }
-export function addEvent(ev: { title: string; whenISO: string; description?: string }): CalendarEvent[] {
+export function addEvent(ev: {
+  title: string
+  whenISO: string
+  description?: string
+  remindMinutes?: number
+  recurrence?: CalendarEvent['recurrence']
+}): CalendarEvent[] {
   const events = loadEvents()
-  events.push({ id: uid('ev'), title: ev.title, whenISO: ev.whenISO, description: ev.description, createdAt: Date.now() })
+  events.push({
+    id: uid('ev'),
+    title: ev.title,
+    whenISO: ev.whenISO,
+    description: ev.description,
+    remindMinutes: typeof ev.remindMinutes === 'number' && ev.remindMinutes > 0 ? ev.remindMinutes : undefined,
+    recurrence: ev.recurrence && ev.recurrence !== 'none' ? ev.recurrence : undefined,
+    createdAt: Date.now()
+  })
   writeJSON('calendar.json', events)
   return loadEvents()
 }

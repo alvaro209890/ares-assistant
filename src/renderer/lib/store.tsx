@@ -2,9 +2,12 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import type {
   AppConfig,
   Board,
+  BriefingData,
   CalendarEvent,
   ChatSession,
   AresState,
+  DeepPartial,
+  MemoryCategory,
   MemoryFact,
   SessionMeta,
   TtsStatus,
@@ -21,7 +24,7 @@ export interface ConvMsg {
   pending?: boolean
 }
 
-type Screen = 'assistant' | 'tasks' | 'calendar' | 'memory'
+type Screen = 'assistant' | 'tasks' | 'calendar' | 'memory' | 'system'
 
 interface AresStore {
   ready: boolean
@@ -40,13 +43,16 @@ interface AresStore {
   recording: boolean
   continuous: boolean
   settingsOpen: boolean
+  briefing: BriefingData | null
+  briefingLoading: boolean
+  briefingOpen: boolean
   error: string | null
   status: string
   actionToast: string | null
 
   navigate: (s: Screen) => void
   openSettings: (b: boolean) => void
-  saveConfig: (patch: Partial<AppConfig>) => Promise<void>
+  saveConfig: (patch: DeepPartial<AppConfig>) => Promise<void>
   setBoard: (updater: Board | ((b: Board) => Board)) => void
   sendText: (text: string) => Promise<void>
   beginPushToTalk: () => Promise<void>
@@ -56,13 +62,23 @@ interface AresStore {
   locateUser: () => Promise<void>
   testVoice: (text?: string) => Promise<void>
   refreshWidgets: () => Promise<void>
+  loadBriefing: () => Promise<void>
+  openBriefing: (open: boolean) => void
   createSession: () => Promise<void>
   openSession: (id: string) => Promise<void>
   renameSession: (id: string, title: string) => Promise<void>
   deleteSession: (id: string) => Promise<void>
-  addMemory: (text: string) => Promise<void>
+  addMemory: (text: string, category?: MemoryCategory) => Promise<void>
+  updateMemory: (id: string, patch: { text?: string; category?: MemoryCategory; status?: 'active' | 'pending' }) => Promise<void>
+  approveMemory: (id: string) => Promise<void>
   removeMemory: (id: string) => Promise<void>
-  addEvent: (event: { title: string; whenISO: string; description?: string }) => Promise<void>
+  addEvent: (event: {
+    title: string
+    whenISO: string
+    description?: string
+    remindMinutes?: number
+    recurrence?: CalendarEvent['recurrence']
+  }) => Promise<void>
   removeEvent: (id: string) => Promise<void>
 }
 
@@ -96,6 +112,9 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   const [recording, setRecording] = useState(false)
   const [continuous, setContinuous] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [briefing, setBriefing] = useState<BriefingData | null>(null)
+  const [briefingLoading, setBriefingLoading] = useState(false)
+  const [briefingOpen, setBriefingOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState('')
   const [actionToast, setActionToast] = useState<string | null>(null)
@@ -233,7 +252,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   )
 
   const runTurn = useCallback(
-    async (userText: string) => {
+    async (userText: string, viaVoice = false) => {
       if (busyRef.current) return
       let sid = currentSessionRef.current
       if (!sid) {
@@ -254,7 +273,9 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
       setAresState('thinking')
 
       try {
-        const result = await window.ares.chat.ask(sid, userText)
+        // Pede respostas mais curtas quando a entrada veio por voz e a fala está ativa.
+        const voice = viaVoice && !!configRef.current?.tts.enabled
+        const result = await window.ares.chat.ask(sid, userText, voice)
         boardRef.current = result.board
         setBoardState(result.board)
         setMemory(result.memory)
@@ -265,6 +286,13 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
         if (result.notes.length) showToast(result.notes.join('   ·   '))
         await refreshSessions()
         void refreshWidgets()
+        // Auto-extração de fatos: roda em segundo plano para não atrasar a fala.
+        if (configRef.current?.memory.autoExtract) {
+          void window.ares.memory
+            .autoExtract(sid)
+            .then((mem) => setMemory(mem))
+            .catch(() => {})
+        }
         await speakText(result.fala)
         busyRef.current = false
       } catch (e) {
@@ -280,7 +308,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   const sendText = useCallback(
     async (text: string) => {
       const t = text.trim()
-      if (t) await runTurn(t)
+      if (t) await runTurn(t, false)
     },
     [runTurn]
   )
@@ -323,12 +351,18 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
         setAresState('idle')
         return
       }
-      await runTurn(text)
+      await runTurn(text, true)
     } catch (e) {
       setError(errMsg(e))
       setAresState('idle')
     }
   }, [runTurn, transcribeBlob])
+
+  // Converte a sensibilidade (0..1) num limiar de áudio (quanto mais sensível, menor).
+  const micThreshold = useCallback((): number => {
+    const s = configRef.current?.ui.micSensitivity ?? 0.5
+    return Math.max(0.012, 0.09 - s * 0.075)
+  }, [])
 
   const continuousLoop = useCallback(async () => {
     if (loopRef.current) return
@@ -344,7 +378,11 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
         setRecording(true)
         let res: { blob: Blob; mimeType: string; spoke: boolean }
         try {
-          res = await audio.recordUntilSilence({ shouldStop: () => !continuousRef.current })
+          res = await audio.recordUntilSilence({
+            shouldStop: () => !continuousRef.current,
+            threshold: micThreshold(),
+            silenceMs: configRef.current?.ui.silenceMs ?? 1350
+          })
         } catch {
           setError('Microfone indisponível para o modo contínuo.')
           break
@@ -366,8 +404,13 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
         }
         if (text.trim()) {
           setStatus('')
-          await runTurn(text)
-          if (continuousRef.current) await new Promise((r) => setTimeout(r, 420))
+          await runTurn(text, true)
+          // Pausa curta após a fala do Ares antes de voltar a ouvir (evita auto-escuta).
+          if (continuousRef.current) {
+            setAresState('idle')
+            setStatus('Pausa…')
+            await new Promise((r) => setTimeout(r, configRef.current?.ui.postSpeechPauseMs ?? 450))
+          }
         } else {
           setStatus('Não captei fala útil. Continuo ouvindo.')
         }
@@ -377,7 +420,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
       setRecording(false)
       if (!busyRef.current) setAresState('idle')
     }
-  }, [runTurn, transcribeBlob])
+  }, [runTurn, transcribeBlob, micThreshold])
 
   const toggleContinuous = useCallback(() => {
     const next = !continuousRef.current
@@ -419,7 +462,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   }, [ready, continuous, continuousLoop])
 
   const saveConfig = useCallback(
-    async (patch: Partial<AppConfig>) => {
+    async (patch: DeepPartial<AppConfig>) => {
       const nc = await window.ares.config.update(patch)
       configRef.current = nc
       setConfig(nc)
@@ -529,24 +572,61 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     []
   )
 
-  const addMemory = useCallback(async (text: string) => {
+  const addMemory = useCallback(async (text: string, category?: MemoryCategory) => {
     const t = text.trim()
     if (!t) return
-    setMemory(await window.ares.memory.add(t))
+    setMemory(await window.ares.memory.add(t, category))
     showToast('memória atualizada')
+  }, [showToast])
+
+  const updateMemory = useCallback(
+    async (id: string, patch: { text?: string; category?: MemoryCategory; status?: 'active' | 'pending' }) => {
+      setMemory(await window.ares.memory.update(id, patch))
+    },
+    []
+  )
+
+  const approveMemory = useCallback(async (id: string) => {
+    setMemory(await window.ares.memory.approve(id))
+    showToast('fato confirmado')
   }, [showToast])
 
   const removeMemory = useCallback(async (id: string) => {
     setMemory(await window.ares.memory.remove(id))
   }, [])
 
-  const addEvent = useCallback(async (event: { title: string; whenISO: string; description?: string }) => {
-    setEvents(await window.ares.calendar.add(event))
-  }, [])
+  const addEvent = useCallback(
+    async (event: {
+      title: string
+      whenISO: string
+      description?: string
+      remindMinutes?: number
+      recurrence?: CalendarEvent['recurrence']
+    }) => {
+      setEvents(await window.ares.calendar.add(event))
+    },
+    []
+  )
 
   const removeEvent = useCallback(async (id: string) => {
     setEvents(await window.ares.calendar.remove(id))
   }, [])
+
+  const loadBriefing = useCallback(async () => {
+    setBriefingLoading(true)
+    try {
+      setBriefing(await window.ares.briefing.get())
+    } catch (e) {
+      setError(errMsg(e))
+    } finally {
+      setBriefingLoading(false)
+    }
+  }, [])
+
+  const openBriefing = useCallback((open: boolean) => {
+    setBriefingOpen(open)
+    if (open) void loadBriefing()
+  }, [loadBriefing])
 
   const navigate = useCallback((s: Screen) => setScreen(s), [])
   const openSettings = useCallback((b: boolean) => setSettingsOpen(b), [])
@@ -569,6 +649,9 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     recording,
     continuous,
     settingsOpen,
+    briefing,
+    briefingLoading,
+    briefingOpen,
     error,
     status,
     actionToast,
@@ -584,11 +667,15 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     locateUser,
     testVoice,
     refreshWidgets,
+    loadBriefing,
+    openBriefing,
     createSession,
     openSession,
     renameSession,
     deleteSession,
     addMemory,
+    updateMemory,
+    approveMemory,
     removeMemory,
     addEvent,
     removeEvent

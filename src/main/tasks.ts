@@ -54,6 +54,8 @@ export function boardSummary(board: Board): string {
             c.priority ? `prioridade ${c.priority}` : '',
             c.due ? `prazo ${c.due}` : '',
             c.reminderAt ? `lembrete ${c.reminderAt}` : '',
+            c.recurrence && c.recurrence !== 'none' ? `repete ${c.recurrence}` : '',
+            c.labels?.length ? `etiquetas ${c.labels.join('/')}` : '',
             c.subtasks?.length ? `subtarefas ${c.subtasks.filter((s) => s.done).length}/${c.subtasks.length}` : ''
           ].filter(Boolean)
           return `"${c.title}" (${bits.join(', ')})`

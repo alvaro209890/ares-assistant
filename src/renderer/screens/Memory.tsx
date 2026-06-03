@@ -1,16 +1,48 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useAres } from '../lib/store'
+import type { MemoryCategory, MemoryFact } from '../../shared/types'
+import { MEMORY_CATEGORIES, MEMORY_CATEGORY_LABEL } from '../../shared/types'
+
+const CAT_CLASS: Record<MemoryCategory, string> = {
+  perfil: 'border-cyan-300/35 text-cyan-200',
+  preferencias: 'border-blue-300/35 text-blue-200',
+  rotina: 'border-emerald-300/35 text-emerald-200',
+  trabalho: 'border-amber-300/35 text-amber-200',
+  projetos: 'border-indigo-300/35 text-indigo-200',
+  restricoes: 'border-red-300/40 text-red-200',
+  interesses: 'border-pink-300/35 text-pink-200',
+  outros: 'border-cyan-300/20 text-cyan-200/70'
+}
 
 export default function Memory(): JSX.Element {
-  const { memory, addMemory, removeMemory, sessions, currentSessionId, openSession, createSession, renameSession, deleteSession } =
-    useAres()
+  const {
+    memory,
+    addMemory,
+    updateMemory,
+    approveMemory,
+    removeMemory,
+    sessions,
+    currentSessionId,
+    openSession,
+    createSession,
+    renameSession,
+    deleteSession
+  } = useAres()
   const [fact, setFact] = useState('')
+  const [newCat, setNewCat] = useState<MemoryCategory>('outros')
+  const [filter, setFilter] = useState<'todas' | MemoryCategory>('todas')
+
+  const pending = useMemo(() => memory.filter((m) => m.status === 'pending'), [memory])
+  const active = useMemo(
+    () => memory.filter((m) => m.status !== 'pending' && (filter === 'todas' || m.category === filter)),
+    [memory, filter]
+  )
 
   const submitFact = () => {
     const t = fact.trim()
     if (!t) return
-    void addMemory(t)
+    void addMemory(t, newCat)
     setFact('')
   }
 
@@ -20,7 +52,7 @@ export default function Memory(): JSX.Element {
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -12 }}
-      className="grid h-full min-h-[680px] gap-4 p-5 lg:grid-cols-[minmax(320px,420px)_minmax(0,1fr)]"
+      className="grid h-full min-h-[680px] gap-4 p-5 lg:grid-cols-[minmax(300px,380px)_minmax(0,1fr)]"
     >
       <section className="glass flex min-h-0 flex-col rounded-2xl p-4">
         <div className="mb-3 flex items-center justify-between">
@@ -46,36 +78,175 @@ export default function Memory(): JSX.Element {
 
       <section className="glass flex min-h-0 flex-col rounded-2xl p-4">
         <h2 className="font-display text-sm title-track text-cyan-100">MEMÓRIA DE LONGO PRAZO</h2>
-        <div className="mt-4 flex gap-2">
+
+        <div className="mt-4 flex flex-wrap gap-2">
           <input
-            className="input flex-1"
+            className="input min-w-[180px] flex-1"
             placeholder="Ex.: prefiro respostas curtas"
             value={fact}
             onChange={(e) => setFact(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && submitFact()}
           />
+          <select className="input w-[150px]" value={newCat} onChange={(e) => setNewCat(e.target.value as MemoryCategory)}>
+            {MEMORY_CATEGORIES.map((c) => (
+              <option key={c} value={c}>
+                {MEMORY_CATEGORY_LABEL[c]}
+              </option>
+            ))}
+          </select>
           <button onClick={submitFact} disabled={!fact.trim()} className="btn-ghost disabled:opacity-40">
             ADICIONAR
           </button>
         </div>
-        <div className="mt-4 min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
-          {memory.length === 0 ? (
-            <div className="grid h-full place-items-center text-sm text-cyan-200/40">Nenhum fato salvo ainda.</div>
+
+        {pending.length > 0 && (
+          <div className="mt-4 rounded-xl border border-amber-300/30 bg-amber-400/5 p-3">
+            <div className="mb-2 flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-amber-300" />
+              <h3 className="text-[11px] title-track text-amber-200/80">PARA REVISAR ({pending.length})</h3>
+              <span className="text-[10px] text-amber-200/50">extraídos automaticamente</span>
+            </div>
+            <div className="grid gap-2">
+              {pending.map((m) => (
+                <PendingRow
+                  key={m.id}
+                  fact={m}
+                  onApprove={() => approveMemory(m.id)}
+                  onCategory={(c) => updateMemory(m.id, { category: c })}
+                  onDelete={() => removeMemory(m.id)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="mt-4 flex items-center gap-2">
+          <span className="text-[11px] text-cyan-200/45">Filtrar:</span>
+          <select className="input w-[170px] py-1" value={filter} onChange={(e) => setFilter(e.target.value as MemoryCategory | 'todas')}>
+            <option value="todas">todas categorias</option>
+            {MEMORY_CATEGORIES.map((c) => (
+              <option key={c} value={c}>
+                {MEMORY_CATEGORY_LABEL[c]}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="mt-3 min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
+          {active.length === 0 ? (
+            <div className="grid h-full place-items-center text-sm text-cyan-200/40">Nenhum fato nesta categoria.</div>
           ) : (
             <div className="grid gap-2">
-              {memory.map((m) => (
-                <article key={m.id} className="flex items-start gap-3 rounded-xl border border-cyan-300/15 bg-black/20 p-3">
-                  <p className="min-w-0 flex-1 text-sm text-cyan-50">{m.text}</p>
-                  <button onClick={() => removeMemory(m.id)} className="text-cyan-200/50 hover:text-red-300" title="Remover">
-                    <TrashIcon />
-                  </button>
-                </article>
+              {active.map((m) => (
+                <FactRow
+                  key={m.id}
+                  fact={m}
+                  onCategory={(c) => updateMemory(m.id, { category: c })}
+                  onText={(t) => updateMemory(m.id, { text: t })}
+                  onDelete={() => removeMemory(m.id)}
+                />
               ))}
             </div>
           )}
         </div>
       </section>
     </motion.div>
+  )
+}
+
+function CategoryPill({ fact, onCategory }: { fact: MemoryFact; onCategory: (c: MemoryCategory) => void }): JSX.Element {
+  return (
+    <select
+      value={fact.category}
+      onChange={(e) => onCategory(e.target.value as MemoryCategory)}
+      className={`rounded-full border bg-black/30 px-2 py-0.5 text-[10px] outline-none ${CAT_CLASS[fact.category]}`}
+      title="Categoria"
+    >
+      {MEMORY_CATEGORIES.map((c) => (
+        <option key={c} value={c}>
+          {MEMORY_CATEGORY_LABEL[c]}
+        </option>
+      ))}
+    </select>
+  )
+}
+
+function FactRow({
+  fact,
+  onCategory,
+  onText,
+  onDelete
+}: {
+  fact: MemoryFact
+  onCategory: (c: MemoryCategory) => void
+  onText: (t: string) => void
+  onDelete: () => void
+}): JSX.Element {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(fact.text)
+  const commit = () => {
+    if (draft.trim() && draft.trim() !== fact.text) onText(draft.trim())
+    setEditing(false)
+  }
+  return (
+    <article className="rounded-xl border border-cyan-300/15 bg-black/20 p-3">
+      <div className="flex items-start gap-3">
+        {editing ? (
+          <input
+            className="input min-w-0 flex-1 py-1"
+            value={draft}
+            autoFocus
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commit()
+              if (e.key === 'Escape') setEditing(false)
+            }}
+          />
+        ) : (
+          <p className="min-w-0 flex-1 text-sm text-cyan-50" onDoubleClick={() => setEditing(true)}>
+            {fact.text}
+            {fact.source === 'auto' && <span className="ml-2 text-[10px] text-cyan-200/40">(auto)</span>}
+          </p>
+        )}
+        <button onClick={() => setEditing(true)} className="text-cyan-200/50 hover:text-cyan-100" title="Editar">
+          ✎
+        </button>
+        <button onClick={onDelete} className="text-cyan-200/50 hover:text-red-300" title="Remover">
+          ✕
+        </button>
+      </div>
+      <div className="mt-2">
+        <CategoryPill fact={fact} onCategory={onCategory} />
+      </div>
+    </article>
+  )
+}
+
+function PendingRow({
+  fact,
+  onApprove,
+  onCategory,
+  onDelete
+}: {
+  fact: MemoryFact
+  onApprove: () => void
+  onCategory: (c: MemoryCategory) => void
+  onDelete: () => void
+}): JSX.Element {
+  return (
+    <article className="rounded-lg border border-amber-300/15 bg-black/20 p-2.5">
+      <p className="text-sm text-cyan-50">{fact.text}</p>
+      <div className="mt-2 flex items-center gap-2">
+        <CategoryPill fact={fact} onCategory={onCategory} />
+        <button onClick={onApprove} className="ml-auto rounded-full border border-emerald-300/40 px-2 py-0.5 text-[10px] text-emerald-200 hover:bg-emerald-400/10">
+          ✓ SALVAR
+        </button>
+        <button onClick={onDelete} className="rounded-full border border-red-300/30 px-2 py-0.5 text-[10px] text-red-200/80 hover:bg-red-400/10">
+          DESCARTAR
+        </button>
+      </div>
+    </article>
   )
 }
 
@@ -122,28 +293,12 @@ function SessionRow({
           </button>
         )}
         <button onClick={() => setEditing(true)} className="text-cyan-200/50 hover:text-cyan-100" title="Renomear">
-          <EditIcon />
+          ✎
         </button>
         <button onClick={onDelete} className="text-cyan-200/50 hover:text-red-300" title="Apagar">
-          <TrashIcon />
+          ✕
         </button>
       </div>
     </div>
-  )
-}
-
-function EditIcon(): JSX.Element {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
-      <path d="M4 20h4L19 9l-4-4L4 16v4zM13 7l4 4" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
-
-function TrashIcon(): JSX.Element {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
-      <path d="M4 7h16M10 11v6M14 11v6M9 7l1-3h4l1 3M6 7l1 14h10l1-14" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
   )
 }

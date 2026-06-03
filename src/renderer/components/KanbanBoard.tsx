@@ -27,11 +27,19 @@ export default function KanbanBoard(): JSX.Element {
   const [dueFilter, setDueFilter] = useState<DueFilter>('todos')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('todos')
   const [sortMode, setSortMode] = useState<SortMode>('manual')
+  const [labelFilter, setLabelFilter] = useState<string>('todas')
+
+  const allLabels = useMemo(() => {
+    const set = new Set<string>()
+    for (const c of Object.values(board.cards)) c.labels?.forEach((l) => set.add(l))
+    return Array.from(set).sort()
+  }, [board.cards])
 
   const filterCard = (card: Card) => {
     const q = query.trim().toLowerCase()
-    if (q && !`${card.title} ${card.description ?? ''}`.toLowerCase().includes(q)) return false
+    if (q && !`${card.title} ${card.description ?? ''} ${(card.labels ?? []).join(' ')}`.toLowerCase().includes(q)) return false
     if (colorFilter !== 'todas' && (card.color ?? 'cyan') !== colorFilter) return false
+    if (labelFilter !== 'todas' && !(card.labels ?? []).includes(labelFilter)) return false
     if (statusFilter === 'abertas' && card.done) return false
     if (statusFilter === 'concluidas' && !card.done) return false
     if (dueFilter !== 'todos') {
@@ -42,6 +50,18 @@ export default function KanbanBoard(): JSX.Element {
       if (dueFilter === 'proximas' && !(t >= Date.now() && t <= Date.now() + 7 * 86400_000)) return false
     }
     return true
+  }
+
+  // Visões rápidas (Hoje / Vencidas / Próximos 7 dias).
+  const quickViews: { id: DueFilter; label: string }[] = [
+    { id: 'todos', label: 'TODAS' },
+    { id: 'hoje', label: 'HOJE' },
+    { id: 'vencidas', label: 'VENCIDAS' },
+    { id: 'proximas', label: 'PRÓXIMOS 7 DIAS' }
+  ]
+  const applyQuickView = (id: DueFilter) => {
+    setDueFilter(id)
+    setStatusFilter(id === 'vencidas' ? 'abertas' : 'todos')
   }
 
   const sortCards = (cards: Card[]) => {
@@ -60,7 +80,7 @@ export default function KanbanBoard(): JSX.Element {
         col,
         cards: sortCards(col.cardIds.map((id) => board.cards[id]).filter(Boolean).filter(filterCard))
       })),
-    [board, query, colorFilter, dueFilter, statusFilter, sortMode]
+    [board, query, colorFilter, dueFilter, statusFilter, sortMode, labelFilter]
   )
 
   const onDragEnd = (result: DropResult) => {
@@ -140,10 +160,23 @@ export default function KanbanBoard(): JSX.Element {
   return (
     <DragDropContext onDragEnd={onDragEnd}>
       <div className="flex h-full min-h-0 flex-col">
-        <div className="mb-4 grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-[minmax(220px,1fr)_repeat(4,minmax(132px,150px))]">
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {quickViews.map((v) => (
+            <button
+              key={v.id}
+              onClick={() => applyQuickView(v.id)}
+              className={`rounded-full border px-3 py-1 text-[11px] title-track transition ${
+                dueFilter === v.id ? 'border-cyan-300/50 bg-cyan-400/10 text-cyan-100' : 'border-cyan-300/15 text-cyan-200/55 hover:text-cyan-100'
+              }`}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+        <div className="mb-4 grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-[minmax(200px,1fr)_repeat(5,minmax(118px,148px))]">
           <input
             className="input"
-            placeholder="Buscar por título ou descrição"
+            placeholder="Buscar título, descrição ou etiqueta"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -151,6 +184,14 @@ export default function KanbanBoard(): JSX.Element {
             {COLORS.map((c) => (
               <option key={c} value={c}>
                 cor {c}
+              </option>
+            ))}
+          </select>
+          <select className="input" value={labelFilter} onChange={(e) => setLabelFilter(e.target.value)}>
+            <option value="todas">toda etiqueta</option>
+            {allLabels.map((l) => (
+              <option key={l} value={l}>
+                {l}
               </option>
             ))}
           </select>

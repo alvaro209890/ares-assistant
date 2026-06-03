@@ -44,7 +44,17 @@
   },
 
   "ui": {
-    "_doc": "Preferências de interface.",
-    "continuousMode": false
+    "_doc": "Preferências de interface e conversa contínua.",
+    "continuousMode": false,
+    "micSensitivity": 0.5,
+    "silenceMs": 1350,
+    "postSpeechPauseMs": 450,
+    "proactiveSuggestions": true
+  },
+
+  "memory": {
+    "_doc": "Memória avançada. autoExtract: extrair fatos da conversa; autoApprove: salvar direto (false = revisar antes na tela Memória).",
+    "autoExtract": true,
+    "autoApprove": false
   }
 }

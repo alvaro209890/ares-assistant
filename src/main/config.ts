@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
 import { homedir } from 'os'
-import type { AppConfig } from '../shared/types'
+import type { AppConfig, DeepPartial } from '../shared/types'
 
 // ---------------------------------------------------------------------------
 // Configuração do Ares.
@@ -34,7 +34,17 @@ const DEFAULT_CONFIG: AppConfig = {
     volume: 1.0
   },
   integrations: { weatherCity: 'São Paulo', newsTopic: '', location: { enabled: true } },
-  ui: { continuousMode: false }
+  ui: {
+    continuousMode: false,
+    micSensitivity: 0.5,
+    silenceMs: 1350,
+    postSpeechPauseMs: 450,
+    proactiveSuggestions: true
+  },
+  memory: {
+    autoExtract: true,
+    autoApprove: false
+  }
 }
 
 function configPath(): string {
@@ -42,7 +52,7 @@ function configPath(): string {
 }
 
 /** Mescla profundamente "patch" sobre "base" (apenas objetos simples). */
-function deepMerge<T>(base: T, patch: Partial<T>): T {
+function deepMerge<T>(base: T, patch: DeepPartial<T>): T {
   const out: any = Array.isArray(base) ? [...(base as any)] : { ...base }
   for (const key of Object.keys(patch || {})) {
     const pv: any = (patch as any)[key]
@@ -110,8 +120,8 @@ export function ensureConfig(): AppConfig {
   return cfg
 }
 
-/** Aplica um patch parcial e devolve a config completa atualizada. */
-export function updateConfig(patch: Partial<AppConfig>): AppConfig {
+/** Aplica um patch parcial (em profundidade) e devolve a config completa atualizada. */
+export function updateConfig(patch: DeepPartial<AppConfig>): AppConfig {
   const merged = deepMerge(readConfig(), patch)
   persist(merged)
   return merged

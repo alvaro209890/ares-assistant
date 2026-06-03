@@ -6,7 +6,50 @@ import type { AgentEnvelope, Acao } from './types'
 // e a documentação no README.
 
 // Ferramentas de CONSULTA (precisam buscar dados e voltar ao LLM para verbalizar).
-export const QUERY_TOOLS = new Set(['clima.consultar', 'web.buscar', 'noticias.listar', 'agenda.listar', 'tarefa.listar'])
+export const QUERY_TOOLS = new Set([
+  'clima.consultar',
+  'web.buscar',
+  'noticias.listar',
+  'agenda.listar',
+  'tarefa.listar',
+  'briefing.consultar'
+])
+
+// Ações de mutação conhecidas e os campos obrigatórios de cada uma. Usado para
+// validar o JSON do LLM e descartar ações inválidas/incompletas com segurança.
+export const MUTATION_REQUIRED: Record<string, string[]> = {
+  'tarefa.criar': ['titulo'],
+  'tarefa.mover': ['titulo'],
+  'tarefa.concluir': ['titulo'],
+  'tarefa.reabrir': ['titulo'],
+  'tarefa.remover': ['titulo'],
+  'tarefa.editar': ['titulo'],
+  'tarefa.subtarefa.adicionar': ['titulo'],
+  'tarefa.subtarefa.concluir': ['titulo'],
+  'tarefa.lembrete.definir': ['titulo', 'quando'],
+  'coluna.criar': ['titulo'],
+  'coluna.renomear': ['titulo', 'novoTitulo'],
+  'coluna.remover': ['titulo'],
+  'memoria.salvar': ['fato'],
+  'memoria.remover': ['fato'],
+  'evento.criar': ['titulo', 'quando'],
+  'evento.remover': ['titulo']
+}
+
+/** Valida uma ação: tipo conhecido (consulta ou mutação) e campos obrigatórios presentes. */
+export function validateAction(a: Acao): { ok: boolean; error?: string } {
+  if (!a || typeof a.tipo !== 'string') return { ok: false, error: 'ação sem tipo' }
+  if (QUERY_TOOLS.has(a.tipo)) return { ok: true }
+  const required = MUTATION_REQUIRED[a.tipo]
+  if (!required) return { ok: false, error: `tipo desconhecido: ${a.tipo}` }
+  for (const field of required) {
+    const v = (a as Record<string, unknown>)[field]
+    if (v === undefined || v === null || String(v).trim() === '') {
+      return { ok: false, error: `${a.tipo} sem campo "${field}"` }
+    }
+  }
+  return { ok: true }
+}
 
 /** Tenta extrair o primeiro objeto JSON balanceado de um texto. */
 function extractJsonObject(text: string): string | null {

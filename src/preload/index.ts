@@ -2,9 +2,13 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AgentTurnResult,
   AppConfig,
+  DeepPartial,
+  BriefingData,
   Board,
   CalendarEvent,
   ChatSession,
+  DiagnosticsResult,
+  MemoryCategory,
   MemoryFact,
   NewsItem,
   ReverseGeocodeResult,
@@ -19,7 +23,7 @@ import type {
 const api = {
   config: {
     get: (): Promise<AppConfig> => ipcRenderer.invoke('config:get'),
-    update: (patch: Partial<AppConfig>): Promise<AppConfig> => ipcRenderer.invoke('config:update', patch)
+    update: (patch: DeepPartial<AppConfig>): Promise<AppConfig> => ipcRenderer.invoke('config:update', patch)
   },
   tasks: {
     load: (): Promise<Board> => ipcRenderer.invoke('tasks:load'),
@@ -27,13 +31,25 @@ const api = {
   },
   memory: {
     load: (): Promise<MemoryFact[]> => ipcRenderer.invoke('memory:load'),
-    add: (text: string): Promise<MemoryFact[]> => ipcRenderer.invoke('memory:add', text),
-    remove: (id: string): Promise<MemoryFact[]> => ipcRenderer.invoke('memory:remove', id)
+    add: (text: string, category?: MemoryCategory): Promise<MemoryFact[]> =>
+      ipcRenderer.invoke('memory:add', text, category),
+    update: (
+      id: string,
+      patch: { text?: string; category?: MemoryCategory; status?: 'active' | 'pending' }
+    ): Promise<MemoryFact[]> => ipcRenderer.invoke('memory:update', id, patch),
+    approve: (id: string): Promise<MemoryFact[]> => ipcRenderer.invoke('memory:approve', id),
+    remove: (id: string): Promise<MemoryFact[]> => ipcRenderer.invoke('memory:remove', id),
+    autoExtract: (sessionId: string): Promise<MemoryFact[]> => ipcRenderer.invoke('memory:autoExtract', sessionId)
   },
   calendar: {
     load: (): Promise<CalendarEvent[]> => ipcRenderer.invoke('calendar:load'),
-    add: (event: { title: string; whenISO: string; description?: string }): Promise<CalendarEvent[]> =>
-      ipcRenderer.invoke('calendar:add', event),
+    add: (event: {
+      title: string
+      whenISO: string
+      description?: string
+      remindMinutes?: number
+      recurrence?: CalendarEvent['recurrence']
+    }): Promise<CalendarEvent[]> => ipcRenderer.invoke('calendar:add', event),
     remove: (id: string): Promise<CalendarEvent[]> => ipcRenderer.invoke('calendar:remove', id),
     save: (events: CalendarEvent[]): Promise<CalendarEvent[]> => ipcRenderer.invoke('calendar:save', events)
   },
@@ -49,8 +65,14 @@ const api = {
       ipcRenderer.invoke('stt:transcribe', audio, mimeType)
   },
   chat: {
-    ask: (sessionId: string, text: string): Promise<AgentTurnResult> =>
-      ipcRenderer.invoke('chat:ask', { sessionId, text })
+    ask: (sessionId: string, text: string, voice = false): Promise<AgentTurnResult> =>
+      ipcRenderer.invoke('chat:ask', { sessionId, text, voice })
+  },
+  briefing: {
+    get: (): Promise<BriefingData> => ipcRenderer.invoke('briefing:get')
+  },
+  diagnostics: {
+    get: (): Promise<DiagnosticsResult> => ipcRenderer.invoke('diagnostics:get')
   },
   tts: {
     synthesize: (text: string, opts: { voice?: string; rate?: number }): Promise<ArrayBuffer> =>
@@ -75,7 +97,10 @@ const api = {
       return () => ipcRenderer.removeListener('reminder:fired', listener)
     }
   },
-  system: { platform: process.platform }
+  system: {
+    platform: process.platform,
+    openExternal: (url: string): Promise<boolean> => ipcRenderer.invoke('system:openExternal', url)
+  }
 }
 
 contextBridge.exposeInMainWorld('ares', api)
