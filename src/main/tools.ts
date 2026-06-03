@@ -1,4 +1,4 @@
-import type { WeatherResult, NewsItem, WebResult } from '../shared/types'
+import type { ReverseGeocodeResult, UserLocation, WeatherResult, NewsItem, WebResult } from '../shared/types'
 
 // Ferramentas de consulta externas (sem chave de API):
 // - Clima: Open-Meteo (geocoding + forecast)
@@ -40,6 +40,32 @@ const WEATHER_CODES: Record<number, string> = {
   99: 'tempestade forte com granizo'
 }
 
+async function forecastByCoords(lat: number, lon: number, label: string): Promise<WeatherResult> {
+  const fTxt = await fetchText(
+    `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+      `&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m` +
+      `&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto`
+  )
+  const f = JSON.parse(fTxt)
+  const code = f.current.weather_code
+  return {
+    city: label,
+    current: {
+      temp: Math.round(f.current.temperature_2m),
+      feels: Math.round(f.current.apparent_temperature),
+      code,
+      desc: WEATHER_CODES[code] || 'tempo indefinido',
+      wind: Math.round(f.current.wind_speed_10m),
+      humidity: Math.round(f.current.relative_humidity_2m)
+    },
+    today: {
+      min: Math.round(f.daily.temperature_2m_min[0]),
+      max: Math.round(f.daily.temperature_2m_max[0]),
+      precipProb: f.daily.precipitation_probability_max?.[0] ?? 0
+    }
+  }
+}
+
 export async function getWeather(city: string): Promise<WeatherResult> {
   const q = (city || '').trim()
   if (!q) throw new Error('Diga uma cidade para eu consultar o tempo.')
@@ -54,28 +80,36 @@ export async function getWeather(city: string): Promise<WeatherResult> {
   }
   const loc = geo?.results?.[0]
   if (!loc) throw new Error(`Não encontrei a cidade "${q}".`)
-  const fTxt = await fetchText(
-    `https://api.open-meteo.com/v1/forecast?latitude=${loc.latitude}&longitude=${loc.longitude}` +
-      `&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m` +
-      `&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto`
-  )
-  const f = JSON.parse(fTxt)
-  const code = f.current.weather_code
-  return {
-    city: `${loc.name}${loc.admin1 ? ', ' + loc.admin1 : ''}`,
-    current: {
-      temp: Math.round(f.current.temperature_2m),
-      feels: Math.round(f.current.apparent_temperature),
-      code,
-      desc: WEATHER_CODES[code] || 'tempo indefinido',
-      wind: Math.round(f.current.wind_speed_10m),
-      humidity: Math.round(f.current.relative_humidity_2m)
-    },
-    today: {
-      min: Math.round(f.daily.temperature_2m_min[0]),
-      max: Math.round(f.daily.temperature_2m_max[0]),
-      precipProb: f.daily.precipitation_probability_max?.[0] ?? 0
-    }
+  return forecastByCoords(loc.latitude, loc.longitude, `${loc.name}${loc.admin1 ? ', ' + loc.admin1 : ''}`)
+}
+
+export async function getWeatherAt(location: UserLocation): Promise<WeatherResult> {
+  if (!location.enabled || typeof location.latitude !== 'number' || typeof location.longitude !== 'number') {
+    throw new Error('Localização precisa não está ativada.')
+  }
+  const label = location.label || location.city || 'sua localização'
+  try {
+    return await forecastByCoords(location.latitude, location.longitude, label)
+  } catch {
+    throw new Error('Não consegui consultar o clima pela sua localização agora.')
+  }
+}
+
+export async function reverseGeocode(latitude: number, longitude: number): Promise<ReverseGeocodeResult> {
+  try {
+    const txt = await fetchText(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(latitude)}` +
+        `&lon=${encodeURIComponent(longitude)}&zoom=10&accept-language=pt-BR`
+    )
+    const json = JSON.parse(txt)
+    const addr = json?.address || {}
+    const city = addr.city || addr.town || addr.village || addr.municipality || addr.county
+    const region = addr.state || addr.region
+    const country = addr.country
+    const label = [city, region].filter(Boolean).join(', ') || json?.display_name || 'localização atual'
+    return { city, region, country, label }
+  } catch {
+    return { label: 'localização atual' }
   }
 }
 

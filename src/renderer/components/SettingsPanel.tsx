@@ -3,7 +3,7 @@ import { useAres } from '../lib/store'
 import { ptVoices } from '../lib/tts'
 
 export default function SettingsPanel(): JSX.Element {
-  const { settingsOpen, openSettings, config, voices, piper, saveConfig, testVoice } = useAres()
+  const { settingsOpen, openSettings, config, voices, piper, saveConfig, testVoice, locateUser } = useAres()
   const pt = ptVoices(voices)
 
   return (
@@ -167,6 +167,31 @@ export default function SettingsPanel(): JSX.Element {
             </Section>
 
             <Section title="INTEGRAÇÕES">
+              <Toggle
+                label="Usar localização aproximada"
+                checked={config.integrations.location.enabled}
+                onChange={(v) =>
+                  saveConfig({ integrations: { ...config.integrations, location: { ...config.integrations.location, enabled: v } } })
+                }
+              />
+              <div className="rounded-lg border border-cyan-300/15 bg-black/20 p-3">
+                <p className="text-xs text-cyan-100/85">
+                  {config.integrations.location.label ||
+                    config.integrations.location.city ||
+                    'Localização ainda não detectada.'}
+                </p>
+                {config.integrations.location.updatedAt && (
+                  <p className="mt-1 text-[11px] text-cyan-200/45">
+                    Atualizada em {new Date(config.integrations.location.updatedAt).toLocaleString('pt-BR')}
+                    {config.integrations.location.accuracy
+                      ? ` · precisão aprox. ${Math.round(config.integrations.location.accuracy)}m`
+                      : ''}
+                  </p>
+                )}
+                <button onClick={() => locateUser()} className="btn-ghost mt-3">
+                  DETECTAR AGORA
+                </button>
+              </div>
               <Field label="Cidade padrão do clima">
                 <input
                   className="input"

@@ -15,8 +15,21 @@ export interface AppConfig {
   integrations: {
     weatherCity: string // cidade padrão (widget de clima)
     newsTopic: string // tema padrão de notícias ("" = manchetes gerais)
+    location: UserLocation // localização aproximada local, com permissão do usuário
   }
   ui: { continuousMode: boolean }
+}
+
+export interface UserLocation {
+  enabled: boolean
+  latitude?: number
+  longitude?: number
+  accuracy?: number
+  city?: string
+  region?: string
+  country?: string
+  label?: string
+  updatedAt?: number
 }
 
 export interface ChatMessage {
@@ -142,4 +155,11 @@ export interface TtsStatus {
   ready: boolean
   voices: string[]
   platform: string
+}
+
+export interface ReverseGeocodeResult {
+  city?: string
+  region?: string
+  country?: string
+  label: string
 }

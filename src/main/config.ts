@@ -33,7 +33,7 @@ const DEFAULT_CONFIG: AppConfig = {
     pitch: 1.0,
     volume: 1.0
   },
-  integrations: { weatherCity: 'São Paulo', newsTopic: '' },
+  integrations: { weatherCity: 'São Paulo', newsTopic: '', location: { enabled: true } },
   ui: { continuousMode: false }
 }
 

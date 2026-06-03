@@ -127,6 +127,49 @@ function Core({ state }: { state: AresState }): JSX.Element {
   )
 }
 
+function EnergyShell({ state }: { state: AresState }): JSX.Element {
+  const shellRef = useRef<THREE.Group>(null)
+  const matRef = useRef<THREE.MeshBasicMaterial>(null)
+  useFrame((_, delta) => {
+    const active = state === 'thinking' || state === 'speaking'
+    if (shellRef.current) {
+      shellRef.current.rotation.y -= delta * (active ? 0.34 : 0.16)
+      shellRef.current.rotation.z += delta * (active ? 0.18 : 0.07)
+      const pulse = 1 + Math.sin(performance.now() / 560) * (active ? 0.035 : 0.015)
+      shellRef.current.scale.setScalar(pulse)
+    }
+    if (matRef.current) {
+      const targetOpacity = state === 'idle' ? 0.12 : state === 'listening' ? 0.2 : 0.26
+      matRef.current.opacity += (targetOpacity - matRef.current.opacity) * Math.min(1, delta * 5)
+    }
+  })
+  return (
+    <group ref={shellRef}>
+      <mesh scale={1.72}>
+        <icosahedronGeometry args={[1.15, 3]} />
+        <meshBasicMaterial
+          ref={matRef}
+          color={'#6ee7ff'}
+          transparent
+          opacity={0.14}
+          wireframe
+          blending={THREE.AdditiveBlending}
+        />
+      </mesh>
+      <mesh scale={1.98} rotation={[0.42, 0.18, 0.2]}>
+        <sphereGeometry args={[1.15, 32, 16]} />
+        <meshBasicMaterial
+          color={'#376cff'}
+          transparent
+          opacity={0.055}
+          wireframe
+          blending={THREE.AdditiveBlending}
+        />
+      </mesh>
+    </group>
+  )
+}
+
 function Rings({ state }: { state: AresState }): JSX.Element {
   const g = useRef<THREE.Group>(null)
   const speed = useRef(0.2)
@@ -148,6 +191,14 @@ function Rings({ state }: { state: AresState }): JSX.Element {
         <torusGeometry args={[2.55, 0.008, 16, 160]} />
         <meshBasicMaterial color={'#6a78ff'} transparent opacity={0.3} blending={THREE.AdditiveBlending} />
       </mesh>
+      <mesh rotation={[Math.PI / 2.05, -Math.PI / 5.5, Math.PI / 7]}>
+        <torusGeometry args={[3.05, 0.006, 16, 180]} />
+        <meshBasicMaterial color={'#7df0ff'} transparent opacity={0.2} blending={THREE.AdditiveBlending} />
+      </mesh>
+      <mesh rotation={[Math.PI / 1.25, Math.PI / 3.2, Math.PI / 4]}>
+        <torusGeometry args={[1.55, 0.01, 16, 140]} />
+        <meshBasicMaterial color={'#b8fbff'} transparent opacity={0.22} blending={THREE.AdditiveBlending} />
+      </mesh>
     </group>
   )
 }
@@ -155,10 +206,10 @@ function Rings({ state }: { state: AresState }): JSX.Element {
 function Particles(): JSX.Element {
   const ref = useRef<THREE.Points>(null)
   const geom = useMemo(() => {
-    const N = 420
+    const N = 620
     const arr = new Float32Array(N * 3)
     for (let i = 0; i < N; i++) {
-      const r = 2.6 + Math.random() * 1.8
+      const r = 2.3 + Math.random() * 2.45
       const th = Math.random() * Math.PI * 2
       const ph = Math.acos(2 * Math.random() - 1)
       arr[i * 3] = r * Math.sin(ph) * Math.cos(th)
@@ -174,7 +225,7 @@ function Particles(): JSX.Element {
   })
   return (
     <points ref={ref} geometry={geom}>
-      <pointsMaterial color={'#7fdcff'} size={0.02} transparent opacity={0.7} blending={THREE.AdditiveBlending} />
+      <pointsMaterial color={'#7fdcff'} size={0.018} transparent opacity={0.74} blending={THREE.AdditiveBlending} />
     </points>
   )
 }
@@ -182,14 +233,17 @@ function Particles(): JSX.Element {
 export default function Orb3D({ state }: { state: AresState }): JSX.Element {
   return (
     <Canvas
-      camera={{ position: [0, 0, 4.2], fov: 50 }}
+      camera={{ position: [0, 0, 6.1], fov: 40 }}
       dpr={[1, 2]}
       gl={{ antialias: true, alpha: true }}
       style={{ width: '100%', height: '100%' }}
     >
-      <Core state={state} />
-      <Rings state={state} />
-      <Particles />
+      <group scale={0.72}>
+        <EnergyShell state={state} />
+        <Core state={state} />
+        <Rings state={state} />
+        <Particles />
+      </group>
     </Canvas>
   )
 }

@@ -50,6 +50,8 @@ export function getLevel(): number {
   return Math.min(1, Math.sqrt(sum / _timeBuf.length) * 3.2)
 }
 
+const waitFrame = () => new Promise<number>((resolve) => requestAnimationFrame(resolve))
+
 /** Começa a gravar (push-to-talk). Reaproveita o stream já aberto. */
 export async function startRecording(): Promise<void> {
   await ensureMic()
@@ -82,28 +84,48 @@ export function stopRecording(): Promise<{ blob: Blob; mimeType: string }> {
  * a falar (até maxWaitMs) e encerra após silenceMs de silêncio, ou no máximo maxMs.
  */
 export async function recordUntilSilence(
-  opts: { silenceMs?: number; maxWaitMs?: number; maxMs?: number; threshold?: number } = {}
+  opts: { silenceMs?: number; maxWaitMs?: number; maxMs?: number; threshold?: number; shouldStop?: () => boolean } = {}
 ): Promise<{ blob: Blob; mimeType: string; spoke: boolean }> {
-  const silenceMs = opts.silenceMs ?? 1100
-  const maxWaitMs = opts.maxWaitMs ?? 6000
-  const maxMs = opts.maxMs ?? 14000
-  const threshold = opts.threshold ?? 0.06
+  const silenceMs = opts.silenceMs ?? 1350
+  const maxWaitMs = opts.maxWaitMs ?? 10000
+  const maxMs = opts.maxMs ?? 24000
+  const baseThreshold = opts.threshold ?? 0.045
 
   await startRecording()
+  const calibrationStart = performance.now()
+  const samples: number[] = []
+  while (performance.now() - calibrationStart < 520 && !opts.shouldStop?.()) {
+    samples.push(getLevel())
+    await waitFrame()
+  }
+  samples.sort((a, b) => a - b)
+  const ambient = samples[Math.floor(samples.length * 0.8)] ?? 0
+  const threshold = Math.max(baseThreshold, ambient * 2.6 + 0.018)
+  const releaseThreshold = threshold * 0.72
+
   const start = performance.now()
   let spoke = false
   let lastVoice = start
+  let voiceMs = 0
+  let lastTick = start
 
   await new Promise<void>((resolve) => {
     const tick = () => {
       const now = performance.now()
+      const dt = now - lastTick
+      lastTick = now
+      if (opts.shouldStop?.()) return resolve()
       const level = getLevel()
       if (level > threshold) {
-        spoke = true
+        voiceMs += dt
         lastVoice = now
+      } else {
+        voiceMs = Math.max(0, voiceMs - dt * 0.45)
+        if (spoke && level > releaseThreshold) lastVoice = now
       }
+      if (!spoke && voiceMs >= 180) spoke = true
       const waitedTooLong = !spoke && now - start > maxWaitMs
-      const silentEnough = spoke && now - lastVoice > silenceMs
+      const silentEnough = spoke && now - lastVoice > silenceMs && now - start > 900
       const hardStop = now - start > maxMs
       if (waitedTooLong || silentEnough || hardStop) return resolve()
       requestAnimationFrame(tick)

@@ -7,8 +7,10 @@ import type {
   ChatSession,
   MemoryFact,
   NewsItem,
+  ReverseGeocodeResult,
   SessionMeta,
   TtsStatus,
+  UserLocation,
   WeatherResult
 } from '../shared/types'
 
@@ -56,7 +58,12 @@ const api = {
     status: (): Promise<TtsStatus> => ipcRenderer.invoke('tts:status')
   },
   weather: {
-    get: (city: string): Promise<WeatherResult> => ipcRenderer.invoke('weather:get', city)
+    get: (city: string): Promise<WeatherResult> => ipcRenderer.invoke('weather:get', city),
+    getCurrent: (location: UserLocation): Promise<WeatherResult> => ipcRenderer.invoke('weather:getCurrent', location)
+  },
+  location: {
+    reverse: (latitude: number, longitude: number): Promise<ReverseGeocodeResult> =>
+      ipcRenderer.invoke('location:reverse', latitude, longitude)
   },
   news: {
     get: (topic: string): Promise<NewsItem[]> => ipcRenderer.invoke('news:get', topic)

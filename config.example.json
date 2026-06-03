@@ -27,9 +27,20 @@
   },
 
   "integrations": {
-    "_doc": "Integrações sem chave: clima Open-Meteo, busca DuckDuckGo HTML, notícias Google News RSS.",
+    "_doc": "Integrações sem chave: clima Open-Meteo, geolocalização local via Chromium + Nominatim, busca DuckDuckGo HTML, notícias Google News RSS.",
     "weatherCity": "São Paulo",
-    "newsTopic": ""
+    "newsTopic": "",
+    "location": {
+      "enabled": true,
+      "latitude": null,
+      "longitude": null,
+      "accuracy": null,
+      "city": "",
+      "region": "",
+      "country": "",
+      "label": "",
+      "updatedAt": null
+    }
   },
 
   "ui": {

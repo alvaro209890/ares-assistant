@@ -8,6 +8,7 @@ import type {
   MemoryFact,
   SessionMeta,
   TtsStatus,
+  UserLocation,
   WeatherResult
 } from '../../shared/types'
 import * as audio from './audio'
@@ -52,6 +53,7 @@ interface AresStore {
   endPushToTalk: () => Promise<void>
   toggleContinuous: () => void
   clearError: () => void
+  locateUser: () => Promise<void>
   testVoice: (text?: string) => Promise<void>
   refreshWidgets: () => Promise<void>
   createSession: () => Promise<void>
@@ -119,9 +121,11 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
 
   const refreshWidgets = useCallback(async () => {
     const cfg = configRef.current
-    if (!cfg?.integrations.weatherCity) return
+    if (!cfg) return
     try {
-      setWeather(await window.ares.weather.get(cfg.integrations.weatherCity))
+      const loc = cfg.integrations.location
+      const hasLocation = loc.enabled && typeof loc.latitude === 'number' && typeof loc.longitude === 'number'
+      setWeather(hasLocation ? await window.ares.weather.getCurrent(loc) : await window.ares.weather.get(cfg.integrations.weatherCity))
     } catch {
       setWeather(null)
     }
@@ -261,8 +265,8 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
         if (result.notes.length) showToast(result.notes.join('   ·   '))
         await refreshSessions()
         void refreshWidgets()
-        busyRef.current = false
         await speakText(result.fala)
+        busyRef.current = false
       } catch (e) {
         setConversation((prev) => prev.filter((m) => m.id !== assistantId))
         setError(errMsg(e))
@@ -336,18 +340,23 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
           continue
         }
         setAresState('listening')
+        setStatus('Conversa contínua: aguardando sua fala.')
         setRecording(true)
         let res: { blob: Blob; mimeType: string; spoke: boolean }
         try {
-          res = await audio.recordUntilSilence()
+          res = await audio.recordUntilSilence({ shouldStop: () => !continuousRef.current })
         } catch {
           setError('Microfone indisponível para o modo contínuo.')
           break
         }
         setRecording(false)
         if (!continuousRef.current) break
-        if (!res.spoke) continue
+        if (!res.spoke) {
+          setStatus('Conversa contínua: ainda ouvindo.')
+          continue
+        }
         setAresState('thinking')
+        setStatus('Transcrevendo sua fala.')
         let text = ''
         try {
           text = await transcribeBlob(res.blob, res.mimeType)
@@ -355,7 +364,13 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
           setError(errMsg(e))
           break
         }
-        if (text.trim()) await runTurn(text)
+        if (text.trim()) {
+          setStatus('')
+          await runTurn(text)
+          if (continuousRef.current) await new Promise((r) => setTimeout(r, 420))
+        } else {
+          setStatus('Não captei fala útil. Continuo ouvindo.')
+        }
       }
     } finally {
       loopRef.current = false
@@ -372,9 +387,36 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
       configRef.current = nc
       setConfig(nc)
     })
-    if (next) void continuousLoop()
-    else cancelSpeech()
+    if (next) {
+      setStatus('Preparando microfone para conversa contínua.')
+      void audio
+        .ensureMic()
+        .then(() => continuousLoop())
+        .catch(() => {
+          continuousRef.current = false
+          setContinuous(false)
+          setStatus('')
+          setError('Não consegui acessar o microfone para conversa contínua.')
+        })
+    } else {
+      setStatus('')
+      cancelSpeech()
+    }
   }, [continuousLoop])
+
+  useEffect(() => {
+    if (!ready || !continuousRef.current || loopRef.current) return
+    setStatus('Retomando conversa contínua.')
+    void audio
+      .ensureMic()
+      .then(() => continuousLoop())
+      .catch(() => {
+        continuousRef.current = false
+        setContinuous(false)
+        setStatus('')
+        setError('Não consegui retomar a conversa contínua porque o microfone está indisponível.')
+      })
+  }, [ready, continuous, continuousLoop])
 
   const saveConfig = useCallback(
     async (patch: Partial<AppConfig>) => {
@@ -386,6 +428,54 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     },
     [refreshWidgets]
   )
+
+  const locateUser = useCallback(async () => {
+    const cfg = configRef.current
+    if (!cfg) return
+    if (!navigator.geolocation) {
+      setStatus('Geolocalização indisponível neste sistema.')
+      return
+    }
+    setStatus('Solicitando localização aproximada.')
+    try {
+      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: false,
+          timeout: 10000,
+          maximumAge: 10 * 60 * 1000
+        })
+      })
+      const { latitude, longitude, accuracy } = pos.coords
+      const reverse = await window.ares.location.reverse(latitude, longitude)
+      const location: UserLocation = {
+        ...cfg.integrations.location,
+        enabled: true,
+        latitude,
+        longitude,
+        accuracy,
+        city: reverse.city,
+        region: reverse.region,
+        country: reverse.country,
+        label: reverse.label,
+        updatedAt: Date.now()
+      }
+      const nc = await window.ares.config.update({ integrations: { ...cfg.integrations, location } })
+      configRef.current = nc
+      setConfig(nc)
+      setStatus('')
+      showToast(`localização: ${location.label || 'atualizada'}`)
+      await refreshWidgets()
+    } catch {
+      setStatus('Não consegui acessar sua localização. Verifique a permissão do sistema.')
+    }
+  }, [refreshWidgets, showToast])
+
+  useEffect(() => {
+    const loc = config?.integrations.location
+    if (!ready || !loc?.enabled || typeof loc.latitude === 'number') return
+    const timer = setTimeout(() => void locateUser(), 1200)
+    return () => clearTimeout(timer)
+  }, [ready, config?.integrations.location, locateUser])
 
   const testVoice = useCallback(
     async (text = 'Olá, senhor. Aqui é o Ares, com voz neural pronta para ajudar.') => {
@@ -491,6 +581,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     endPushToTalk,
     toggleContinuous,
     clearError,
+    locateUser,
     testVoice,
     refreshWidgets,
     createSession,

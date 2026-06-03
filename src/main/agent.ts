@@ -1,4 +1,4 @@
-import type { Acao, AgentTurnResult, Board, CalendarEvent, ChatMessage, MemoryFact } from '../shared/types'
+import type { Acao, AgentTurnResult, AppConfig, Board, CalendarEvent, ChatMessage, MemoryFact, UserLocation } from '../shared/types'
 import { readConfig } from './config'
 import { chatJSON } from './ninerouter'
 import { parseEnvelope, QUERY_TOOLS } from '../shared/protocol'
@@ -15,7 +15,7 @@ import {
   appendMessages,
   setSessionSummary
 } from './data'
-import { getWeather, getNews, webSearch } from './tools'
+import { getWeather, getWeatherAt, getNews, webSearch } from './tools'
 
 const norm = (s: unknown) => String(s ?? '').toLowerCase().trim()
 const uid = (p: string) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
@@ -52,6 +52,7 @@ function buildSystemPrompt(ctx: {
   facts: MemoryFact[]
   board: Board
   events: CalendarEvent[]
+  location: UserLocation
   summary?: string
 }): string {
   const now = new Date()
@@ -61,11 +62,16 @@ function buildSystemPrompt(ctx: {
     .slice(0, 8)
     .map((e) => `- ${new Date(e.whenISO).toLocaleString('pt-BR')}: ${e.title}`)
     .join('\n')
+  const loc =
+    ctx.location.enabled && typeof ctx.location.latitude === 'number' && typeof ctx.location.longitude === 'number'
+      ? `${ctx.location.label || ctx.location.city || 'localização atual'} (aprox.; precisão ${Math.round(ctx.location.accuracy || 0)}m)`
+      : '(não disponível; use a cidade padrão quando necessário)'
   return [
     PERSONA,
     toolDocs(),
     `# CONTEXTO`,
     `Agora: ${now.toLocaleString('pt-BR')} (ISO ${now.toISOString()})`,
+    `## Localização aproximada do usuário\n${loc}`,
     `## Sobre o usuário (memória de longo prazo)\n${factsTxt}`,
     `## Tarefas atuais\n${boardSummary(ctx.board)}`,
     `## Próximos eventos\n${upcoming || '(nenhum)'}`,
@@ -75,11 +81,18 @@ function buildSystemPrompt(ctx: {
     .join('\n\n')
 }
 
-async function runQuery(a: Acao, defaultCity: string): Promise<unknown> {
+async function runQuery(a: Acao, integrations: AppConfig['integrations']): Promise<unknown> {
   try {
     switch (a.tipo) {
-      case 'clima.consultar':
-        return { tipo: a.tipo, resultado: await getWeather(String(a.cidade || defaultCity)) }
+      case 'clima.consultar': {
+        const city = String(a.cidade || '').trim()
+        const resultado = city
+          ? await getWeather(city)
+          : integrations.location.enabled && typeof integrations.location.latitude === 'number'
+            ? await getWeatherAt(integrations.location)
+            : await getWeather(integrations.weatherCity)
+        return { tipo: a.tipo, resultado }
+      }
       case 'web.buscar':
         return { tipo: a.tipo, resultado: await webSearch(String(a.consulta || a.query || '')) }
       case 'noticias.listar':
@@ -144,6 +157,7 @@ export async function runTurn(sessionId: string, userText: string): Promise<Agen
     facts: loadMemory(),
     board: loadBoard(),
     events: loadEvents(),
+    location: cfg.integrations.location,
     summary: session?.summary
   })
   const messages: ChatMessage[] = [
@@ -159,7 +173,7 @@ export async function runTurn(sessionId: string, userText: string): Promise<Agen
 
   if (queries.length) {
     const results: unknown[] = []
-    for (const q of queries) results.push(await runQuery(q, cfg.integrations.weatherCity))
+    for (const q of queries) results.push(await runQuery(q, cfg.integrations))
     const followup: ChatMessage[] = [
       ...messages,
       { role: 'assistant', content: env.fala || '...' },

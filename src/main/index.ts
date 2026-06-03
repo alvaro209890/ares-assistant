@@ -6,7 +6,7 @@ import { transcribe } from './grog'
 import { runTurn } from './agent'
 import { startReminders } from './notify'
 import { synthesize, listPiperVoices, isPiperReady, ensurePiper } from './piper'
-import { getWeather, getNews } from './tools'
+import { getWeather, getWeatherAt, getNews, reverseGeocode } from './tools'
 import {
   loadMemory,
   addFact,
@@ -21,7 +21,7 @@ import {
   renameSession,
   deleteSession
 } from './data'
-import type { AppConfig, Board, CalendarEvent } from '../shared/types'
+import type { AppConfig, Board, CalendarEvent, UserLocation } from '../shared/types'
 
 // Nome do app: define userData (Linux: ~/.config/ares) com config/tasks/memória/etc.
 app.setName('ares')
@@ -59,10 +59,20 @@ app.whenReady().then(() => {
   ensureConfig()
 
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => {
-    cb(permission === 'media' || String(permission) === 'audioCapture' || permission === 'notifications')
+    cb(
+      permission === 'media' ||
+        String(permission) === 'audioCapture' ||
+        permission === 'notifications' ||
+        permission === 'geolocation'
+    )
   })
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => {
-    return permission === 'media' || String(permission) === 'audioCapture' || permission === 'notifications'
+    return (
+      permission === 'media' ||
+      String(permission) === 'audioCapture' ||
+      permission === 'notifications' ||
+      permission === 'geolocation'
+    )
   })
 
   registerIpc()
@@ -129,5 +139,7 @@ function registerIpc(): void {
 
   // Widgets / consultas diretas
   ipcMain.handle('weather:get', (_e, city: string) => getWeather(city))
+  ipcMain.handle('weather:getCurrent', (_e, location: UserLocation) => getWeatherAt(location))
+  ipcMain.handle('location:reverse', (_e, latitude: number, longitude: number) => reverseGeocode(latitude, longitude))
   ipcMain.handle('news:get', (_e, topic: string) => getNews(topic))
 }

@@ -69,12 +69,154 @@ body {
   -webkit-backdrop-filter: blur(18px);
 }
 
+.ares-orb-stage {
+  background:
+    linear-gradient(180deg, rgba(13, 26, 48, 0.72), rgba(3, 8, 18, 0.84)),
+    radial-gradient(circle at 50% 48%, rgba(56, 225, 255, 0.18), transparent 38%),
+    linear-gradient(135deg, rgba(43, 108, 255, 0.12), transparent 48%);
+}
+
+.ares-stage-grid,
+.ares-stage-vignette,
+.ares-stage-scan {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+}
+
+.ares-stage-grid {
+  background-image:
+    linear-gradient(rgba(95, 220, 255, 0.075) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(95, 220, 255, 0.055) 1px, transparent 1px),
+    linear-gradient(rgba(95, 220, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(95, 220, 255, 0.03) 1px, transparent 1px);
+  background-size:
+    88px 88px,
+    88px 88px,
+    22px 22px,
+    22px 22px;
+  mask-image: radial-gradient(circle at 50% 48%, black 0 38%, transparent 78%);
+  -webkit-mask-image: radial-gradient(circle at 50% 48%, black 0 38%, transparent 78%);
+}
+
+.ares-stage-vignette {
+  background:
+    linear-gradient(90deg, rgba(4, 7, 15, 0.86), transparent 18%, transparent 82%, rgba(4, 7, 15, 0.86)),
+    linear-gradient(180deg, rgba(4, 7, 15, 0.72), transparent 24%, transparent 68%, rgba(4, 7, 15, 0.94));
+}
+
+.ares-stage-scan {
+  height: 22%;
+  background: linear-gradient(180deg, transparent, rgba(56, 225, 255, 0.08), transparent);
+  animation: ares-stage-scan 7s linear infinite;
+}
+
+.ares-hud-disc {
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(104, 224, 255, 0.18);
+  border-radius: 9999px;
+  box-shadow:
+    inset 0 0 38px rgba(56, 225, 255, 0.055),
+    0 0 42px rgba(43, 108, 255, 0.08);
+}
+
+.ares-orb-reticle {
+  width: min(52vh, 520px, 62vw);
+  min-width: 320px;
+  max-width: calc(100% - 180px);
+}
+
+.ares-hud-disc::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg 28deg,
+    rgba(56, 225, 255, 0.72) 30deg 34deg,
+    transparent 36deg 96deg,
+    rgba(106, 120, 255, 0.58) 99deg 104deg,
+    transparent 108deg 214deg,
+    rgba(94, 240, 255, 0.64) 218deg 223deg,
+    transparent 226deg 360deg
+  );
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), black calc(100% - 1px));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), black calc(100% - 1px));
+}
+
+.ares-hud-disc-outer {
+  animation: ares-hud-spin 24s linear infinite;
+}
+
+.ares-hud-disc-mid {
+  inset: 10%;
+  animation: ares-hud-spin 17s linear infinite reverse;
+}
+
+.ares-hud-disc-inner {
+  inset: 24%;
+  border-style: dashed;
+  opacity: 0.72;
+  animation: ares-hud-spin 11s linear infinite;
+}
+
+.ares-hud-axis {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(56, 225, 255, 0.3), transparent);
+  transform-origin: center;
+}
+
+.ares-hud-axis-x {
+  transform: translate(-50%, -50%);
+}
+
+.ares-hud-axis-y {
+  transform: translate(-50%, -50%) rotate(90deg);
+}
+
+.ares-metric-panel {
+  background: linear-gradient(180deg, rgba(7, 18, 35, 0.72), rgba(6, 14, 28, 0.48));
+  border: 1px solid rgba(86, 200, 255, 0.2);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 12px 30px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
 .neon-text {
   text-shadow: 0 0 12px rgba(56, 225, 255, 0.55);
 }
 
 .title-track {
   letter-spacing: 0;
+}
+
+@keyframes ares-stage-scan {
+  0% {
+    transform: translateY(-120%);
+    opacity: 0;
+  }
+  18%,
+  70% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(520%);
+    opacity: 0;
+  }
+}
+
+@keyframes ares-hud-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Barra de rolagem temática. */

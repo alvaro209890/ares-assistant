@@ -13,15 +13,16 @@ const sameDay = (iso: string, ref = new Date()) => {
 
 export default function Assistant(): JSX.Element {
   const { aresState, conversation, status, weather, events, board, createSession } = useAres()
-  const todayEvents = useMemo(() => events.filter((e) => sameDay(e.whenISO)).slice(0, 4), [events])
+  const todayEvents = useMemo(() => events.filter((e) => sameDay(e.whenISO)).slice(0, 3), [events])
   const reminders = useMemo(
     () =>
       Object.values(board.cards)
         .filter((c) => c.reminderAt && !c.done && !c.reminded)
         .sort((a, b) => String(a.reminderAt).localeCompare(String(b.reminderAt)))
-        .slice(0, 4),
+        .slice(0, 3),
     [board.cards]
   )
+  const openTasks = useMemo(() => Object.values(board.cards).filter((c) => !c.done).length, [board.cards])
 
   return (
     <motion.div
@@ -29,70 +30,63 @@ export default function Assistant(): JSX.Element {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="flex h-full gap-4 px-7 pb-6"
+      className="grid h-full grid-cols-[minmax(0,1fr)_420px] gap-4 px-7 pb-6"
     >
-      <div className="glass relative flex-1 overflow-hidden rounded-2xl">
-        <div className="pointer-events-none absolute left-1/2 top-[42%] h-[440px] w-[440px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-cyan-400/10 blur-[90px]" />
+      <section className="ares-orb-stage glass relative min-w-0 overflow-hidden rounded-2xl">
+        <div className="ares-stage-grid" />
+        <div className="ares-stage-vignette" />
+        <div className="ares-stage-scan" />
 
-        <div className="absolute left-5 top-5 z-10 grid w-[260px] gap-3">
-          <Widget title="CLIMA">
-            {weather ? (
-              <>
-                <div className="text-lg text-cyan-50">{weather.current.temp}°C</div>
-                <p className="text-xs text-cyan-200/60">
-                  {weather.city} · {weather.current.desc}
-                </p>
-                <p className="mt-1 text-[11px] text-cyan-200/45">
-                  Sensação {weather.current.feels}°C · chuva {weather.today.precipProb}%
-                </p>
-              </>
-            ) : (
-              <p className="text-xs text-cyan-200/45">Clima indisponível no momento.</p>
-            )}
-          </Widget>
-          <Widget title="HOJE">
-            {todayEvents.length ? (
-              todayEvents.map((e) => (
-                <p key={e.id} className="truncate text-xs text-cyan-100/85">
-                  {new Date(e.whenISO).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} · {e.title}
-                </p>
-              ))
-            ) : (
-              <p className="text-xs text-cyan-200/45">Sem eventos para hoje.</p>
-            )}
-          </Widget>
+        <div className="absolute inset-x-5 top-5 z-20 grid grid-cols-3 gap-3">
+          <Metric title="CLIMA" value={weather ? `${weather.current.temp}°C` : 'OFFLINE'}>
+            {weather ? `${weather.city} · ${weather.current.desc}` : 'Sem dados externos'}
+          </Metric>
+          <Metric title="AGENDA" value={String(todayEvents.length).padStart(2, '0')}>
+            {todayEvents[0]
+              ? `${new Date(todayEvents[0].whenISO).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} · ${todayEvents[0].title}`
+              : 'Dia livre'}
+          </Metric>
+          <Metric title="TAREFAS" value={String(openTasks).padStart(2, '0')}>
+            {reminders[0]
+              ? `Lembrete ${new Date(String(reminders[0].reminderAt)).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
+              : 'Sem alertas'}
+          </Metric>
         </div>
 
-        <div className="absolute right-5 top-5 z-10 w-[260px]">
-          <Widget title="LEMBRETES">
-            {reminders.length ? (
-              reminders.map((c) => (
-                <p key={c.id} className="truncate text-xs text-cyan-100/85">
-                  {new Date(String(c.reminderAt)).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })} · {c.title}
-                </p>
-              ))
-            ) : (
-              <p className="text-xs text-cyan-200/45">Nenhum lembrete pendente.</p>
-            )}
-          </Widget>
+        <div className="ares-orb-reticle pointer-events-none absolute left-1/2 top-[51%] z-0 aspect-square -translate-x-1/2 -translate-y-1/2">
+          <div className="ares-hud-disc ares-hud-disc-outer" />
+          <div className="ares-hud-disc ares-hud-disc-mid" />
+          <div className="ares-hud-disc ares-hud-disc-inner" />
+          <div className="ares-hud-axis ares-hud-axis-x" />
+          <div className="ares-hud-axis ares-hud-axis-y" />
         </div>
 
-        <div className="absolute inset-0">
+        <div className="absolute inset-0 z-10">
           <Orb3D state={aresState} />
         </div>
 
-        <div className="absolute left-1/2 top-6 -translate-x-1/2">
+        <div className="absolute left-1/2 top-[118px] z-30 -translate-x-1/2">
           <StateIndicator state={aresState} />
         </div>
 
-        {status && <div className="absolute left-1/2 top-20 -translate-x-1/2 text-xs text-amber-200/80">{status}</div>}
+        {status && (
+          <div className="absolute left-1/2 top-[158px] z-30 max-w-[520px] -translate-x-1/2 truncate rounded-full border border-amber-300/20 bg-black/25 px-3 py-1 text-xs text-amber-200/85 backdrop-blur-md">
+            {status}
+          </div>
+        )}
 
-        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-6">
+        <div className="pointer-events-none absolute bottom-[112px] left-1/2 z-20 flex w-[min(74%,680px)] -translate-x-1/2 items-center justify-between text-[10px] text-cyan-200/45">
+          <span>NEURAL CORE</span>
+          <span>ARES ONLINE</span>
+          <span>LOCAL MEMORY</span>
+        </div>
+
+        <div className="absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-[#04070f] via-[#04070f]/82 to-transparent p-6 pt-16">
           <Controls />
         </div>
-      </div>
+      </section>
 
-      <div className="glass flex w-[420px] flex-col rounded-2xl p-4">
+      <aside className="glass flex min-w-0 flex-col rounded-2xl p-4">
         <div className="mb-3 flex items-center justify-between px-1">
           <h3 className="text-xs title-track text-cyan-300/60">CONVERSA</h3>
           <button onClick={() => createSession()} className="text-xs text-cyan-200/60 hover:text-cyan-100">
@@ -102,16 +96,20 @@ export default function Assistant(): JSX.Element {
         <div className="min-h-0 flex-1">
           <Conversation messages={conversation} />
         </div>
-      </div>
+      </aside>
     </motion.div>
   )
 }
 
-function Widget({ title, children }: { title: string; children: React.ReactNode }): JSX.Element {
+function Metric({ title, value, children }: { title: string; value: string; children: React.ReactNode }): JSX.Element {
   return (
-    <div className="rounded-xl border border-cyan-300/15 bg-black/25 p-3 backdrop-blur-md">
-      <div className="mb-1 text-[10px] title-track text-cyan-300/45">{title}</div>
-      {children}
+    <div className="ares-metric-panel min-w-0 rounded-xl px-3 py-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] text-cyan-300/50">{title}</span>
+        <span className="h-1.5 w-1.5 rounded-full bg-cyan-300 shadow-glow" />
+      </div>
+      <div className="mt-1 truncate font-display text-xl text-cyan-50 neon-text">{value}</div>
+      <div className="mt-0.5 truncate text-[11px] text-cyan-200/50">{children}</div>
     </div>
   )
 }
