@@ -7,6 +7,8 @@ import { runTurn, extractFacts } from './agent'
 import { buildBriefing } from './briefing'
 import { getDiagnostics } from './diagnostics'
 import { initOverlay, toggleOverlay, setOverlayState, focusMain, requestListen } from './overlay'
+import { setupTray, destroyTray, registerGlobalShortcut, setAutostart } from './desktop'
+import { exportData, importData } from './backup'
 import { startReminders } from './notify'
 import { synthesize, listPiperVoices, isPiperReady, ensurePiper } from './piper'
 import { getWeather, getWeatherAt, getNews, reverseGeocode } from './tools'
@@ -24,9 +26,29 @@ import {
   getSession,
   createSession,
   renameSession,
-  deleteSession
+  deleteSession,
+  loadLists,
+  setLists,
+  loadNotes,
+  addNote,
+  removeNote,
+  loadReminders,
+  addReminder,
+  removeReminder,
+  setReminders
 } from './data'
-import type { AppConfig, AresState, Board, CalendarEvent, DeepPartial, MemoryCategory, UserLocation } from '../shared/types'
+import type {
+  AppConfig,
+  AresState,
+  Board,
+  CalendarEvent,
+  Checklist,
+  DeepPartial,
+  MemoryCategory,
+  Recurrence,
+  Reminder,
+  UserLocation
+} from '../shared/types'
 
 // Nome do app: define userData (Linux: ~/.config/ares) com config/tasks/memória/etc.
 app.setName('ares')
@@ -88,7 +110,11 @@ app.whenReady().then(() => {
   registerIpc()
   createWindow()
   initOverlay(() => mainWindow)
-  if (readConfig().ui.overlayEnabled) toggleOverlay(true)
+  const cfg0 = readConfig()
+  if (cfg0.ui.overlayEnabled) toggleOverlay(true)
+  setupTray(() => mainWindow)
+  registerGlobalShortcut(cfg0.ui.globalShortcut, () => mainWindow)
+  setAutostart(cfg0.ui.autostart)
   startReminders(() => mainWindow)
   // Garante o Piper (voz neural) em background; até ficar pronto, usa-se a Web Speech.
   ensurePiper().catch(() => {})
@@ -100,6 +126,10 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('will-quit', () => {
+  destroyTray()
 })
 
 function registerIpc(): void {
@@ -206,4 +236,54 @@ function registerIpc(): void {
   ipcMain.handle('weather:getCurrent', (_e, location: UserLocation) => getWeatherAt(location))
   ipcMain.handle('location:reverse', (_e, latitude: number, longitude: number) => reverseGeocode(latitude, longitude))
   ipcMain.handle('news:get', (_e, topic: string) => getNews(topic))
+
+  // Listas simples
+  ipcMain.handle('lists:load', () => loadLists())
+  ipcMain.handle('lists:save', (_e, lists: Checklist[]) => setLists(lists))
+
+  // Notas rápidas
+  ipcMain.handle('notes:load', () => loadNotes())
+  ipcMain.handle('notes:add', (_e, text: string) => addNote(text))
+  ipcMain.handle('notes:remove', (_e, id: string) => removeNote(id))
+
+  // Lembretes (remédio/rotina, timer, despertador)
+  ipcMain.handle('reminders:load', () => loadReminders())
+  ipcMain.handle(
+    'reminders:add',
+    (_e, r: { text: string; whenISO: string; recurrence?: Recurrence; kind?: Reminder['kind'] }) => addReminder(r)
+  )
+  ipcMain.handle('reminders:remove', (_e, id: string) => removeReminder(id))
+  ipcMain.handle('reminders:save', (_e, rs: Reminder[]) => setReminders(rs))
+
+  // Backup / restauração
+  ipcMain.handle('data:export', () => exportData())
+  ipcMain.handle('data:import', () => importData())
+
+  // Atalho global + iniciar com o sistema
+  ipcMain.handle('system:setGlobalShortcut', (_e, enabled: boolean): AppConfig => {
+    registerGlobalShortcut(!!enabled, () => mainWindow)
+    return updateConfig({ ui: { globalShortcut: !!enabled } })
+  })
+  ipcMain.handle('system:setAutostart', (_e, enabled: boolean): AppConfig => {
+    setAutostart(!!enabled)
+    return updateConfig({ ui: { autostart: !!enabled } })
+  })
+
+  // Teste rápido de conexão com o cérebro (9 Router)
+  ipcMain.handle('brain:test', async (): Promise<{ ok: boolean; detail: string }> => {
+    const cfg = readConfig()
+    const url = cfg.nineRouter.baseUrl.replace(/\/$/, '') + '/models'
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 3000)
+    try {
+      const headers: Record<string, string> = {}
+      if (cfg.nineRouter.apiKey) headers['Authorization'] = `Bearer ${cfg.nineRouter.apiKey}`
+      const res = await fetch(url, { signal: ctrl.signal, headers })
+      clearTimeout(timer)
+      return res.ok ? { ok: true, detail: 'Conexão OK' } : { ok: false, detail: `HTTP ${res.status}` }
+    } catch (e: any) {
+      clearTimeout(timer)
+      return { ok: false, detail: e?.name === 'AbortError' ? 'sem resposta (timeout)' : 'offline / inacessível' }
+    }
+  })
 }

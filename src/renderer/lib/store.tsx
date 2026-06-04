@@ -5,10 +5,14 @@ import type {
   BriefingData,
   CalendarEvent,
   ChatSession,
+  Checklist,
   AresState,
   DeepPartial,
   MemoryCategory,
   MemoryFact,
+  Note,
+  Recurrence,
+  Reminder,
   SessionMeta,
   TtsStatus,
   UserLocation,
@@ -25,7 +29,7 @@ export interface ConvMsg {
   pending?: boolean
 }
 
-type Screen = 'assistant' | 'tasks' | 'calendar' | 'memory' | 'system'
+type Screen = 'assistant' | 'tasks' | 'calendar' | 'reminders' | 'lists' | 'memory' | 'system'
 
 interface AresStore {
   ready: boolean
@@ -38,12 +42,16 @@ interface AresStore {
   board: Board
   memory: MemoryFact[]
   events: CalendarEvent[]
+  lists: Checklist[]
+  quickNotes: Note[]
+  reminders: Reminder[]
   voices: SpeechSynthesisVoice[]
   piper: TtsStatus | null
   weather: WeatherResult | null
   recording: boolean
   continuous: boolean
   settingsOpen: boolean
+  helpOpen: boolean
   briefing: BriefingData | null
   briefingLoading: boolean
   briefingOpen: boolean
@@ -53,6 +61,7 @@ interface AresStore {
 
   navigate: (s: Screen) => void
   openSettings: (b: boolean) => void
+  openHelp: (b: boolean) => void
   saveConfig: (patch: DeepPartial<AppConfig>) => Promise<void>
   setBoard: (updater: Board | ((b: Board) => Board)) => void
   sendText: (text: string) => Promise<void>
@@ -82,6 +91,17 @@ interface AresStore {
     recurrence?: CalendarEvent['recurrence']
   }) => Promise<void>
   removeEvent: (id: string) => Promise<void>
+  saveLists: (lists: Checklist[]) => Promise<void>
+  addNote: (text: string) => Promise<void>
+  removeNote: (id: string) => Promise<void>
+  addReminder: (r: { text: string; whenISO: string; recurrence?: Recurrence; kind?: Reminder['kind'] }) => Promise<void>
+  removeReminder: (id: string) => Promise<void>
+  exportData: () => Promise<void>
+  importData: () => Promise<void>
+  setGlobalShortcut: (enabled: boolean) => Promise<void>
+  setAutostart: (enabled: boolean) => Promise<void>
+  testBrain: () => Promise<{ ok: boolean; detail: string }>
+  finishOnboarding: (name: string) => Promise<void>
 }
 
 const Ctx = createContext<AresStore | null>(null)
@@ -153,12 +173,16 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   const [board, setBoardState] = useState<Board>(emptyBoard)
   const [memory, setMemory] = useState<MemoryFact[]>([])
   const [events, setEvents] = useState<CalendarEvent[]>([])
+  const [lists, setLists] = useState<Checklist[]>([])
+  const [quickNotes, setQuickNotes] = useState<Note[]>([])
+  const [reminders, setReminders] = useState<Reminder[]>([])
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([])
   const [piper, setPiper] = useState<TtsStatus | null>(null)
   const [weather, setWeather] = useState<WeatherResult | null>(null)
   const [recording, setRecording] = useState(false)
   const [continuous, setContinuous] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   const [briefing, setBriefing] = useState<BriefingData | null>(null)
   const [briefingLoading, setBriefingLoading] = useState(false)
   const [briefingOpen, setBriefingOpen] = useState(false)
@@ -232,14 +256,17 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     let cancelled = false
     ;(async () => {
       try {
-        const [cfg, b, vs, ps, mem, evs, list] = await Promise.all([
+        const [cfg, b, vs, ps, mem, evs, list, lsts, nts, rems] = await Promise.all([
           window.ares.config.get(),
           window.ares.tasks.load(),
           loadVoices(),
           window.ares.tts.status(),
           window.ares.memory.load(),
           window.ares.calendar.load(),
-          window.ares.sessions.list()
+          window.ares.sessions.list(),
+          window.ares.lists.load(),
+          window.ares.notes.load(),
+          window.ares.reminders.load()
         ])
         if (cancelled) return
         let active = list[0]?.id
@@ -257,6 +284,9 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
         setPiper(ps)
         setMemory(mem)
         setEvents(evs)
+        setLists(lsts)
+        setQuickNotes(nts)
+        setReminders(rems)
         setSessions(list.length ? list : await window.ares.sessions.list())
         setCurrentSessionId(active || null)
         setConversation(toConv(session))
@@ -291,6 +321,14 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   useEffect(() => {
     window.ares.overlay.pushState(aresState).catch(() => {})
   }, [aresState])
+
+  // Acessibilidade: escala de fonte, alto contraste e modo simples.
+  useEffect(() => {
+    if (!config) return
+    document.documentElement.style.fontSize = `${Math.round(16 * (config.ui.fontScale || 1))}px`
+    document.body.classList.toggle('hc', !!config.ui.highContrast)
+    document.body.classList.toggle('simple', !!config.ui.simpleMode)
+  }, [config?.ui.fontScale, config?.ui.highContrast, config?.ui.simpleMode, config])
 
   const persistBoard = useCallback((nb: Board) => {
     boardRef.current = nb
@@ -378,6 +416,9 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
         setBoardState(result.board)
         setMemory(result.memory)
         setEvents(result.events)
+        setLists(result.lists)
+        setQuickNotes(result.quickNotes)
+        setReminders(result.reminders)
         setConversation((prev) =>
           prev.map((m) => (m.id === assistantId ? { ...m, content: result.fala, pending: false } : m))
         )
@@ -777,6 +818,87 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     setEvents(await window.ares.calendar.remove(id))
   }, [])
 
+  const saveLists = useCallback(async (next: Checklist[]) => {
+    setLists(next) // otimista
+    setLists(await window.ares.lists.save(next))
+  }, [])
+
+  const addNote = useCallback(async (text: string) => {
+    const t = text.trim()
+    if (!t) return
+    setQuickNotes(await window.ares.notes.add(t))
+    showToast('nota salva')
+  }, [showToast])
+
+  const removeNote = useCallback(async (id: string) => {
+    setQuickNotes(await window.ares.notes.remove(id))
+  }, [])
+
+  const addReminder = useCallback(
+    async (r: { text: string; whenISO: string; recurrence?: Recurrence; kind?: Reminder['kind'] }) => {
+      setReminders(await window.ares.reminders.add(r))
+      showToast('lembrete criado')
+    },
+    [showToast]
+  )
+
+  const removeReminder = useCallback(async (id: string) => {
+    setReminders(await window.ares.reminders.remove(id))
+  }, [])
+
+  const exportData = useCallback(async () => {
+    const r = await window.ares.data.export()
+    if (r.ok) showToast('backup exportado')
+    else if (r.error) setError(r.error)
+  }, [showToast])
+
+  const importData = useCallback(async () => {
+    const r = await window.ares.data.import()
+    if (r.ok) {
+      showToast(`backup restaurado (${r.restored} arquivos)`)
+      const [b, mem, evs, lsts, nts, rems] = await Promise.all([
+        window.ares.tasks.load(),
+        window.ares.memory.load(),
+        window.ares.calendar.load(),
+        window.ares.lists.load(),
+        window.ares.notes.load(),
+        window.ares.reminders.load()
+      ])
+      boardRef.current = b
+      setBoardState(b)
+      setMemory(mem)
+      setEvents(evs)
+      setLists(lsts)
+      setQuickNotes(nts)
+      setReminders(rems)
+    } else if (r.error) setError(r.error)
+  }, [showToast])
+
+  const setGlobalShortcut = useCallback(async (enabled: boolean) => {
+    const nc = await window.ares.system.setGlobalShortcut(enabled)
+    configRef.current = nc
+    setConfig(nc)
+  }, [])
+
+  const setAutostart = useCallback(async (enabled: boolean) => {
+    const nc = await window.ares.system.setAutostart(enabled)
+    configRef.current = nc
+    setConfig(nc)
+  }, [])
+
+  const testBrain = useCallback(() => window.ares.system.testBrain(), [])
+
+  const finishOnboarding = useCallback(
+    async (name: string) => {
+      const userName = name.trim()
+      const nc = await window.ares.config.update({ ui: { onboarded: true, userName } })
+      configRef.current = nc
+      setConfig(nc)
+      if (userName) setMemory(await window.ares.memory.add(`O usuário se chama ${userName}.`, 'perfil'))
+    },
+    []
+  )
+
   const loadBriefing = useCallback(async () => {
     setBriefingLoading(true)
     try {
@@ -799,8 +921,37 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     setConfig(nc)
   }, [])
 
+  // Bandeja: "Briefing do dia" abre o painel.
+  useEffect(() => {
+    const off = window.ares.system.onBriefing(() => openBriefing(true))
+    return off
+  }, [openBriefing])
+
+  // "Bom dia": fala o briefing 1x por dia ao abrir, se ativado.
+  useEffect(() => {
+    if (!ready || !config?.ui.morningBriefing) return
+    const today = new Date().toISOString().slice(0, 10)
+    if (localStorage.getItem('ares-briefing-day') === today) return
+    localStorage.setItem('ares-briefing-day', today)
+    const timer = setTimeout(async () => {
+      try {
+        const b = await window.ares.briefing.get()
+        setBriefing(b)
+        const bits = [b.greeting]
+        if (b.weather) bits.push(`${b.weather.current.temp} graus, ${b.weather.current.desc}.`)
+        bits.push(b.todayEvents.length ? `Você tem ${b.todayEvents.length} compromisso(s) hoje.` : 'Sua agenda está livre.')
+        if (b.overdueTasks.length) bits.push(`${b.overdueTasks.length} tarefa(s) vencida(s).`)
+        await speakText(bits.join(' '))
+      } catch {
+        /* silencioso */
+      }
+    }, 1500)
+    return () => clearTimeout(timer)
+  }, [ready, config?.ui.morningBriefing, speakText])
+
   const navigate = useCallback((s: Screen) => setScreen(s), [])
   const openSettings = useCallback((b: boolean) => setSettingsOpen(b), [])
+  const openHelp = useCallback((b: boolean) => setHelpOpen(b), [])
   const clearError = useCallback(() => setError(null), [])
 
   const value: AresStore = {
@@ -814,12 +965,16 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     board,
     memory,
     events,
+    lists,
+    quickNotes,
+    reminders,
     voices,
     piper,
     weather,
     recording,
     continuous,
     settingsOpen,
+    helpOpen,
     briefing,
     briefingLoading,
     briefingOpen,
@@ -828,6 +983,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     actionToast,
     navigate,
     openSettings,
+    openHelp,
     saveConfig,
     setBoard,
     sendText,
@@ -850,7 +1006,18 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     approveMemory,
     removeMemory,
     addEvent,
-    removeEvent
+    removeEvent,
+    saveLists,
+    addNote,
+    removeNote,
+    addReminder,
+    removeReminder,
+    exportData,
+    importData,
+    setGlobalShortcut,
+    setAutostart,
+    testBrain,
+    finishOnboarding
   }
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

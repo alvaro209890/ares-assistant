@@ -1,10 +1,28 @@
+import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useAres } from '../lib/store'
 import { ptVoices } from '../lib/tts'
 
 export default function SettingsPanel(): JSX.Element {
-  const { settingsOpen, openSettings, config, voices, piper, saveConfig, testVoice, locateUser, navigate, setOverlay } = useAres()
+  const {
+    settingsOpen,
+    openSettings,
+    config,
+    voices,
+    piper,
+    saveConfig,
+    testVoice,
+    locateUser,
+    navigate,
+    setOverlay,
+    exportData,
+    importData,
+    setGlobalShortcut,
+    setAutostart,
+    testBrain
+  } = useAres()
   const pt = ptVoices(voices)
+  const [brainTest, setBrainTest] = useState<string>('')
 
   return (
     <AnimatePresence>
@@ -202,6 +220,79 @@ export default function SettingsPanel(): JSX.Element {
               </p>
             </Section>
 
+            <Section title="ACESSIBILIDADE">
+              <Slider
+                label={`Tamanho do texto: ${Math.round(config.ui.fontScale * 100)}%`}
+                min={0.85}
+                max={1.5}
+                step={0.05}
+                value={config.ui.fontScale}
+                onChange={(v) => saveConfig({ ui: { fontScale: v } })}
+              />
+              <Toggle
+                label="Alto contraste"
+                checked={config.ui.highContrast}
+                onChange={(v) => saveConfig({ ui: { highContrast: v } })}
+              />
+              <Toggle
+                label="Modo simples (menos HUD)"
+                checked={config.ui.simpleMode}
+                onChange={(v) => saveConfig({ ui: { simpleMode: v } })}
+              />
+            </Section>
+
+            <Section title="SISTEMA E ATALHOS">
+              <Toggle
+                label="Falar briefing ao abrir (1x/dia)"
+                checked={config.ui.morningBriefing}
+                onChange={(v) => saveConfig({ ui: { morningBriefing: v } })}
+              />
+              <Toggle
+                label="Atalho global (Ctrl+Shift+Espaço)"
+                checked={config.ui.globalShortcut}
+                onChange={(v) => void setGlobalShortcut(v)}
+              />
+              <Toggle
+                label="Iniciar com o sistema"
+                checked={config.ui.autostart}
+                onChange={(v) => void setAutostart(v)}
+              />
+              <p className="text-[11px] text-cyan-200/45">Iniciar com o sistema fica plenamente efetivo após o empacotamento.</p>
+              <div className="flex gap-2">
+                <button onClick={() => void exportData()} className="btn-ghost">
+                  EXPORTAR DADOS
+                </button>
+                <button onClick={() => void importData()} className="btn-ghost">
+                  IMPORTAR DADOS
+                </button>
+              </div>
+              <p className="text-[11px] text-cyan-200/45">Backup de tarefas, agenda, memória, listas, notas e lembretes (não inclui chaves).</p>
+            </Section>
+
+            <Section title="PONTE COM O HERMES (avançado)">
+              <Toggle
+                label="Ativar ponte com o Hermes"
+                checked={config.integrations.hermes.enabled}
+                onChange={(v) =>
+                  saveConfig({ integrations: { ...config.integrations, hermes: { ...config.integrations.hermes, enabled: v } } })
+                }
+              />
+              <Field label="Endpoint do Hermes">
+                <input
+                  className="input"
+                  value={config.integrations.hermes.baseUrl}
+                  onChange={(e) =>
+                    saveConfig({
+                      integrations: { ...config.integrations, hermes: { ...config.integrations.hermes, baseUrl: e.target.value } }
+                    })
+                  }
+                />
+              </Field>
+              <p className="text-[11px] text-cyan-200/45">
+                Quando ligada, o Ares pode delegar comandos ao Hermes por voz. Confirme o endpoint do seu Hermes.
+              </p>
+            </Section>
+
             <Section title="CÉREBRO - 9 ROUTER">
               <Field label="URL base">
                 <input
@@ -226,6 +317,19 @@ export default function SettingsPanel(): JSX.Element {
                   onChange={(e) => saveConfig({ nineRouter: { ...config.nineRouter, apiKey: e.target.value } })}
                 />
               </Field>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={async () => {
+                    setBrainTest('testando…')
+                    const r = await testBrain()
+                    setBrainTest(r.ok ? '✓ ' + r.detail : '✕ ' + r.detail)
+                  }}
+                  className="btn-ghost"
+                >
+                  TESTAR CONEXÃO
+                </button>
+                {brainTest && <span className="text-[11px] text-cyan-200/60">{brainTest}</span>}
+              </div>
             </Section>
 
             <Section title="TRANSCRIÇÃO - GROQ">

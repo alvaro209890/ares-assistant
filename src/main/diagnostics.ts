@@ -58,6 +58,15 @@ export async function getDiagnostics(): Promise<DiagnosticsResult> {
     },
     piper: { ready: isPiperReady(), voices: listPiperVoices() },
     location: cfg.integrations.location,
-    dataFiles: ['config.json', 'tasks.json', 'memory.json', 'calendar.json', 'sessions.json'].map(fileInfo)
+    dataFiles: [
+      'config.json',
+      'tasks.json',
+      'memory.json',
+      'calendar.json',
+      'sessions.json',
+      'lists.json',
+      'notes.json',
+      'reminders.json'
+    ].map(fileInfo)
   }
 }

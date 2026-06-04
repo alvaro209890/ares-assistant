@@ -7,7 +7,12 @@ import type {
   CalendarEvent,
   ChatSession,
   SessionMeta,
-  StoredMessage
+  StoredMessage,
+  Checklist,
+  ListItem,
+  Note,
+  Reminder,
+  Recurrence
 } from '../shared/types'
 import { MEMORY_CATEGORIES, MEMORY_CATEGORY_LABEL } from '../shared/types'
 
@@ -279,4 +284,153 @@ export function setSessionSummary(id: string, summary: string, keepLast: number)
     if (s.messages.length > keepLast) s.messages = s.messages.slice(-keepLast)
     saveSessions(list)
   }
+}
+
+// ---------------- Listas simples (compras/afazeres) ----------------
+const normTxt = (s: unknown) => String(s ?? '').toLowerCase().trim()
+
+export function loadLists(): Checklist[] {
+  return readJSON<Checklist[]>('lists.json', [])
+}
+function saveLists(lists: Checklist[]): void {
+  writeJSON('lists.json', lists)
+}
+/** Garante uma lista pelo título (cria se não existir). */
+function ensureList(lists: Checklist[], title: string): Checklist {
+  const t = title.trim() || 'Lista'
+  let l = lists.find((x) => normTxt(x.title) === normTxt(t) || normTxt(x.title).includes(normTxt(t)))
+  if (!l) {
+    l = { id: uid('list'), title: t, items: [], createdAt: Date.now() }
+    lists.push(l)
+  }
+  return l
+}
+export function listCreate(title: string): Checklist[] {
+  const lists = loadLists()
+  ensureList(lists, title)
+  saveLists(lists)
+  return loadLists()
+}
+export function listAddItem(title: string, text: string): Checklist[] {
+  const t = text.trim()
+  if (!t) return loadLists()
+  const lists = loadLists()
+  const l = ensureList(lists, title || 'Compras')
+  if (!l.items.some((i) => normTxt(i.text) === normTxt(t))) {
+    l.items.push({ id: uid('li'), text: t, done: false })
+  }
+  saveLists(lists)
+  return loadLists()
+}
+export function listToggleItem(title: string, text: string, done?: boolean): Checklist[] {
+  const lists = loadLists()
+  const l = lists.find((x) => normTxt(x.title).includes(normTxt(title)))
+  if (l) {
+    const it = l.items.find((i) => normTxt(i.text).includes(normTxt(text)))
+    if (it) it.done = typeof done === 'boolean' ? done : !it.done
+    saveLists(lists)
+  }
+  return loadLists()
+}
+export function listRemoveItem(title: string, text: string): Checklist[] {
+  const lists = loadLists()
+  const l = lists.find((x) => normTxt(x.title).includes(normTxt(title)))
+  if (l) {
+    l.items = l.items.filter((i) => !normTxt(i.text).includes(normTxt(text)))
+    saveLists(lists)
+  }
+  return loadLists()
+}
+export function listClear(title: string): Checklist[] {
+  const lists = loadLists()
+  const l = lists.find((x) => normTxt(x.title).includes(normTxt(title)))
+  if (l) {
+    l.items = []
+    saveLists(lists)
+  }
+  return loadLists()
+}
+export function listRemove(title: string): Checklist[] {
+  const lists = loadLists().filter((x) => !normTxt(x.title).includes(normTxt(title)) || !title.trim())
+  saveLists(lists)
+  return loadLists()
+}
+/** Substitui o conjunto de listas (usado pela edição manual no renderer). */
+export function setLists(lists: Checklist[]): Checklist[] {
+  saveLists(lists)
+  return loadLists()
+}
+/** Resumo curto das listas para o prompt do agente. */
+export function listsSummary(): string {
+  const lists = loadLists()
+  if (!lists.length) return '(nenhuma lista)'
+  return lists
+    .map((l) => `- "${l.title}": ${l.items.filter((i) => !i.done).map((i) => i.text).join(', ') || '(vazia)'}`)
+    .join('\n')
+}
+
+// ---------------- Notas rápidas ----------------
+export function loadNotes(): Note[] {
+  return readJSON<Note[]>('notes.json', []).sort((a, b) => b.createdAt - a.createdAt)
+}
+export function addNote(text: string): Note[] {
+  const t = text.trim()
+  if (!t) return loadNotes()
+  const notes = loadNotes()
+  notes.unshift({ id: uid('note'), text: t, createdAt: Date.now() })
+  writeJSON('notes.json', notes)
+  return loadNotes()
+}
+export function removeNote(id: string): Note[] {
+  writeJSON('notes.json', loadNotes().filter((n) => n.id !== id))
+  return loadNotes()
+}
+
+// ---------------- Lembretes (remédio/rotina, timer, despertador) ----------------
+export function loadReminders(): Reminder[] {
+  return readJSON<Reminder[]>('reminders.json', []).sort((a, b) => a.whenISO.localeCompare(b.whenISO))
+}
+export function setReminders(rs: Reminder[]): Reminder[] {
+  writeJSON('reminders.json', rs)
+  return loadReminders()
+}
+export function addReminder(r: {
+  text: string
+  whenISO: string
+  recurrence?: Recurrence
+  kind?: Reminder['kind']
+}): Reminder[] {
+  const rs = loadReminders()
+  rs.push({
+    id: uid('rem'),
+    text: r.text.trim() || 'Lembrete',
+    whenISO: r.whenISO,
+    recurrence: r.recurrence && r.recurrence !== 'none' ? r.recurrence : undefined,
+    kind: r.kind || 'reminder',
+    createdAt: Date.now()
+  })
+  writeJSON('reminders.json', rs)
+  return loadReminders()
+}
+export function removeReminder(id: string): Reminder[] {
+  writeJSON('reminders.json', loadReminders().filter((r) => r.id !== id))
+  return loadReminders()
+}
+export function removeReminderByText(text: string): Reminder[] {
+  const rs = loadReminders()
+  const idx = rs.findIndex((r) => normTxt(r.text).includes(normTxt(text)))
+  if (idx >= 0) rs.splice(idx, 1)
+  writeJSON('reminders.json', rs)
+  return loadReminders()
+}
+/** Resumo curto dos próximos lembretes para o prompt do agente. */
+export function remindersSummary(): string {
+  const now = Date.now()
+  const up = loadReminders()
+    .filter((r) => r.recurrence || new Date(r.whenISO).getTime() > now - 3600_000)
+    .slice(0, 8)
+  if (!up.length) return '(nenhum)'
+  return up
+    .map((r) => `- ${new Date(r.whenISO).toLocaleString('pt-BR')}${r.recurrence ? ` (repete ${r.recurrence})` : ''}: ${r.text}`)
+    .join('\n')
 }

@@ -30,6 +30,20 @@ O projeto roda em modo de desenvolvimento. O empacotamento `.deb` está configur
 - **Palavra de ativação ("Ares")**: na conversa contínua, opcionalmente só responde quando você começa pela palavra-chave (ex.: "Ares, que horas são?"). Diga só "Ares" para ele confirmar e aguardar o comando.
 - **Orbe flutuante (companion)**: uma mini-orbe always-on-top que reflete o estado do Ares; clique para abrir o app, ou use o microfone dela para falar sem trazer a janela principal.
 
+### Fácil para o dia a dia (pessoas comuns)
+
+- **Primeiros passos guiados (onboarding)**: no 1º uso, um passo a passo pede o nome, detecta localização, testa a voz e mostra exemplos.
+- **Ajuda "O que eu sei fazer"**: botão na barra com exemplos clicáveis que já executam o comando.
+- **Listas simples e notas rápidas**: listas de compras/afazeres e anotações, por toque ou por voz.
+- **Lembretes, timers e despertador**: "me lembra do remédio às 8h", "põe um timer de 10 minutos", "me acorda às 7h" — com repetição e notificação.
+- **Contas e conversões**: "30% de 250?", "quantos reais são 50 dólares?".
+- **Acessibilidade**: tamanho de texto, alto contraste e um modo simples (menos HUD).
+- **Backup em 1 clique**: exportar/importar todos os seus dados (sem incluir chaves).
+- **Presença no sistema**: ícone na bandeja, atalho global (Ctrl+Shift+Espaço) e iniciar com o sistema.
+- **"Bom dia" automático**: opção de falar o briefing ao abrir, 1x por dia.
+- **Indicador de microfone**: aviso visível sempre que o microfone está ativo.
+- **Ponte com o Hermes (avançado/groundwork)**: opção para delegar comandos por voz a um Hermes existente.
+
 ## Rodar em Desenvolvimento
 
 ```bash
@@ -66,6 +80,8 @@ Arquivos importantes:
 - `src/main/briefing.ts`: monta o briefing do dia e sua versão falável.
 - `src/main/diagnostics.ts`: status de serviços, localização e arquivos de dados.
 - `src/main/overlay.ts`: janela da mini-orbe flutuante (always-on-top) e sincronização de estado.
+- `src/main/desktop.ts`: ícone na bandeja, atalho global e iniciar com o sistema.
+- `src/main/backup.ts`: exportar/importar dados do usuário.
 - `src/main/ninerouter.ts`: chamadas ao 9 Router (JSON e streaming SSE).
 - `src/main/data.ts`: memória (categorias, dedupe, resumo), calendário e sessões.
 - `src/shared/protocol.ts`: parsing do envelope JSON e validação de ações.
@@ -74,8 +90,12 @@ Arquivos importantes:
 - `src/renderer/components/Orb3D.tsx`: núcleo visual 3D do Ares.
 - `src/renderer/components/BriefingPanel.tsx`: painel do briefing do dia.
 - `src/renderer/components/Overlay.tsx`: UI da mini-orbe flutuante.
+- `src/renderer/components/Onboarding.tsx`: assistente de primeiros passos.
+- `src/renderer/components/Help.tsx`: ajuda com exemplos clicáveis.
 - `src/renderer/lib/tts.ts`: síntese de voz e fila de fala por sentença (streaming).
 - `src/renderer/screens/Assistant.tsx`: palco principal da orbe, widgets e conversa.
+- `src/renderer/screens/Lists.tsx`: listas simples e notas rápidas.
+- `src/renderer/screens/Reminders.tsx`: lembretes, timers e despertadores.
 - `src/renderer/screens/System.tsx`: tela de diagnóstico do sistema.
 
 ## Configuração
@@ -229,7 +249,7 @@ A aba **Sistema** (`Alt+5`) mostra o status local do Ares:
 - Piper: pronto e vozes disponíveis;
 - localização: estado e última atualização;
 - aplicativo: nome, versão, plataforma e versões de Electron/Node/Chrome;
-- dados locais: pasta `userData` e tamanho de cada arquivo (`config.json`, `tasks.json`, `memory.json`, `calendar.json`, `sessions.json`).
+- dados locais: pasta `userData` e tamanho de cada arquivo (`config.json`, `tasks.json`, `memory.json`, `calendar.json`, `sessions.json`, `lists.json`, `notes.json`, `reminders.json`).
 
 Use o botão ATUALIZAR para refazer o diagnóstico.
 
@@ -259,10 +279,64 @@ Atalhos:
 - `Alt+1`: Assistente.
 - `Alt+2`: Tarefas.
 - `Alt+3`: Calendário.
-- `Alt+4`: Memória.
-- `Alt+5`: Sistema (diagnóstico).
+- `Alt+4`: Lembretes.
+- `Alt+5`: Listas.
+- `Alt+6`: Memória.
+- `Alt+7`: Sistema (diagnóstico).
+- `Ctrl+Shift+Espaço`: atalho global (quando ativado) para chamar o Ares e ouvir.
 
 As telas foram estruturadas com `min-h-0`, `overflow-y-auto` e `overscroll-contain` para evitar travamento de rolagem dentro do Electron. O Kanban mantém rolagem horizontal própria para colunas e rolagem vertical por coluna para cartões.
+
+## Listas e Notas
+
+Tela **Listas** (`Alt+5`) com listas simples (compras/afazeres) e notas rápidas.
+
+```text
+~/.config/ares/lists.json
+~/.config/ares/notes.json
+```
+
+Por voz: "adiciona leite na lista de compras", "cria uma lista de viagem", "anota que a senha do wifi é casa123".
+
+## Lembretes, Timers e Despertador
+
+Tela **Lembretes** (`Alt+4`) reúne lembretes de rotina/remédio, timers e despertadores. O processo principal dispara a notificação (e a fala, se a voz estiver ativa) na hora certa; recorrentes são reagendados automaticamente.
+
+```text
+~/.config/ares/reminders.json
+```
+
+Por voz: "me lembra de tomar o remédio todo dia às 8h", "põe um timer de 10 minutos", "me acorda às 7h".
+
+## Onboarding e Ajuda
+
+- No primeiro uso, um assistente de **primeiros passos** pede o nome (salvo na memória como perfil), oferece detectar a localização, testar a voz e ver exemplos.
+- O botão **Ajuda** (barra lateral) abre "O que eu sei fazer", com exemplos clicáveis que executam o comando — a forma mais fácil de aprender usando.
+
+## Acessibilidade
+
+Em Configurações > Acessibilidade:
+
+- **Tamanho do texto** (escala global da fonte);
+- **Alto contraste** (painéis e textos mais legíveis);
+- **Modo simples** (esconde a decoração pesada do HUD).
+
+## Backup e Restauração
+
+Em Configurações > Sistema e Atalhos: **Exportar/Importar dados** em um arquivo `.json`. Cobre tarefas, agenda, memória, conversas, listas, notas e lembretes. **Não inclui** `config.json` (que guarda chaves), para o backup ser compartilhável com segurança.
+
+## Presença no Sistema
+
+Em Configurações > Sistema e Atalhos:
+
+- **Atalho global** `Ctrl+Shift+Espaço` para chamar o Ares e já ouvir;
+- **Ícone na bandeja** (abrir, falar agora, briefing, sair);
+- **Iniciar com o sistema** (plenamente efetivo após o empacotamento);
+- **Falar briefing ao abrir** (1x por dia).
+
+## Ponte com o Hermes (avançado)
+
+O Ares e o Hermes compartilham o mesmo cérebro (9 Router). Em vez de reimplementar o Hermes, o Ares pode atuar como **controle de voz/cliente** dele: em Configurações > Ponte com o Hermes, ative e informe o endpoint; assim o Ares delega comandos ao Hermes (ferramenta `hermes.executar`) preservando a qualidade do Hermes. É um groundwork — confirme o contrato HTTP do seu Hermes antes de usar em produção.
 
 ## Kanban
 
@@ -412,6 +486,9 @@ Ações de mutação (campos principais entre chaves):
 - `coluna.criar` `{titulo}` · `coluna.renomear` `{titulo, novoTitulo}` · `coluna.remover` `{titulo}`
 - `memoria.salvar` `{fato, categoria?}` · `memoria.remover` `{fato}`
 - `evento.criar` `{titulo, quando(ISO), descricao?, lembreteMin?(min antes), repetir?}` · `evento.remover` `{titulo}`
+- `lista.criar` `{titulo}` · `lista.adicionar` `{item, lista?}` · `lista.marcar` `{item, lista?, feito?}` · `lista.removerItem` `{item, lista?}` · `lista.limpar` `{lista}`
+- `nota.salvar` `{texto}`
+- `lembrete.criar` `{texto, quando?(ISO), emMinutos?, repetir?, modo?(reminder|timer|alarm)}` · `lembrete.remover` `{texto}`
 
 Ferramentas de consulta:
 
@@ -421,6 +498,9 @@ Ferramentas de consulta:
 - `agenda.listar` `{dia?(ISO date)}`
 - `tarefa.listar` `{}`
 - `briefing.consultar` `{}`
+- `calcular` `{expressao}`
+- `converter.moeda` `{de, para, valor}`
+- `hermes.executar` `{comando}` (só com a ponte do Hermes ativada)
 
 As ferramentas de consulta são executadas pelo processo principal. O resultado volta ao LLM para gerar a resposta final em linguagem natural.
 
@@ -445,6 +525,9 @@ Com a palavra de ativação ligada, comece pela palavra (ex.: "**Ares**, faça m
 - "faça meu briefing" / "como está meu dia?"
 - "vai chover hoje?" / "preciso levar guarda-chuva?" / "como está o tempo onde estou?"
 - "o que tenho amanhã?" / "marque reunião toda segunda às 9" / "me avise 15 minutos antes"
+- "me lembra de tomar o remédio todo dia às 8h" / "põe um timer de 10 minutos" / "me acorda às 7h"
+- "adiciona leite na lista de compras" / "cria uma lista de viagem"
+- "quanto é 30% de 250?" / "quantos reais são 50 dólares?"
 - "crie uma tarefa semanal de regar as plantas" / "mova comprar café para concluído"
 - "lembre-se que prefiro respostas curtas" / "anote que trabalho com fotografia"
 - "quais as notícias de hoje?" / "pesquise na web sobre ..."

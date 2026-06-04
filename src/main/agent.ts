@@ -15,9 +15,22 @@ import {
   removeEvent,
   getSession,
   appendMessages,
-  setSessionSummary
+  setSessionSummary,
+  listCreate,
+  listAddItem,
+  listToggleItem,
+  listRemoveItem,
+  listClear,
+  listsSummary,
+  loadLists,
+  addNote,
+  loadNotes,
+  addReminder,
+  removeReminderByText,
+  remindersSummary,
+  loadReminders
 } from './data'
-import { getWeather, getWeatherAt, getNews, webSearch } from './tools'
+import { getWeather, getWeatherAt, getNews, webSearch, calcExpression, convertCurrency, hermesExecute } from './tools'
 import { buildBriefing, briefingToSpeech } from './briefing'
 
 const norm = (s: unknown) => String(s ?? '').toLowerCase().trim()
@@ -51,6 +64,12 @@ AÇÕES DE MUTAÇÃO (aplique quando o usuário pedir):
 - coluna.criar {titulo}   |   coluna.renomear {titulo, novoTitulo}   |   coluna.remover {titulo}
 - memoria.salvar {fato, categoria?(perfil|preferencias|rotina|trabalho|projetos|restricoes|interesses|outros)}   |   memoria.remover {fato}
 - evento.criar {titulo, quando(ISO), descricao?, lembreteMin?(minutos antes), repetir?(none|daily|weekly|monthly)}   |   evento.remover {titulo}
+- lista.criar {titulo}   |   lista.adicionar {item, lista?}   |   lista.marcar {item, lista?, feito?(bool)}   |   lista.removerItem {item, lista?}   |   lista.limpar {lista}   (listas simples: compras, afazeres)
+- nota.salvar {texto}   (anotações rápidas; também para guardar rascunhos de mensagens/e-mails)
+- lembrete.criar {texto, quando?(ISO), emMinutos?(número), repetir?(none|daily|weekly|monthly), modo?(reminder|timer|alarm)}   |   lembrete.remover {texto}
+  · "me lembra do remédio todo dia às 8h" -> lembrete.criar {texto:"remédio", quando ISO de hoje 08:00, repetir:"daily"}
+  · "põe um timer de 10 minutos" -> lembrete.criar {texto:"timer", emMinutos:10, modo:"timer"}
+  · "me acorda às 6h" -> lembrete.criar {texto:"despertador", quando ISO 06:00, modo:"alarm"}
 
 FERRAMENTAS DE CONSULTA (dê uma fala curta tipo "Deixe-me verificar." e AGUARDE os resultados para então responder):
 - clima.consultar {cidade?}   (sem cidade = usa a localização aproximada)
@@ -59,8 +78,10 @@ FERRAMENTAS DE CONSULTA (dê uma fala curta tipo "Deixe-me verificar." e AGUARDE
 - agenda.listar {dia?(ISO date)}
 - tarefa.listar {}
 - briefing.consultar {}   (use quando pedirem "briefing", "resumo do dia", "como está meu dia")
+- calcular {expressao}   (contas: "30% de 250", "12*7+3")
+- converter.moeda {de, para, valor}   (ex.: de:"USD", para:"BRL", valor:50)
 
-Regras: use nomes de colunas/tarefas existentes (ver CONTEXTO). Datas SEMPRE em ISO local sem fuso (ex.: 2026-06-03T09:00), resolvidas pela seção DATAS. memoria.salvar só para fatos duradouros do usuário (preferências, perfil, rotina), nunca para pedidos pontuais.`
+Regras: use nomes de colunas/tarefas/listas existentes (ver CONTEXTO). Datas SEMPRE em ISO local sem fuso (ex.: 2026-06-03T09:00), resolvidas pela seção DATAS. memoria.salvar só para fatos duradouros do usuário (preferências, perfil, rotina), nunca para pedidos pontuais. Para rascunho de mensagem/e-mail: escreva o texto em "fala" para o usuário revisar e, se ele pedir para guardar, use nota.salvar.`
 }
 
 // Âncoras de datas relativas, pré-calculadas, para o LLM resolver "hoje", "amanhã",
@@ -115,6 +136,8 @@ function buildSystemPrompt(ctx: {
     `## Sobre o usuário (memória de longo prazo)\n${memorySummary()}`,
     `## Tarefas atuais\n${boardSummary(ctx.board)}`,
     `## Próximos eventos\n${upcoming || '(nenhum)'}`,
+    `## Lembretes\n${remindersSummary()}`,
+    `## Listas\n${listsSummary()}`,
     ctx.summary ? `## Resumo da conversa anterior\n${ctx.summary}` : ''
   ]
     .filter(Boolean)
@@ -145,6 +168,17 @@ async function runQuery(a: Acao, cfg: AppConfig): Promise<unknown> {
       }
       case 'tarefa.listar':
         return { tipo: a.tipo, resultado: boardSummary(loadBoard()) }
+      case 'calcular':
+        return { tipo: a.tipo, resultado: calcExpression(String(a.expressao || a.conta || '')) }
+      case 'converter.moeda':
+        return {
+          tipo: a.tipo,
+          resultado: await convertCurrency(String(a.de || ''), String(a.para || ''), Number(a.valor))
+        }
+      case 'hermes.executar': {
+        if (!integrations.hermes?.enabled) return { tipo: a.tipo, erro: 'Ponte com o Hermes desativada nas Configurações.' }
+        return { tipo: a.tipo, resultado: await hermesExecute(integrations.hermes.baseUrl, String(a.comando || a.texto || '')) }
+      }
       case 'briefing.consultar': {
         const b = await buildBriefing(cfg)
         return {
@@ -197,6 +231,41 @@ function applyMutations(acoes: Acao[]): { board: Board; notes: string[]; changed
     } else if (a.tipo === 'evento.remover' && a.titulo) {
       const e = loadEvents().find((x) => norm(x.title).includes(norm(a.titulo)))
       if (e) removeEvent(e.id)
+    } else if (a.tipo === 'lista.criar' && a.titulo) {
+      listCreate(String(a.titulo))
+      notes.push(`lista "${a.titulo}" criada`)
+    } else if (a.tipo === 'lista.adicionar' && a.item) {
+      listAddItem(String(a.lista || 'Compras'), String(a.item))
+      notes.push(`+ "${a.item}" na lista`)
+    } else if (a.tipo === 'lista.marcar' && a.item) {
+      listToggleItem(String(a.lista || ''), String(a.item), typeof a.feito === 'boolean' ? a.feito : undefined)
+      notes.push(`✓ "${a.item}"`)
+    } else if (a.tipo === 'lista.removerItem' && a.item) {
+      listRemoveItem(String(a.lista || ''), String(a.item))
+      notes.push(`🗑 "${a.item}"`)
+    } else if (a.tipo === 'lista.limpar' && a.lista) {
+      listClear(String(a.lista))
+      notes.push(`lista "${a.lista}" limpa`)
+    } else if (a.tipo === 'nota.salvar' && a.texto) {
+      addNote(String(a.texto))
+      notes.push('nota salva')
+    } else if (a.tipo === 'lembrete.criar' && a.texto) {
+      const mins = Number(a.emMinutos)
+      const whenISO =
+        Number.isFinite(mins) && mins > 0
+          ? new Date(Date.now() + mins * 60_000).toISOString()
+          : String(a.quando || new Date(Date.now() + 60_000).toISOString())
+      const modo = String(a.modo || '')
+      addReminder({
+        text: String(a.texto),
+        whenISO,
+        recurrence: a.repetir as CalendarEvent['recurrence'],
+        kind: (['timer', 'alarm', 'reminder'].includes(modo) ? modo : 'reminder') as 'reminder' | 'timer' | 'alarm'
+      })
+      notes.push('lembrete criado')
+    } else if (a.tipo === 'lembrete.remover' && a.texto) {
+      removeReminderByText(String(a.texto))
+      notes.push('lembrete removido')
     }
   }
   const changedBoard = board !== original
@@ -325,7 +394,17 @@ export async function runTurn(
   ])
   await summarizeIfNeeded(sessionId)
 
-  return { fala, board, memory: loadMemory(), events: loadEvents(), notes: allNotes, changedBoard }
+  return {
+    fala,
+    board,
+    memory: loadMemory(),
+    events: loadEvents(),
+    lists: loadLists(),
+    quickNotes: loadNotes(),
+    reminders: loadReminders(),
+    notes: allNotes,
+    changedBoard
+  }
 }
 
 // Controle de contexto: quando a sessão fica longa, resume o histórico antigo.

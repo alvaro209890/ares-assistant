@@ -2,18 +2,20 @@ import { useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useAres } from '../lib/store'
 
-type Screen = 'assistant' | 'tasks' | 'calendar' | 'memory' | 'system'
+type Screen = 'assistant' | 'tasks' | 'calendar' | 'reminders' | 'lists' | 'memory' | 'system'
 
 const tabs: { id: Screen; label: string; hint: string; icon: JSX.Element }[] = [
   { id: 'assistant', label: 'Assistente', hint: 'Alt+1', icon: <AssistantIcon /> },
   { id: 'tasks', label: 'Tarefas', hint: 'Alt+2', icon: <TasksIcon /> },
   { id: 'calendar', label: 'Calendário', hint: 'Alt+3', icon: <CalendarIcon /> },
-  { id: 'memory', label: 'Memória', hint: 'Alt+4', icon: <MemoryIcon /> },
-  { id: 'system', label: 'Sistema', hint: 'Alt+5', icon: <SystemIcon /> }
+  { id: 'reminders', label: 'Lembretes', hint: 'Alt+4', icon: <BellIcon /> },
+  { id: 'lists', label: 'Listas', hint: 'Alt+5', icon: <ListIcon /> },
+  { id: 'memory', label: 'Memória', hint: 'Alt+6', icon: <MemoryIcon /> },
+  { id: 'system', label: 'Sistema', hint: 'Alt+7', icon: <SystemIcon /> }
 ]
 
 export default function TopBar(): JSX.Element {
-  const { screen, navigate, openSettings, config, saveConfig } = useAres()
+  const { screen, navigate, openSettings, openHelp, config, saveConfig } = useAres()
   const muted = !config?.tts.enabled
 
   useEffect(() => {
@@ -95,6 +97,16 @@ export default function TopBar(): JSX.Element {
           </button>
         )}
         <button
+          onClick={() => openHelp(true)}
+          className="flex min-h-[42px] items-center gap-3 rounded-xl border border-cyan-300/12 bg-white/[0.03] px-3 text-sm text-cyan-200/70 transition hover:text-cyan-50"
+          title="O que o Ares sabe fazer"
+        >
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-cyan-300/15">
+            <HelpIcon />
+          </span>
+          <span>Ajuda</span>
+        </button>
+        <button
           onClick={() => openSettings(true)}
           className="flex min-h-[42px] items-center gap-3 rounded-xl border border-cyan-300/12 bg-white/[0.03] px-3 text-sm text-cyan-200/70 transition hover:text-cyan-50"
           title="Configurações"
@@ -142,6 +154,22 @@ function MemoryIcon(): JSX.Element {
   )
 }
 
+function BellIcon(): JSX.Element {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+      <path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6M10 20a2 2 0 0 0 4 0" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function ListIcon(): JSX.Element {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+      <path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 function SystemIcon(): JSX.Element {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
@@ -165,6 +193,15 @@ function SpeakerOffIcon(): JSX.Element {
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
       <path d="M4 9v6h4l5 4V5L9 8" strokeLinejoin="round" />
       <path d="M3 3l18 18M17 9l4 4M21 9l-4 4" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function HelpIcon(): JSX.Element {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M9.5 9a2.5 2.5 0 0 1 4.5 1.5c0 1.5-2 2-2 3.5M12 17h.01" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }

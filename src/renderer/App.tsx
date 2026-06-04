@@ -4,14 +4,18 @@ import Background from './components/Background'
 import TopBar from './components/TopBar'
 import SettingsPanel from './components/SettingsPanel'
 import BriefingPanel from './components/BriefingPanel'
+import Onboarding from './components/Onboarding'
+import Help from './components/Help'
 import Assistant from './screens/Assistant'
 import Tasks from './screens/Tasks'
 import Calendar from './screens/Calendar'
+import Reminders from './screens/Reminders'
+import Lists from './screens/Lists'
 import Memory from './screens/Memory'
 import System from './screens/System'
 
 export default function App(): JSX.Element {
-  const { ready, screen, error, clearError, actionToast } = useAres()
+  const { ready, screen, error, clearError, actionToast, recording } = useAres()
 
   return (
     <div className="relative h-full w-full text-cyan-50">
@@ -27,6 +31,8 @@ export default function App(): JSX.Element {
               {screen === 'assistant' && <Assistant key="a" />}
               {screen === 'tasks' && <Tasks key="t" />}
               {screen === 'calendar' && <Calendar key="c" />}
+              {screen === 'reminders' && <Reminders key="r" />}
+              {screen === 'lists' && <Lists key="l" />}
               {screen === 'memory' && <Memory key="m" />}
               {screen === 'system' && <System key="s" />}
             </AnimatePresence>
@@ -36,6 +42,27 @@ export default function App(): JSX.Element {
 
       <SettingsPanel />
       <BriefingPanel />
+      <Help />
+      <Onboarding />
+
+      {/* Indicador global de microfone ativo (privacidade/confiança) */}
+      <AnimatePresence>
+        {recording && (
+          <motion.div
+            initial={{ opacity: 0, y: -12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            className="fixed right-4 top-4 z-[55] flex items-center gap-2 rounded-full border border-emerald-300/50 bg-emerald-500/15 px-3 py-1.5 text-xs text-emerald-100 backdrop-blur"
+          >
+            <motion.span
+              className="h-2 w-2 rounded-full bg-emerald-300"
+              animate={{ opacity: [1, 0.3, 1] }}
+              transition={{ duration: 1.1, repeat: Infinity }}
+            />
+            microfone ativo
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Toast de ação de tarefas */}
       <AnimatePresence>

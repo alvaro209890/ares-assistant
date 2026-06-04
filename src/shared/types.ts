@@ -21,6 +21,7 @@ export interface AppConfig {
     weatherCity: string // cidade padrão (widget de clima)
     newsTopic: string // tema padrão de notícias ("" = manchetes gerais)
     location: UserLocation // localização aproximada local, com permissão do usuário
+    hermes: { enabled: boolean; baseUrl: string } // ponte opcional com o Hermes (groundwork)
   }
   ui: {
     continuousMode: boolean
@@ -31,6 +32,14 @@ export interface AppConfig {
     wakeWord: string // palavra de ativação (ex.: "ares")
     wakeWordEnabled: boolean // na conversa contínua, só age se ouvir a palavra de ativação
     overlayEnabled: boolean // mini-orbe flutuante (always-on-top)
+    onboarded: boolean // primeiro uso já concluído
+    userName: string // como o Ares chama o usuário
+    fontScale: number // 0.85..1.5 — acessibilidade
+    highContrast: boolean // alto contraste
+    simpleMode: boolean // visão reduzida (menos HUD)
+    autostart: boolean // iniciar com o sistema (efetivo após empacotar)
+    globalShortcut: boolean // atalho global para chamar o Ares
+    morningBriefing: boolean // falar o briefing ao abrir (1x por dia)
   }
   memory: {
     autoExtract: boolean // extrair fatos úteis da conversa automaticamente
@@ -178,6 +187,37 @@ export interface CalendarEvent {
   createdAt: number
 }
 
+// --- Listas simples (compras/afazeres) ---
+export interface ListItem {
+  id: string
+  text: string
+  done: boolean
+}
+export interface Checklist {
+  id: string
+  title: string
+  items: ListItem[]
+  createdAt: number
+}
+
+// --- Notas rápidas ---
+export interface Note {
+  id: string
+  text: string
+  createdAt: number
+}
+
+// --- Lembretes (remédio/rotina, timer, despertador) ---
+export interface Reminder {
+  id: string
+  text: string
+  whenISO: string // quando disparar
+  recurrence?: Recurrence // diário/semanal/mensal (rotina/remédio)
+  kind: 'reminder' | 'timer' | 'alarm' // origem (para rótulo/UI)
+  fired?: boolean
+  createdAt: number
+}
+
 export type AresState = 'idle' | 'listening' | 'thinking' | 'speaking'
 
 // --- Sistema de ações/ferramentas ---
@@ -236,7 +276,10 @@ export interface AgentTurnResult {
   board: Board
   memory: MemoryFact[]
   events: CalendarEvent[]
-  notes: string[]
+  lists: Checklist[]
+  quickNotes: Note[]
+  reminders: Reminder[]
+  notes: string[] // log curto das ações aplicadas (para toast)
   changedBoard: boolean
 }
 

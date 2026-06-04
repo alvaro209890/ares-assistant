@@ -27,7 +27,7 @@
   },
 
   "integrations": {
-    "_doc": "Integrações sem chave: clima Open-Meteo, geolocalização local via Chromium + Nominatim, busca DuckDuckGo HTML, notícias Google News RSS.",
+    "_doc": "Integrações sem chave: clima Open-Meteo, geolocalização local via Chromium + Nominatim, busca DuckDuckGo HTML, notícias Google News RSS. hermes: ponte opcional (groundwork) para delegar comandos ao Hermes.",
     "weatherCity": "São Paulo",
     "newsTopic": "",
     "location": {
@@ -40,11 +40,12 @@
       "country": "",
       "label": "",
       "updatedAt": null
-    }
+    },
+    "hermes": { "enabled": false, "baseUrl": "http://localhost:18789" }
   },
 
   "ui": {
-    "_doc": "Preferências de interface e conversa contínua. wakeWordEnabled: na conversa contínua, só age após ouvir a wakeWord. overlayEnabled: mini-orbe flutuante always-on-top.",
+    "_doc": "Preferências de interface, conversa contínua e acessibilidade. onboarded: primeiro uso concluído. fontScale/highContrast/simpleMode: acessibilidade. morningBriefing: falar briefing ao abrir. globalShortcut/autostart: presença no sistema (autostart efetivo após empacotar).",
     "continuousMode": false,
     "micSensitivity": 0.5,
     "silenceMs": 1350,
@@ -52,7 +53,15 @@
     "proactiveSuggestions": true,
     "wakeWord": "ares",
     "wakeWordEnabled": false,
-    "overlayEnabled": false
+    "overlayEnabled": false,
+    "onboarded": false,
+    "userName": "",
+    "fontScale": 1,
+    "highContrast": false,
+    "simpleMode": false,
+    "autostart": false,
+    "globalShortcut": false,
+    "morningBriefing": false
   },
 
   "memory": {

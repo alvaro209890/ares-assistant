@@ -1,6 +1,6 @@
 import { Notification, BrowserWindow } from 'electron'
 import { loadBoard, saveBoard } from './tasks'
-import { loadEvents, setEvents } from './data'
+import { loadEvents, setEvents, loadReminders, setReminders } from './data'
 import { advanceISO } from './board'
 
 // Lembretes locais: varre periodicamente tarefas (reminderAt) e eventos (whenISO).
@@ -55,6 +55,27 @@ function tick(): void {
     }
   }
   if (changedEvents) setEvents(events)
+
+  // Lembretes (remédio/rotina, timers, despertadores)
+  const reminders = loadReminders()
+  let changedReminders = false
+  for (const r of reminders) {
+    if (!r.fired && new Date(r.whenISO).getTime() <= now) {
+      const prefix = r.kind === 'timer' ? 'Timer' : r.kind === 'alarm' ? 'Despertador' : 'Lembrete'
+      fire(prefix, r.text)
+      if (r.recurrence && r.recurrence !== 'none') {
+        r.whenISO = advanceISO(r.whenISO, r.recurrence)
+        r.fired = false
+      } else {
+        r.fired = true
+      }
+      changedReminders = true
+    }
+  }
+  if (changedReminders) {
+    // Remove timers/despertadores de uma vez só que já dispararam (não recorrentes).
+    setReminders(reminders.filter((r) => !(r.fired && r.kind !== 'reminder')))
+  }
 }
 
 export function startReminders(windowGetter: () => BrowserWindow | null): void {

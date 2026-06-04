@@ -250,6 +250,30 @@ textarea,
   user-select: text;
 }
 
+/* ---------------- Acessibilidade ---------------- */
+/* Alto contraste: painéis mais sólidos, bordas e brilho mais fortes. */
+body.hc .glass {
+  background: linear-gradient(180deg, rgba(10, 22, 40, 0.94), rgba(4, 10, 22, 0.9));
+  border-color: rgba(120, 230, 255, 0.55);
+}
+body.hc .glass-strong {
+  background: rgba(4, 10, 22, 0.96);
+  border-color: rgba(120, 230, 255, 0.65);
+}
+body.hc .ares-metric-panel {
+  background: rgba(4, 12, 24, 0.92);
+  border-color: rgba(120, 230, 255, 0.5);
+}
+body.hc .neon-text {
+  text-shadow: 0 0 6px rgba(56, 225, 255, 0.95);
+}
+/* Modo simples: tira a decoração pesada do palco da orbe. */
+body.simple .ares-stage-scan,
+body.simple .ares-stage-grid,
+body.simple .ares-orb-reticle {
+  display: none;
+}
+
 /* ---------------- Overlay flutuante (mini-orbe always-on-top) ---------------- */
 .overlay-root {
   position: fixed;

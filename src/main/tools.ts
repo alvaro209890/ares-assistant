@@ -227,6 +227,124 @@ export async function getNews(topic = '', limit = 6): Promise<NewsItem[]> {
   return items
 }
 
+// ---------------- Cálculo seguro (sem eval) ----------------
+// Avaliador de aritmética: + - * / % ^ e parênteses. Aceita vírgula decimal e
+// "X% de Y" (vira (X/100)*Y). Nada de eval/Function por segurança.
+export function calcExpression(input: string): { resultado: number; expressao: string } {
+  let expr = String(input || '')
+    .toLowerCase()
+    .replace(/,(\d)/g, '.$1') // vírgula decimal -> ponto
+    .replace(/(\d+(?:\.\d+)?)\s*%\s*de\s*/g, '($1/100)*') // "30% de" -> (30/100)*
+    .replace(/(\d+(?:\.\d+)?)\s*%/g, '($1/100)') // "30%" -> (30/100)
+    .replace(/x/g, '*')
+    .replace(/[^0-9+\-*/%^().\s]/g, '')
+  // Tokenização
+  const tokens = expr.match(/\d+(?:\.\d+)?|[+\-*/%^()]/g)
+  if (!tokens || !tokens.length) throw new Error('Não entendi a conta.')
+  // Shunting-yard -> RPN
+  const prec: Record<string, number> = { '+': 1, '-': 1, '*': 2, '/': 2, '%': 2, '^': 3 }
+  const out: string[] = []
+  const ops: string[] = []
+  let prev: string | null = null
+  for (let t of tokens) {
+    if (/\d/.test(t)) {
+      out.push(t)
+    } else if (t === '(') {
+      ops.push(t)
+    } else if (t === ')') {
+      while (ops.length && ops[ops.length - 1] !== '(') out.push(ops.pop()!)
+      if (!ops.length) throw new Error('Parênteses desbalanceados.')
+      ops.pop()
+    } else {
+      // menos unário -> 0 - x
+      if (t === '-' && (prev === null || prev === '(' || '+-*/%^'.includes(prev))) out.push('0')
+      while (ops.length && ops[ops.length - 1] !== '(' && prec[ops[ops.length - 1]] >= prec[t]) out.push(ops.pop()!)
+      ops.push(t)
+    }
+    prev = t
+  }
+  while (ops.length) {
+    const op = ops.pop()!
+    if (op === '(') throw new Error('Parênteses desbalanceados.')
+    out.push(op)
+  }
+  // Avalia RPN
+  const st: number[] = []
+  for (const t of out) {
+    if (/\d/.test(t)) st.push(parseFloat(t))
+    else {
+      const b = st.pop()
+      const a = st.pop()
+      if (a === undefined || b === undefined) throw new Error('Expressão inválida.')
+      st.push(
+        t === '+' ? a + b : t === '-' ? a - b : t === '*' ? a * b : t === '/' ? a / b : t === '%' ? a % b : Math.pow(a, b)
+      )
+    }
+  }
+  const resultado = st.pop()
+  if (resultado === undefined || st.length || !Number.isFinite(resultado)) throw new Error('Não consegui calcular.')
+  return { resultado: Math.round(resultado * 1e6) / 1e6, expressao: input }
+}
+
+// ---------------- Conversão de moeda (open.er-api.com, sem chave) ----------------
+const CURRENCY_ALIASES: Record<string, string> = {
+  real: 'BRL', reais: 'BRL', brl: 'BRL', 'r$': 'BRL',
+  dolar: 'USD', 'dólar': 'USD', dolares: 'USD', 'dólares': 'USD', usd: 'USD', us$: 'USD',
+  euro: 'EUR', euros: 'EUR', eur: 'EUR',
+  libra: 'GBP', libras: 'GBP', gbp: 'GBP',
+  iene: 'JPY', ienes: 'JPY', jpy: 'JPY',
+  peso: 'ARS', pesos: 'ARS', ars: 'ARS',
+  bitcoin: 'BTC', btc: 'BTC'
+}
+function currencyCode(s: string): string {
+  const k = String(s || '').toLowerCase().trim()
+  return CURRENCY_ALIASES[k] || k.toUpperCase().slice(0, 3)
+}
+export async function convertCurrency(
+  from: string,
+  to: string,
+  amount: number
+): Promise<{ de: string; para: string; valor: number; resultado: number; taxa: number }> {
+  const f = currencyCode(from)
+  const t = currencyCode(to)
+  const amt = Number(amount)
+  if (!Number.isFinite(amt)) throw new Error('Valor inválido para conversão.')
+  let json: any
+  try {
+    json = JSON.parse(await fetchText(`https://open.er-api.com/v6/latest/${encodeURIComponent(f)}`))
+  } catch {
+    throw new Error('Não consegui consultar a cotação agora (sem internet ou serviço fora do ar).')
+  }
+  const rate = json?.rates?.[t]
+  if (!rate) throw new Error(`Não encontrei a cotação de ${f} para ${t}.`)
+  return { de: f, para: t, valor: amt, resultado: Math.round(amt * rate * 100) / 100, taxa: rate }
+}
+
+// ---------------- Ponte com o Hermes (groundwork, opcional) ----------------
+// Delegação genérica: envia um comando em texto ao Hermes e devolve a resposta.
+// Off por padrão; o contrato real do endpoint do Hermes deve ser confirmado.
+export async function hermesExecute(baseUrl: string, comando: string): Promise<string> {
+  const url = baseUrl.replace(/\/$/, '') + '/message'
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: comando, source: 'ares' })
+    })
+  } catch (err: any) {
+    throw new Error(`Não consegui falar com o Hermes em ${baseUrl}. Detalhe: ${err?.message || err}`)
+  }
+  if (!res.ok) throw new Error(`Hermes respondeu ${res.status}.`)
+  const txt = await res.text()
+  try {
+    const j = JSON.parse(txt)
+    return String(j.reply ?? j.text ?? j.message ?? txt)
+  } catch {
+    return txt
+  }
+}
+
 // ---------------- Busca web (DuckDuckGo HTML) ----------------
 export async function webSearch(query: string, limit = 5): Promise<WebResult[]> {
   const q = (query || '').trim()

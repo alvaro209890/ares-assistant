@@ -12,7 +12,10 @@ export const QUERY_TOOLS = new Set([
   'noticias.listar',
   'agenda.listar',
   'tarefa.listar',
-  'briefing.consultar'
+  'briefing.consultar',
+  'calcular',
+  'converter.moeda',
+  'hermes.executar'
 ])
 
 // Ações de mutação conhecidas e os campos obrigatórios de cada uma. Usado para
@@ -33,7 +36,15 @@ export const MUTATION_REQUIRED: Record<string, string[]> = {
   'memoria.salvar': ['fato'],
   'memoria.remover': ['fato'],
   'evento.criar': ['titulo', 'quando'],
-  'evento.remover': ['titulo']
+  'evento.remover': ['titulo'],
+  'lista.criar': ['titulo'],
+  'lista.adicionar': ['item'],
+  'lista.marcar': ['item'],
+  'lista.removerItem': ['item'],
+  'lista.limpar': ['lista'],
+  'nota.salvar': ['texto'],
+  'lembrete.criar': ['texto'],
+  'lembrete.remover': ['texto']
 }
 
 /** Valida uma ação: tipo conhecido (consulta ou mutação) e campos obrigatórios presentes. */

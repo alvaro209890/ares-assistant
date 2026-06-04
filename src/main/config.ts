@@ -33,7 +33,12 @@ const DEFAULT_CONFIG: AppConfig = {
     pitch: 1.0,
     volume: 1.0
   },
-  integrations: { weatherCity: 'São Paulo', newsTopic: '', location: { enabled: true } },
+  integrations: {
+    weatherCity: 'São Paulo',
+    newsTopic: '',
+    location: { enabled: true },
+    hermes: { enabled: false, baseUrl: 'http://localhost:18789' }
+  },
   ui: {
     continuousMode: false,
     micSensitivity: 0.5,
@@ -42,7 +47,15 @@ const DEFAULT_CONFIG: AppConfig = {
     proactiveSuggestions: true,
     wakeWord: 'ares',
     wakeWordEnabled: false,
-    overlayEnabled: false
+    overlayEnabled: false,
+    onboarded: false,
+    userName: '',
+    fontScale: 1,
+    highContrast: false,
+    simpleMode: false,
+    autostart: false,
+    globalShortcut: false,
+    morningBriefing: false
   },
   memory: {
     autoExtract: true,

@@ -8,10 +8,14 @@ import type {
   Board,
   CalendarEvent,
   ChatSession,
+  Checklist,
   DiagnosticsResult,
   MemoryCategory,
   MemoryFact,
   NewsItem,
+  Note,
+  Recurrence,
+  Reminder,
   ReverseGeocodeResult,
   SessionMeta,
   TtsStatus,
@@ -82,6 +86,32 @@ const api = {
   diagnostics: {
     get: (): Promise<DiagnosticsResult> => ipcRenderer.invoke('diagnostics:get')
   },
+  lists: {
+    load: (): Promise<Checklist[]> => ipcRenderer.invoke('lists:load'),
+    save: (lists: Checklist[]): Promise<Checklist[]> => ipcRenderer.invoke('lists:save', lists)
+  },
+  notes: {
+    load: (): Promise<Note[]> => ipcRenderer.invoke('notes:load'),
+    add: (text: string): Promise<Note[]> => ipcRenderer.invoke('notes:add', text),
+    remove: (id: string): Promise<Note[]> => ipcRenderer.invoke('notes:remove', id)
+  },
+  reminders: {
+    load: (): Promise<Reminder[]> => ipcRenderer.invoke('reminders:load'),
+    add: (r: { text: string; whenISO: string; recurrence?: Recurrence; kind?: Reminder['kind'] }): Promise<Reminder[]> =>
+      ipcRenderer.invoke('reminders:add', r),
+    remove: (id: string): Promise<Reminder[]> => ipcRenderer.invoke('reminders:remove', id),
+    save: (rs: Reminder[]): Promise<Reminder[]> => ipcRenderer.invoke('reminders:save', rs),
+    // Notificação local disparada (tarefa/evento/lembrete) para a UI reagir e falar.
+    onFired: (cb: (data: { prefix: string; title: string; body: string }) => void): (() => void) => {
+      const listener = (_e: unknown, data: { prefix: string; title: string; body: string }) => cb(data)
+      ipcRenderer.on('reminder:fired', listener)
+      return () => ipcRenderer.removeListener('reminder:fired', listener)
+    }
+  },
+  data: {
+    export: (): Promise<{ ok: boolean; path?: string; error?: string }> => ipcRenderer.invoke('data:export'),
+    import: (): Promise<{ ok: boolean; restored?: number; error?: string }> => ipcRenderer.invoke('data:import')
+  },
   tts: {
     synthesize: (text: string, opts: { voice?: string; rate?: number }): Promise<ArrayBuffer> =>
       ipcRenderer.invoke('tts:synthesize', text, opts),
@@ -98,16 +128,18 @@ const api = {
   news: {
     get: (topic: string): Promise<NewsItem[]> => ipcRenderer.invoke('news:get', topic)
   },
-  reminders: {
-    onFired: (cb: (data: { prefix: string; title: string; body: string }) => void): (() => void) => {
-      const listener = (_e: unknown, data: { prefix: string; title: string; body: string }) => cb(data)
-      ipcRenderer.on('reminder:fired', listener)
-      return () => ipcRenderer.removeListener('reminder:fired', listener)
-    }
-  },
   system: {
     platform: process.platform,
-    openExternal: (url: string): Promise<boolean> => ipcRenderer.invoke('system:openExternal', url)
+    openExternal: (url: string): Promise<boolean> => ipcRenderer.invoke('system:openExternal', url),
+    setGlobalShortcut: (enabled: boolean): Promise<AppConfig> => ipcRenderer.invoke('system:setGlobalShortcut', enabled),
+    setAutostart: (enabled: boolean): Promise<AppConfig> => ipcRenderer.invoke('system:setAutostart', enabled),
+    testBrain: (): Promise<{ ok: boolean; detail: string }> => ipcRenderer.invoke('brain:test'),
+    // Bandeja "Briefing do dia" pede para abrir o briefing na janela principal.
+    onBriefing: (cb: () => void): (() => void) => {
+      const listener = (): void => cb()
+      ipcRenderer.on('shortcut:briefing', listener)
+      return () => ipcRenderer.removeListener('shortcut:briefing', listener)
+    }
   },
   overlay: {
     // Liga/desliga a mini-orbe flutuante; devolve a config atualizada.
