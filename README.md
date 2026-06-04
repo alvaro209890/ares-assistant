@@ -493,6 +493,12 @@ Para desenvolvimento visual:
 npm run dev
 ```
 
+## Roadmap (próximos passos)
+
+Ideias priorizadas para deixar o Ares mais fácil e útil para **pessoas comuns** (onboarding
+guiado, ajuda com exemplos, listas simples, lembretes de remédio/rotina, timer por voz,
+acessibilidade, backup em 1 clique e mais) estão em [`ROADMAP.md`](ROADMAP.md).
+
 ## Empacotamento Futuro
 
 O alvo configurado é `.deb`:
