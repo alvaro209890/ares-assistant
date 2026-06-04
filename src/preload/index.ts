@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AgentTurnResult,
   AppConfig,
+  AresState,
   DeepPartial,
   BriefingData,
   Board,
@@ -66,7 +67,14 @@ const api = {
   },
   chat: {
     ask: (sessionId: string, text: string, voice = false): Promise<AgentTurnResult> =>
-      ipcRenderer.invoke('chat:ask', { sessionId, text, voice })
+      ipcRenderer.invoke('chat:ask', { sessionId, text, voice }),
+    // Recebe a "fala" em pedaços enquanto o LLM gera. phase muda (1→2) quando há
+    // ferramentas e a resposta final começa (sinal para reiniciar exibição/fala).
+    onDelta: (cb: (data: { chunk: string; phase: number }) => void): (() => void) => {
+      const listener = (_e: unknown, data: { chunk: string; phase: number }) => cb(data)
+      ipcRenderer.on('chat:delta', listener)
+      return () => ipcRenderer.removeListener('chat:delta', listener)
+    }
   },
   briefing: {
     get: (): Promise<BriefingData> => ipcRenderer.invoke('briefing:get')
@@ -100,6 +108,26 @@ const api = {
   system: {
     platform: process.platform,
     openExternal: (url: string): Promise<boolean> => ipcRenderer.invoke('system:openExternal', url)
+  },
+  overlay: {
+    // Liga/desliga a mini-orbe flutuante; devolve a config atualizada.
+    set: (enabled: boolean): Promise<AppConfig> => ipcRenderer.invoke('overlay:set', enabled),
+    // Janela principal envia seu estado para a orbe flutuante refletir.
+    pushState: (state: AresState): Promise<boolean> => ipcRenderer.invoke('overlay:pushState', state),
+    focusMain: (): Promise<boolean> => ipcRenderer.invoke('overlay:focusMain'),
+    command: (): Promise<boolean> => ipcRenderer.invoke('overlay:command'),
+    // Orbe flutuante recebe o estado para animar.
+    onState: (cb: (state: AresState) => void): (() => void) => {
+      const listener = (_e: unknown, state: AresState) => cb(state)
+      ipcRenderer.on('overlay:state', listener)
+      return () => ipcRenderer.removeListener('overlay:state', listener)
+    },
+    // Janela principal recebe o pedido de "ouvir agora" vindo da orbe flutuante.
+    onListen: (cb: () => void): (() => void) => {
+      const listener = (): void => cb()
+      ipcRenderer.on('overlay:listen', listener)
+      return () => ipcRenderer.removeListener('overlay:listen', listener)
+    }
   }
 }
 

@@ -28,6 +28,9 @@ export interface AppConfig {
     silenceMs: number // tempo de silêncio (ms) para encerrar a fala no modo contínuo
     postSpeechPauseMs: number // pausa após o Ares falar antes de voltar a ouvir
     proactiveSuggestions: boolean // sugestões proativas discretas no briefing/assistente
+    wakeWord: string // palavra de ativação (ex.: "ares")
+    wakeWordEnabled: boolean // na conversa contínua, só age se ouvir a palavra de ativação
+    overlayEnabled: boolean // mini-orbe flutuante (always-on-top)
   }
   memory: {
     autoExtract: boolean // extrair fatos úteis da conversa automaticamente

@@ -3,7 +3,7 @@ import { useAres } from '../lib/store'
 import { ptVoices } from '../lib/tts'
 
 export default function SettingsPanel(): JSX.Element {
-  const { settingsOpen, openSettings, config, voices, piper, saveConfig, testVoice, locateUser, navigate } = useAres()
+  const { settingsOpen, openSettings, config, voices, piper, saveConfig, testVoice, locateUser, navigate, setOverlay } = useAres()
   const pt = ptVoices(voices)
 
   return (
@@ -144,6 +144,22 @@ export default function SettingsPanel(): JSX.Element {
                 Mais sensibilidade capta vozes baixas; mais silêncio evita cortar frases. A pausa após a fala impede o Ares de se
                 ouvir.
               </p>
+              <Toggle
+                label="Exigir palavra de ativação"
+                checked={config.ui.wakeWordEnabled}
+                onChange={(v) => saveConfig({ ui: { wakeWordEnabled: v } })}
+              />
+              <Field label="Palavra de ativação">
+                <input
+                  className="input"
+                  value={config.ui.wakeWord}
+                  onChange={(e) => saveConfig({ ui: { wakeWord: e.target.value.trim() || 'ares' } })}
+                />
+                <p className="mt-1 text-[11px] text-cyan-200/45">
+                  Com isto ligado, na conversa contínua o Ares só responde quando você começa pela palavra (ex.: “Ares, que horas
+                  são?”). Diga só “Ares” para ele confirmar e aguardar o comando.
+                </p>
+              </Field>
             </Section>
 
             <Section title="MEMÓRIA">
@@ -171,6 +187,18 @@ export default function SettingsPanel(): JSX.Element {
               />
               <p className="text-[11px] text-cyan-200/45">
                 Sugestões discretas sobre tarefas vencidas, eventos próximos, chuva e conflitos de agenda.
+              </p>
+            </Section>
+
+            <Section title="ORBE FLUTUANTE">
+              <Toggle
+                label="Mini-orbe sempre no topo"
+                checked={config.ui.overlayEnabled}
+                onChange={(v) => void setOverlay(v)}
+              />
+              <p className="text-[11px] text-cyan-200/45">
+                Um companion flutuante que reflete o estado do Ares. Clique na orbe para abrir o app; no microfone para falar.
+                Arraste pela borda para reposicionar.
               </p>
             </Section>
 

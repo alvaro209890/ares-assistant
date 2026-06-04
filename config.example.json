@@ -44,12 +44,15 @@
   },
 
   "ui": {
-    "_doc": "Preferências de interface e conversa contínua.",
+    "_doc": "Preferências de interface e conversa contínua. wakeWordEnabled: na conversa contínua, só age após ouvir a wakeWord. overlayEnabled: mini-orbe flutuante always-on-top.",
     "continuousMode": false,
     "micSensitivity": 0.5,
     "silenceMs": 1350,
     "postSpeechPauseMs": 450,
-    "proactiveSuggestions": true
+    "proactiveSuggestions": true,
+    "wakeWord": "ares",
+    "wakeWordEnabled": false,
+    "overlayEnabled": false
   },
 
   "memory": {

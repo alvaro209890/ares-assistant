@@ -249,3 +249,71 @@ textarea,
 .selectable {
   user-select: text;
 }
+
+/* ---------------- Overlay flutuante (mini-orbe always-on-top) ---------------- */
+.overlay-root {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  overflow: hidden;
+}
+
+/* Área de arraste (atrás dos botões). */
+.overlay-drag {
+  position: absolute;
+  inset: 0;
+  -webkit-app-region: drag;
+  cursor: grab;
+}
+
+.overlay-orb {
+  -webkit-app-region: no-drag;
+  position: relative;
+  height: 116px;
+  width: 116px;
+  border-radius: 9999px;
+  border: 1px solid rgba(86, 200, 255, 0.3);
+  background: radial-gradient(circle at 50% 45%, rgba(13, 26, 48, 0.7), rgba(3, 8, 18, 0.6));
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5), inset 0 0 24px rgba(56, 225, 255, 0.12);
+  cursor: pointer;
+  padding: 0;
+  overflow: hidden;
+  transition: transform 0.15s ease;
+}
+.overlay-orb:hover {
+  transform: scale(1.04);
+}
+
+.overlay-label {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: rgba(167, 235, 255, 0.7);
+  pointer-events: none;
+  text-shadow: 0 0 8px rgba(56, 225, 255, 0.5);
+}
+
+.overlay-mic {
+  -webkit-app-region: no-drag;
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  display: flex;
+  height: 30px;
+  width: 30px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  border: 1px solid rgba(86, 200, 255, 0.35);
+  background: rgba(8, 20, 36, 0.7);
+  color: #a7ebff;
+  cursor: pointer;
+}
+.overlay-mic:hover {
+  background: rgba(56, 225, 255, 0.18);
+}

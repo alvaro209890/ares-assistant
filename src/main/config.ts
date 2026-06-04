@@ -39,7 +39,10 @@ const DEFAULT_CONFIG: AppConfig = {
     micSensitivity: 0.5,
     silenceMs: 1350,
     postSpeechPauseMs: 450,
-    proactiveSuggestions: true
+    proactiveSuggestions: true,
+    wakeWord: 'ares',
+    wakeWordEnabled: false,
+    overlayEnabled: false
   },
   memory: {
     autoExtract: true,

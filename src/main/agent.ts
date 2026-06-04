@@ -1,8 +1,8 @@
 import type { Acao, AgentTurnResult, AppConfig, Board, CalendarEvent, ChatMessage, MemoryCategory, MemoryFact, UserLocation } from '../shared/types'
 import { MEMORY_CATEGORIES } from '../shared/types'
 import { readConfig } from './config'
-import { chatJSON } from './ninerouter'
-import { parseEnvelope, QUERY_TOOLS, validateAction } from '../shared/protocol'
+import { chatJSON, streamChat } from './ninerouter'
+import { parseEnvelope, QUERY_TOOLS, validateAction, extractFalaPrefix } from '../shared/protocol'
 import { applyBoardAction } from './board'
 import { loadBoard, saveBoard, boardSummary } from './tasks'
 import {
@@ -213,6 +213,45 @@ function memoryFallback(userText: string, acoes: Acao[]): Acao[] {
   return fact ? [...acoes, { tipo: 'memoria.salvar', fato: fact }] : acoes
 }
 
+export type DeltaFn = (chunk: string, phase: number) => void
+
+/**
+ * Faz uma chamada do agente transmitindo a "fala" em tempo real (streaming) via
+ * onDelta. Sem consumidor de streaming, cai na chamada JSON robusta. Em falha de
+ * stream sem nada emitido, faz fallback para chatJSON.
+ */
+async function streamTurn(
+  cfg: AppConfig,
+  messages: ChatMessage[],
+  phase: number,
+  onDelta?: DeltaFn
+): Promise<string> {
+  if (!onDelta) return chatJSON(cfg, messages, true)
+  let cumulative = ''
+  let emitted = 0
+  const pump = (full: string): void => {
+    const { text } = extractFalaPrefix(full)
+    if (text.length > emitted) {
+      onDelta(text.slice(emitted), phase)
+      emitted = text.length
+    }
+  }
+  try {
+    const full = await streamChat(cfg, messages, (delta) => {
+      cumulative += delta
+      pump(cumulative)
+    })
+    pump(full)
+    return full
+  } catch (e) {
+    if (emitted > 0) throw e // já falamos parte: não dá para refazer com segurança
+    const full = await chatJSON(cfg, messages, true)
+    const env = parseEnvelope(full)
+    if (env.fala) onDelta(env.fala, phase)
+    return full
+  }
+}
+
 /** Separa as ações válidas das inválidas, com notas para o usuário. */
 function validateActions(acoes: Acao[]): { valid: Acao[]; notes: string[] } {
   const valid: Acao[] = []
@@ -225,8 +264,13 @@ function validateActions(acoes: Acao[]): { valid: Acao[]; notes: string[] } {
   return { valid, notes }
 }
 
-/** Executa um turno completo de conversa + ações. */
-export async function runTurn(sessionId: string, userText: string, voice = false): Promise<AgentTurnResult> {
+/** Executa um turno completo de conversa + ações, com fala transmitida em streaming. */
+export async function runTurn(
+  sessionId: string,
+  userText: string,
+  voice = false,
+  onDelta?: DeltaFn
+): Promise<AgentTurnResult> {
   const cfg = readConfig()
   const session = getSession(sessionId)
   const recent = (session?.messages || []).slice(-12)
@@ -243,7 +287,7 @@ export async function runTurn(sessionId: string, userText: string, voice = false
     { role: 'user', content: userText }
   ]
 
-  let env = parseEnvelope(await chatJSON(cfg, messages, true))
+  const env = parseEnvelope(await streamTurn(cfg, messages, 1, onDelta))
   let fala = env.fala
   const allNotes: string[] = []
   let mutations = env.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo))
@@ -262,7 +306,8 @@ export async function runTurn(sessionId: string, userText: string, voice = false
           JSON.stringify(results)
       }
     ]
-    const env2 = parseEnvelope(await chatJSON(cfg, followup, true))
+    // Fase 2 (resposta final após as ferramentas): novo streaming, fase 2 = reset no cliente.
+    const env2 = parseEnvelope(await streamTurn(cfg, followup, 2, onDelta))
     if (env2.fala) fala = env2.fala
     mutations = mutations.concat(env2.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo)))
   }

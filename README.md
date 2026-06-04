@@ -24,6 +24,12 @@ O projeto roda em modo de desenvolvimento. O empacotamento `.deb` está configur
 - **Conversa contínua melhor**: sensibilidade do microfone, tempo de silêncio e pausa pós-fala configuráveis (evita que o Ares escute a própria voz).
 - **Tela Sistema/Diagnóstico**: status do 9 Router, Groq, Piper, localização, arquivos de dados locais e versões do app.
 
+### Recursos avançados de voz e presença
+
+- **Resposta em streaming + fala por sentença**: o Ares começa a exibir e a falar a resposta enquanto ela é gerada (frase a frase), reduzindo muito a latência percebida — parece "pensar em voz alta".
+- **Palavra de ativação ("Ares")**: na conversa contínua, opcionalmente só responde quando você começa pela palavra-chave (ex.: "Ares, que horas são?"). Diga só "Ares" para ele confirmar e aguardar o comando.
+- **Orbe flutuante (companion)**: uma mini-orbe always-on-top que reflete o estado do Ares; clique para abrir o app, ou use o microfone dela para falar sem trazer a janela principal.
+
 ## Rodar em Desenvolvimento
 
 ```bash
@@ -59,12 +65,16 @@ Arquivos importantes:
 - `src/main/tools.ts`: clima (com períodos/alerta), busca web, notícias e geocodificação reversa.
 - `src/main/briefing.ts`: monta o briefing do dia e sua versão falável.
 - `src/main/diagnostics.ts`: status de serviços, localização e arquivos de dados.
+- `src/main/overlay.ts`: janela da mini-orbe flutuante (always-on-top) e sincronização de estado.
+- `src/main/ninerouter.ts`: chamadas ao 9 Router (JSON e streaming SSE).
 - `src/main/data.ts`: memória (categorias, dedupe, resumo), calendário e sessões.
 - `src/shared/protocol.ts`: parsing do envelope JSON e validação de ações.
 - `src/renderer/lib/store.tsx`: estado global do app, conversa, voz, localização, briefing e widgets.
 - `src/renderer/lib/audio.ts`: microfone, análise de nível de áudio e conversa contínua.
 - `src/renderer/components/Orb3D.tsx`: núcleo visual 3D do Ares.
 - `src/renderer/components/BriefingPanel.tsx`: painel do briefing do dia.
+- `src/renderer/components/Overlay.tsx`: UI da mini-orbe flutuante.
+- `src/renderer/lib/tts.ts`: síntese de voz e fila de fala por sentença (streaming).
 - `src/renderer/screens/Assistant.tsx`: palco principal da orbe, widgets e conversa.
 - `src/renderer/screens/System.tsx`: tela de diagnóstico do sistema.
 
@@ -97,6 +107,9 @@ Campos principais:
 | `ui.silenceMs` | tempo de silêncio (ms) para encerrar a fala no modo contínuo |
 | `ui.postSpeechPauseMs` | pausa após o Ares falar antes de voltar a ouvir |
 | `ui.proactiveSuggestions` | liga as sugestões proativas no briefing |
+| `ui.wakeWord` | palavra de ativação (padrão `ares`) |
+| `ui.wakeWordEnabled` | na conversa contínua, só age após ouvir a palavra de ativação |
+| `ui.overlayEnabled` | mini-orbe flutuante always-on-top |
 | `memory.autoExtract` | extrair fatos úteis da conversa automaticamente |
 | `memory.autoApprove` | `true` salva direto; `false` deixa o fato pendente para revisão |
 
@@ -131,6 +144,38 @@ O modo Conversa Contínua usa o microfone em ciclos:
 9. volta a ouvir.
 
 Essa calibração reduz falsos disparos, evita cortar frases curtas e impede que o Ares responda ao próprio áudio. Os estados aparecem na orbe e no indicador: ouvindo, pensando, falando e em pausa.
+
+### Resposta em streaming e fala por sentença
+
+A resposta do agente é transmitida em tempo real:
+
+- o processo principal extrai o campo `fala` do JSON enquanto o LLM gera (`extractFalaPrefix` em `src/shared/protocol.ts`) e envia pedaços ao renderer pelo evento `chat:delta`;
+- o renderer exibe o texto crescendo no balão e, com a voz ativa, quebra em sentenças (`splitSentences`) e fala uma a uma por uma fila de reprodução (`enqueueSentence`/`whenSpeechQueueIdle` em `src/renderer/lib/tts.ts`);
+- quando há ferramentas de consulta, a primeira fala ("deixe-me verificar…") é dita e, ao chegar a resposta final (fase 2), o cliente reinicia a exibição/fala;
+- iniciar um novo turno interrompe a fala anterior.
+
+O resultado: o Ares começa a falar quase imediatamente, sem esperar a resposta inteira.
+
+### Palavra de ativação ("Ares")
+
+Em Configurações > Conversa Contínua (ou no botão "EXIGIR 'ARES'" na tela Assistente) você pode exigir uma palavra de ativação:
+
+- com a conversa contínua ligada, o Ares transcreve a fala e só age se ela começar pela palavra (padrão "Ares"), tolerando pequenos erros de transcrição;
+- diga apenas "Ares" e ele confirma ("Pois não?") e abre uma janela de alguns segundos para você falar o comando sem repetir a palavra;
+- a palavra é configurável (`ui.wakeWord`).
+
+É um wake word por transcrição (usa o mesmo pipeline de microfone + Whisper, sem dependências extras e sem enviar áudio contínuo para a nuvem fora dos trechos com fala). Evita disparos acidentais do modo contínuo.
+
+## Orbe Flutuante (companion)
+
+Em Configurações > Orbe Flutuante (`ui.overlayEnabled`) você ativa uma mini-orbe sempre no topo:
+
+- é uma segunda janela, pequena, sem moldura e transparente, que reflete o estado do Ares (ocioso/ouvindo/pensando/falando);
+- clique na orbe para abrir/focar a janela principal;
+- clique no microfone da orbe para falar um comando sem trazer a janela principal (escuta única);
+- arraste pela borda para reposicionar.
+
+Tecnicamente, a mesma janela renderer é carregada com `#overlay` e renderiza só a orbe (sem microfone/STT próprios). O estado é espelhado da janela principal via IPC (`overlay:pushState` → evento `overlay:state`). Fechar a janela principal encerra a orbe e o app.
 
 ## Localização
 
@@ -385,15 +430,17 @@ O processo principal valida cada ação antes de aplicar: o tipo precisa ser con
 
 ## Fluxo de Dados do Agente
 
-1. Renderer chama `window.ares.chat.ask(sessionId, text)`.
+1. Renderer chama `window.ares.chat.ask(sessionId, text, voice)` e assina `chat:delta`.
 2. Main carrega config, sessão, memória, calendário e Kanban.
-3. Main monta prompt com ferramentas, contexto local, localização e resumo.
-4. 9 Router retorna `{ fala, acoes }`.
-5. Main executa consultas e mutações.
+3. Main monta prompt com ferramentas, contexto local, localização, datas e resumo.
+4. 9 Router gera `{ fala, acoes }` em streaming; a `fala` chega ao renderer em pedaços (exibida e falada por sentença).
+5. Main executa consultas (se houver, com 2ª fase em streaming) e valida + aplica mutações.
 6. Main persiste dados locais.
-7. Renderer atualiza UI e fala a resposta.
+7. `chat:ask` resolve com o resultado final; o renderer concilia UI, atualiza widgets e dispara a auto-extração de memória.
 
 ## Comandos por Voz (exemplos)
+
+Com a palavra de ativação ligada, comece pela palavra (ex.: "**Ares**, faça meu briefing"). Sem ela, use o push-to-talk ou a conversa contínua.
 
 - "faça meu briefing" / "como está meu dia?"
 - "vai chover hoje?" / "preciso levar guarda-chuva?" / "como está o tempo onde estou?"
@@ -429,6 +476,9 @@ Os arquivos locais antigos continuam funcionando. Campos novos são preenchidos 
 - **STT não transcreve**: confira a chave Groq em Configurações > Transcrição (ou em Sistema).
 - **Sem clima/notícias/localização**: precisa de internet; o app mostra um aviso amigável e segue funcionando com a cidade padrão.
 - **Fatos demais ou de menos na memória**: ajuste `memory.autoExtract`/`memory.autoApprove` e use a fila “Para revisar”.
+- **A fala sai picotada ou começa antes da hora**: é o streaming por sentença; se preferir, o conteúdo final é sempre reconciliado no balão. Modelos que não suportam streaming caem automaticamente na resposta única.
+- **A palavra de ativação não é reconhecida**: fale "Ares" no começo da frase; ajuste a palavra em Configurações > Conversa Contínua e a sensibilidade do microfone. O reconhecimento depende do Whisper (Groq).
+- **A orbe flutuante não aparece ou fica preta**: depende de um compositor com transparência. Ative/desative em Configurações > Orbe Flutuante; ela some ao fechar a janela principal.
 
 ## Verificação Antes de Publicar
 

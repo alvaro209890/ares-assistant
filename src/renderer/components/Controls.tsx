@@ -4,9 +4,12 @@ import { useAres } from '../lib/store'
 
 // Controles do assistente: push-to-talk, campo de texto e modo conversa contínua.
 export default function Controls(): JSX.Element {
-  const { aresState, recording, continuous, beginPushToTalk, endPushToTalk, sendText, toggleContinuous } = useAres()
+  const { aresState, recording, continuous, beginPushToTalk, endPushToTalk, sendText, toggleContinuous, config, saveConfig } =
+    useAres()
   const [text, setText] = useState('')
   const busy = aresState === 'thinking'
+  const wake = config?.ui.wakeWord || 'ares'
+  const wakeOn = !!config?.ui.wakeWordEnabled
 
   const submit = () => {
     const t = text.trim()
@@ -60,17 +63,30 @@ export default function Controls(): JSX.Element {
         </button>
       </div>
 
-      {/* Toggle de conversa contínua */}
-      <button
-        onClick={toggleContinuous}
-        className={`self-start rounded-full border px-3 py-1 text-xs title-track transition ${
-          continuous
-            ? 'border-emerald-300/60 text-emerald-200 bg-emerald-400/10'
-            : 'border-cyan-300/20 text-cyan-200/60 hover:text-cyan-100'
-        }`}
-      >
-        {continuous ? '● CONVERSA CONTÍNUA ATIVA' : '○ CONVERSA CONTÍNUA'}
-      </button>
+      {/* Toggles de conversa contínua + wake word */}
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          onClick={toggleContinuous}
+          className={`rounded-full border px-3 py-1 text-xs title-track transition ${
+            continuous
+              ? 'border-emerald-300/60 text-emerald-200 bg-emerald-400/10'
+              : 'border-cyan-300/20 text-cyan-200/60 hover:text-cyan-100'
+          }`}
+        >
+          {continuous ? '● CONVERSA CONTÍNUA ATIVA' : '○ CONVERSA CONTÍNUA'}
+        </button>
+        <button
+          onClick={() => config && saveConfig({ ui: { wakeWordEnabled: !wakeOn } })}
+          title={`Na conversa contínua, só age após ouvir "${wake}".`}
+          className={`rounded-full border px-3 py-1 text-xs title-track transition ${
+            wakeOn
+              ? 'border-cyan-300/60 text-cyan-100 bg-cyan-400/10'
+              : 'border-cyan-300/20 text-cyan-200/60 hover:text-cyan-100'
+          }`}
+        >
+          {wakeOn ? `● EXIGIR “${wake.toUpperCase()}”` : `○ EXIGIR “${wake.toUpperCase()}”`}
+        </button>
+      </div>
     </div>
   )
 }

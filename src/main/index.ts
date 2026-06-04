@@ -6,6 +6,7 @@ import { transcribe } from './grog'
 import { runTurn, extractFacts } from './agent'
 import { buildBriefing } from './briefing'
 import { getDiagnostics } from './diagnostics'
+import { initOverlay, toggleOverlay, setOverlayState, focusMain, requestListen } from './overlay'
 import { startReminders } from './notify'
 import { synthesize, listPiperVoices, isPiperReady, ensurePiper } from './piper'
 import { getWeather, getWeatherAt, getNews, reverseGeocode } from './tools'
@@ -25,7 +26,7 @@ import {
   renameSession,
   deleteSession
 } from './data'
-import type { AppConfig, Board, CalendarEvent, DeepPartial, MemoryCategory, UserLocation } from '../shared/types'
+import type { AppConfig, AresState, Board, CalendarEvent, DeepPartial, MemoryCategory, UserLocation } from '../shared/types'
 
 // Nome do app: define userData (Linux: ~/.config/ares) com config/tasks/memória/etc.
 app.setName('ares')
@@ -57,6 +58,11 @@ function createWindow(): void {
   const devUrl = process.env['ELECTRON_RENDERER_URL']
   if (devUrl) mainWindow.loadURL(devUrl)
   else mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+  // Fechar a janela principal encerra também o overlay (evita o app ficar vivo só com a orbe).
+  mainWindow.on('closed', () => {
+    toggleOverlay(false)
+    mainWindow = null
+  })
 }
 
 app.whenReady().then(() => {
@@ -81,6 +87,8 @@ app.whenReady().then(() => {
 
   registerIpc()
   createWindow()
+  initOverlay(() => mainWindow)
+  if (readConfig().ui.overlayEnabled) toggleOverlay(true)
   startReminders(() => mainWindow)
   // Garante o Piper (voz neural) em background; até ficar pronto, usa-se a Web Speech.
   ensurePiper().catch(() => {})
@@ -148,9 +156,13 @@ function registerIpc(): void {
     return transcribe(readConfig(), audio, mimeType)
   })
 
-  // Chat (agente): um turno completo com ações (voice = resposta mais curta)
-  ipcMain.handle('chat:ask', async (_e, payload: { sessionId: string; text: string; voice?: boolean }) => {
-    return runTurn(payload.sessionId, payload.text, !!payload.voice)
+  // Chat (agente): um turno completo com ações (voice = resposta mais curta).
+  // A "fala" é transmitida em tempo real via evento 'chat:delta'; o invoke
+  // resolve com o resultado final (board, memória, eventos, notas).
+  ipcMain.handle('chat:ask', async (event, payload: { sessionId: string; text: string; voice?: boolean }) => {
+    return runTurn(payload.sessionId, payload.text, !!payload.voice, (chunk, phase) => {
+      if (!event.sender.isDestroyed()) event.sender.send('chat:delta', { chunk, phase })
+    })
   })
 
   // Briefing do dia + diagnóstico do sistema
@@ -161,6 +173,24 @@ function registerIpc(): void {
   ipcMain.handle('system:openExternal', async (_e, url: string) => {
     const u = String(url || '').trim()
     if (/^(https?:|file:|mailto:)/i.test(u)) await shell.openExternal(u)
+    return true
+  })
+
+  // Overlay flutuante (mini-orbe always-on-top)
+  ipcMain.handle('overlay:set', (_e, enabled: boolean): AppConfig => {
+    toggleOverlay(!!enabled)
+    return updateConfig({ ui: { overlayEnabled: !!enabled } })
+  })
+  ipcMain.handle('overlay:pushState', (_e, state: AresState) => {
+    setOverlayState(state)
+    return true
+  })
+  ipcMain.handle('overlay:focusMain', () => {
+    focusMain()
+    return true
+  })
+  ipcMain.handle('overlay:command', () => {
+    requestListen()
     return true
   })
 

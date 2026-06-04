@@ -126,3 +126,76 @@ export function cancelSpeech(): void {
     currentAudio = null
   }
 }
+
+// ---------------------------------------------------------------------------
+// Fila de fala por sentença (para o modo streaming): cada frase completa entra
+// na fila e é falada em sequência, sem esperar a resposta inteira ser gerada.
+// ---------------------------------------------------------------------------
+let sentenceQueue: { text: string; opts: SpeakOptions }[] = []
+let draining = false
+let idleWaiters: (() => void)[] = []
+
+function resolveIdle(): void {
+  const waiters = idleWaiters
+  idleWaiters = []
+  waiters.forEach((fn) => fn())
+}
+
+async function drainQueue(): Promise<void> {
+  if (draining) return
+  draining = true
+  while (sentenceQueue.length) {
+    const { text, opts } = sentenceQueue.shift()!
+    await new Promise<void>((resolve) => {
+      void speak(text, { ...opts, onEnd: () => resolve(), onError: () => resolve() })
+    })
+  }
+  draining = false
+  resolveIdle()
+}
+
+/** Coloca uma sentença na fila de fala e inicia/continua a reprodução. */
+export function enqueueSentence(text: string, opts: SpeakOptions): void {
+  const t = text.trim()
+  if (!t) return
+  sentenceQueue.push({ text: t, opts })
+  void drainQueue()
+}
+
+/** Resolve quando a fila de fala terminar (ou imediatamente se já vazia). */
+export function whenSpeechQueueIdle(): Promise<void> {
+  if (!draining && sentenceQueue.length === 0) return Promise.resolve()
+  return new Promise((resolve) => idleWaiters.push(resolve))
+}
+
+/** Esvazia a fila e interrompe a fala atual (ex.: novo turno / barge-in). */
+export function clearSpeechQueue(): void {
+  sentenceQueue = []
+  cancelSpeech()
+  draining = false
+  resolveIdle()
+}
+
+const SENTENCE_RE = /[^.!?…\n]*[.!?…\n]+/g
+
+/**
+ * Quebra um buffer de texto em sentenças completas + o resto incompleto.
+ * Com final=true, o resto também vira sentença (flush ao terminar o stream).
+ */
+export function splitSentences(buffer: string, final: boolean): { sentences: string[]; rest: string } {
+  const sentences: string[] = []
+  let lastIndex = 0
+  let m: RegExpExecArray | null
+  SENTENCE_RE.lastIndex = 0
+  while ((m = SENTENCE_RE.exec(buffer))) {
+    const s = m[0].trim()
+    if (s) sentences.push(s)
+    lastIndex = SENTENCE_RE.lastIndex
+  }
+  let rest = buffer.slice(lastIndex)
+  if (final && rest.trim()) {
+    sentences.push(rest.trim())
+    rest = ''
+  }
+  return { sentences, rest }
+}

@@ -15,7 +15,8 @@ import type {
   WeatherResult
 } from '../../shared/types'
 import * as audio from './audio'
-import { cancelSpeech, loadVoices, speak } from './tts'
+import type { SpeakOptions } from './tts'
+import { cancelSpeech, loadVoices, enqueueSentence, whenSpeechQueueIdle, clearSpeechQueue, splitSentences } from './tts'
 
 export interface ConvMsg {
   id: string
@@ -64,6 +65,7 @@ interface AresStore {
   refreshWidgets: () => Promise<void>
   loadBriefing: () => Promise<void>
   openBriefing: (open: boolean) => void
+  setOverlay: (enabled: boolean) => Promise<void>
   createSession: () => Promise<void>
   openSession: (id: string) => Promise<void>
   renameSession: (id: string, title: string) => Promise<void>
@@ -94,6 +96,51 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
 const uid = (p = 'id') => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
 const toConv = (session: ChatSession | null): ConvMsg[] =>
   (session?.messages || []).map((m) => ({ id: m.id, role: m.role, content: m.content }))
+
+const normWake = (s: string): string =>
+  s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[.,!?;:]/g, '')
+
+// Distância de edição pequena (tolera erros de transcrição da palavra de ativação).
+function lev(a: string, b: string): number {
+  const m = a.length
+  const n = b.length
+  if (!m) return n
+  if (!n) return m
+  let prev = Array.from({ length: n + 1 }, (_, i) => i)
+  for (let i = 1; i <= m; i++) {
+    const cur = [i]
+    for (let j = 1; j <= n; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1))
+    }
+    prev = cur
+  }
+  return prev[n]
+}
+
+/**
+ * Verifica se a transcrição começa com a palavra de ativação (nas 2 primeiras
+ * palavras, tolerando erros). Retorna o comando sem a palavra-chave, '' se só a
+ * palavra foi dita, ou null se a palavra de ativação não apareceu.
+ */
+function stripWakeWord(text: string, wakeWord: string): string | null {
+  const w = normWake(wakeWord || 'ares')
+  const variants = w === 'ares' ? ['ares', 'aris', 'aries', 'arez', 'aress', 'harris', 'ariz'] : [w]
+  const tokens = text.trim().split(/\s+/)
+  const firstTwo = tokens.slice(0, 2).map(normWake)
+  let hit = -1
+  for (let k = 0; k < firstTwo.length; k++) {
+    if (variants.some((v) => firstTwo[k] === v || lev(firstTwo[k], v) <= 1)) {
+      hit = k
+      break
+    }
+  }
+  if (hit === -1) return null
+  return tokens
+    .slice(hit + 1)
+    .join(' ')
+    .replace(/^[\s,.:;-]+/, '')
+    .trim()
+}
 
 export function AresProvider({ children }: { children: React.ReactNode }): JSX.Element {
   const [ready, setReady] = useState(false)
@@ -126,6 +173,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   const recordingRef = useRef(false)
   const busyRef = useRef(false)
   const loopRef = useRef(false)
+  const wakeArmedUntilRef = useRef(0) // janela em que o comando é aceito sem repetir a palavra
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const showToast = useCallback((msg: string) => {
@@ -150,33 +198,35 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     }
   }, [])
 
-  const speakText = useCallback((text: string): Promise<void> => {
-    return new Promise((resolve) => {
+  // Opções de voz a partir da config atual (engine, voz, velocidade etc.).
+  const voiceOpts = useCallback((): SpeakOptions => {
+    const cfg = configRef.current
+    return {
+      engine: cfg?.tts.engine,
+      piperVoice: cfg?.tts.piperVoice,
+      voiceURI: cfg?.tts.webVoiceURI,
+      rate: cfg?.tts.rate,
+      pitch: cfg?.tts.pitch,
+      volume: cfg?.tts.volume
+    }
+  }, [])
+
+  // Fala um texto inteiro (briefing, lembrete, teste de voz) pela fila de fala.
+  const speakText = useCallback(
+    async (text: string): Promise<void> => {
       const cfg = configRef.current
       if (!cfg?.tts.enabled || !text.trim()) {
         setAresState('idle')
-        return resolve()
+        return
       }
+      clearSpeechQueue()
       setAresState('speaking')
-      void speak(text, {
-        engine: cfg.tts.engine,
-        piperVoice: cfg.tts.piperVoice,
-        voiceURI: cfg.tts.webVoiceURI,
-        rate: cfg.tts.rate,
-        pitch: cfg.tts.pitch,
-        volume: cfg.tts.volume,
-        onEnd: () => {
-          setAresState('idle')
-          resolve()
-        },
-        onError: (m) => {
-          setStatus(m)
-          setAresState('idle')
-          resolve()
-        }
-      })
-    })
-  }, [])
+      enqueueSentence(text, voiceOpts())
+      await whenSpeechQueueIdle()
+      setAresState('idle')
+    },
+    [voiceOpts]
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -237,6 +287,11 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     return off
   }, [showToast, speakText])
 
+  // Espelha o estado do Ares na mini-orbe flutuante.
+  useEffect(() => {
+    window.ares.overlay.pushState(aresState).catch(() => {})
+  }, [aresState])
+
   const persistBoard = useCallback((nb: Board) => {
     boardRef.current = nb
     setBoardState(nb)
@@ -264,6 +319,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
       busyRef.current = true
       setError(null)
       setStatus('')
+      clearSpeechQueue() // interrompe qualquer fala anterior antes de começar
       const assistantId = uid('msg')
       setConversation((prev) => [
         ...prev,
@@ -272,10 +328,52 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
       ])
       setAresState('thinking')
 
+      // Pede respostas mais curtas quando a entrada veio por voz e a fala está ativa.
+      const voice = viaVoice && !!configRef.current?.tts.enabled
+      // Estado de streaming: texto exibido e buffer de sentenças (por fase).
+      let phase = 1
+      let display = ''
+      let sentenceBuf = ''
+      let speaking = false
+      const opts = voiceOpts()
+
+      const flush = (final: boolean): void => {
+        if (!voice) {
+          sentenceBuf = ''
+          return
+        }
+        const { sentences, rest } = splitSentences(sentenceBuf, final)
+        sentenceBuf = rest
+        for (const s of sentences) {
+          if (!speaking) {
+            speaking = true
+            setAresState('speaking')
+          }
+          enqueueSentence(s, opts)
+        }
+      }
+
+      const off = window.ares.chat.onDelta(({ chunk, phase: ph }) => {
+        if (ph !== phase) {
+          // Resposta final após ferramentas: encerra a fase anterior e recomeça.
+          flush(true)
+          phase = ph
+          display = ''
+          sentenceBuf = ''
+        }
+        display += chunk
+        const current = display
+        setConversation((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: current } : m)))
+        if (voice) {
+          sentenceBuf += chunk
+          flush(false)
+        }
+      })
+
       try {
-        // Pede respostas mais curtas quando a entrada veio por voz e a fala está ativa.
-        const voice = viaVoice && !!configRef.current?.tts.enabled
         const result = await window.ares.chat.ask(sid, userText, voice)
+        off()
+        flush(true) // fala o restante do buffer
         boardRef.current = result.board
         setBoardState(result.board)
         setMemory(result.memory)
@@ -293,16 +391,19 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
             .then((mem) => setMemory(mem))
             .catch(() => {})
         }
-        await speakText(result.fala)
+        if (voice) await whenSpeechQueueIdle()
+        setAresState('idle')
         busyRef.current = false
       } catch (e) {
+        off()
+        clearSpeechQueue()
         setConversation((prev) => prev.filter((m) => m.id !== assistantId))
         setError(errMsg(e))
         setAresState('idle')
         busyRef.current = false
       }
     },
-    [refreshSessions, refreshWidgets, showToast, speakText]
+    [refreshSessions, refreshWidgets, showToast, voiceOpts]
   )
 
   const sendText = useCallback(
@@ -364,6 +465,46 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     return Math.max(0.012, 0.09 - s * 0.075)
   }, [])
 
+  // Escuta única (usada pela orbe flutuante): grava até o silêncio, transcreve e responde.
+  const voiceCommandOnce = useCallback(async () => {
+    if (busyRef.current || continuousRef.current) return
+    try {
+      await audio.ensureMic()
+      setAresState('listening')
+      setStatus('Ouvindo…')
+      setRecording(true)
+      const res = await audio.recordUntilSilence({
+        threshold: micThreshold(),
+        silenceMs: configRef.current?.ui.silenceMs ?? 1350
+      })
+      setRecording(false)
+      if (!res.spoke) {
+        setAresState('idle')
+        setStatus('')
+        return
+      }
+      setAresState('thinking')
+      setStatus('Transcrevendo…')
+      const text = await transcribeBlob(res.blob, res.mimeType)
+      setStatus('')
+      if (text.trim()) await runTurn(text, true)
+      else setAresState('idle')
+    } catch (e) {
+      setError(errMsg(e))
+      setAresState('idle')
+      setRecording(false)
+    }
+  }, [micThreshold, transcribeBlob, runTurn])
+
+  // A orbe flutuante pode pedir uma escuta (botão do microfone).
+  useEffect(() => {
+    const off = window.ares.overlay.onListen(() => {
+      setScreen('assistant')
+      void voiceCommandOnce()
+    })
+    return off
+  }, [voiceCommandOnce])
+
   const continuousLoop = useCallback(async () => {
     if (loopRef.current) return
     loopRef.current = true
@@ -403,8 +544,32 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
           break
         }
         if (text.trim()) {
+          // Wake word: na conversa contínua, só age se ouvir a palavra de ativação
+          // (ou se estiver "armado" logo após dizê-la sozinha).
+          const cfg = configRef.current
+          let command = text.trim()
+          if (cfg?.ui.wakeWordEnabled) {
+            const armed = Date.now() < wakeArmedUntilRef.current
+            if (armed) {
+              wakeArmedUntilRef.current = 0 // consome a janela
+            } else {
+              const stripped = stripWakeWord(command, cfg.ui.wakeWord)
+              if (stripped === null) {
+                setStatus(`Aguardando “${cfg.ui.wakeWord || 'Ares'}”…`)
+                continue
+              }
+              if (stripped === '') {
+                // Disse só a palavra-chave: confirma e abre janela para o comando.
+                wakeArmedUntilRef.current = Date.now() + 9000
+                setStatus('Pois não?')
+                await speakText('Pois não?')
+                continue
+              }
+              command = stripped
+            }
+          }
           setStatus('')
-          await runTurn(text, true)
+          await runTurn(command, true)
           // Pausa curta após a fala do Ares antes de voltar a ouvir (evita auto-escuta).
           if (continuousRef.current) {
             setAresState('idle')
@@ -420,7 +585,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
       setRecording(false)
       if (!busyRef.current) setAresState('idle')
     }
-  }, [runTurn, transcribeBlob, micThreshold])
+  }, [runTurn, transcribeBlob, micThreshold, speakText])
 
   const toggleContinuous = useCallback(() => {
     const next = !continuousRef.current
@@ -628,6 +793,12 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     if (open) void loadBriefing()
   }, [loadBriefing])
 
+  const setOverlay = useCallback(async (enabled: boolean) => {
+    const nc = await window.ares.overlay.set(enabled)
+    configRef.current = nc
+    setConfig(nc)
+  }, [])
+
   const navigate = useCallback((s: Screen) => setScreen(s), [])
   const openSettings = useCallback((b: boolean) => setSettingsOpen(b), [])
   const clearError = useCallback(() => setError(null), [])
@@ -669,6 +840,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     refreshWidgets,
     loadBriefing,
     openBriefing,
+    setOverlay,
     createSession,
     openSession,
     renameSession,

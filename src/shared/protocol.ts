@@ -51,6 +51,53 @@ export function validateAction(a: Acao): { ok: boolean; error?: string } {
   return { ok: true }
 }
 
+/**
+ * Extrai, de um JSON ainda em construção (streaming), o valor parcial do campo
+ * "fala" já decodificado. Monotônico: o texto só cresce conforme chegam tokens,
+ * até a aspa de fechamento. Usado para falar/exibir a resposta enquanto o LLM gera.
+ */
+export function extractFalaPrefix(raw: string): { text: string; closed: boolean } {
+  const keyIdx = raw.indexOf('"fala"')
+  if (keyIdx === -1) return { text: '', closed: false }
+  let i = keyIdx + 6
+  while (i < raw.length && raw[i] !== ':') i++
+  i++ // passa do ':'
+  while (i < raw.length && /\s/.test(raw[i])) i++
+  if (raw[i] !== '"') return { text: '', closed: false }
+  i++ // passa da aspa de abertura
+  let out = ''
+  let esc = false
+  for (; i < raw.length; i++) {
+    const ch = raw[i]
+    if (esc) {
+      if (ch === 'n') out += '\n'
+      else if (ch === 't') out += '\t'
+      else if (ch === 'r') out += '\r'
+      else if (ch === '"') out += '"'
+      else if (ch === '\\') out += '\\'
+      else if (ch === '/') out += '/'
+      else if (ch === 'u') {
+        const hex = raw.slice(i + 1, i + 5)
+        if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+          out += String.fromCharCode(parseInt(hex, 16))
+          i += 4
+        } else {
+          return { text: out, closed: false } // \u incompleto: espera mais tokens
+        }
+      } else out += ch
+      esc = false
+      continue
+    }
+    if (ch === '\\') {
+      esc = true
+      continue
+    }
+    if (ch === '"') return { text: out, closed: true }
+    out += ch
+  }
+  return { text: out, closed: false }
+}
+
 /** Tenta extrair o primeiro objeto JSON balanceado de um texto. */
 function extractJsonObject(text: string): string | null {
   const start = text.indexOf('{')
