@@ -1,4 +1,5 @@
 import type { ReverseGeocodeResult, UserLocation, WeatherResult, WeatherPeriod, NewsItem, WebResult } from '../shared/types'
+export { hermesExecute, pingHermes } from './hermes'
 
 // Ferramentas de consulta externas (sem chave de API):
 // - Clima: Open-Meteo (geocoding + forecast)
@@ -447,31 +448,6 @@ export async function readPage(url: string): Promise<{ url: string; title: strin
   const texto = decodeEntities(body).replace(/\s+/g, ' ').trim().slice(0, 4000)
   if (!texto) throw new Error('A página não tem texto legível para mim.')
   return { url: u, title, texto }
-}
-
-// ---------------- Ponte com o Hermes (groundwork, opcional) ----------------
-// Delegação genérica: envia um comando em texto ao Hermes e devolve a resposta.
-// Off por padrão; o contrato real do endpoint do Hermes deve ser confirmado.
-export async function hermesExecute(baseUrl: string, comando: string): Promise<string> {
-  const url = baseUrl.replace(/\/$/, '') + '/message'
-  let res: Response
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: comando, source: 'ares' })
-    })
-  } catch (err: any) {
-    throw new Error(`Não consegui falar com o Hermes em ${baseUrl}. Detalhe: ${err?.message || err}`)
-  }
-  if (!res.ok) throw new Error(`Hermes respondeu ${res.status}.`)
-  const txt = await res.text()
-  try {
-    const j = JSON.parse(txt)
-    return String(j.reply ?? j.text ?? j.message ?? txt)
-  } catch {
-    return txt
-  }
 }
 
 // ---------------- Busca web (DuckDuckGo HTML) ----------------

@@ -134,25 +134,34 @@ risco é tratar o Ares como **cliente de voz/desktop** do Hermes:
 
 Assim a qualidade do Hermes é preservada porque **reusamos o Hermes**, não o imitamos.
 
-### Groundwork já deixado nesta atualização
+### Fechamento implementado na versão 0.4
 
-- Config `integrations.hermes { enabled, baseUrl }` + seção em Configurações.
-- Ferramenta de agente `hermes.executar { comando }` (POST para o endpoint do Hermes).
-- Função `hermesExecute()` em `src/main/tools.ts` (genérica: envia `{message}`, lê `reply`).
+- Config `integrations.hermes` completa: `enabled`, `baseUrl`, `messagePath`,
+  `healthPath`, `apiKey`, `authHeader`, `timeoutMs` e `responsePath`.
+- Seção em Configurações com botão **TESTAR PONTE**.
+- Ferramenta de agente `hermes.executar { comando }`, com roteamento explícito para
+  WhatsApp, Trello, Obsidian, office de agentes e automações do Hermes.
+- Função `hermesExecute()` em `src/main/hermes.ts`, tolerante a respostas em
+  `reply`, `text`, `message`, `data.*`, `result.*` ou caminho configurável.
+- Envio de `sessionId`, `source: "ares"` e `client: "ares-desktop"` para manter
+  contexto do lado Hermes.
+- Status do Hermes na tela Sistema via `pingHermes()`.
+- Testes unitários da ponte em `tests/hermes.test.ts`.
 
-### Próximos passos para fechar a integração
+### Status dos itens que faltavam
 
-1. **Confirmar o contrato HTTP do Hermes** (rota, formato de request/response, auth). Hoje a
-   ponte assume `POST /message {message} -> {reply}`; ajustar ao real do Hermes.
-2. **Roteamento de intenção**: o prompt decide quando usar `hermes.executar` (ex.: "manda no
-   WhatsApp…", "cria card no Trello…", "salva no Obsidian…") vs. resolver localmente.
-3. **Voz ponta a ponta**: streaming da resposta do Hermes na fila de fala por sentença (já
-   existe no Ares).
-4. **Sessão/contexto compartilhado**: enviar ao Hermes um id de sessão para manter contexto
-   do "office".
-5. **Segurança/confirmação**: ações externas sensíveis (enviar mensagem) pedem confirmação,
-   como já fazemos para rascunhos.
-6. **Status do Hermes na tela Sistema**: ping ao endpoint, como já fazemos com o 9 Router.
+1. **Contrato HTTP do Hermes** — fechado no Ares com rotas, auth, timeout e
+   `responsePath` configuráveis. O padrão segue `POST /message`.
+2. **Roteamento de intenção** — implementado no prompt do agente.
+3. **Voz ponta a ponta** — a resposta final do Hermes entra no mesmo fluxo de fala
+   por sentença do Ares.
+4. **Sessão/contexto compartilhado** — implementado com `sessionId`.
+5. **Segurança/confirmação** — prompt orienta pedir confirmação quando destinatário,
+   conteúdo ou alvo externo estiverem incompletos.
+6. **Status do Hermes na tela Sistema** — implementado.
+
+Próximos incrementos possíveis: streaming nativo do Hermes, confirmação visual antes
+de ações externas sensíveis e suporte a múltiplos perfis/endpoints Hermes.
 
 ### Alternativas consideradas
 

@@ -91,6 +91,18 @@ export default function System(): JSX.Element {
               <Row k="Modelo" v={diag.nineRouter.model} />
             </Panel>
 
+            <Panel title="PONTE · HERMES">
+              <Status
+                ok={diag.hermes.ok}
+                label={diag.hermes.enabled ? (diag.hermes.ok ? 'Online' : 'Indisponível') : 'Desativada'}
+                detail={diag.hermes.detail}
+              />
+              <Row k="URL" v={diag.hermes.baseUrl} />
+              <Row k="Comando" v={diag.hermes.messagePath} />
+              <Row k="Status" v={diag.hermes.healthPath} />
+              <Row k="Timeout" v={`${diag.hermes.timeoutMs} ms`} />
+            </Panel>
+
             <Panel title="TRANSCRIÇÃO · GROQ">
               <Status ok={diag.groq.ok} label={diag.groq.configured ? 'Configurado' : 'Sem chave'} detail={diag.groq.detail} />
             </Panel>

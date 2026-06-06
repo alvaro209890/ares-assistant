@@ -19,10 +19,12 @@ export default function SettingsPanel(): JSX.Element {
     importData,
     setGlobalShortcut,
     setAutostart,
-    testBrain
+    testBrain,
+    testHermes
   } = useAres()
   const pt = ptVoices(voices)
   const [brainTest, setBrainTest] = useState<string>('')
+  const [hermesTest, setHermesTest] = useState<string>('')
 
   return (
     <AnimatePresence>
@@ -297,8 +299,103 @@ export default function SettingsPanel(): JSX.Element {
                   }
                 />
               </Field>
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Rota de comando">
+                  <input
+                    className="input"
+                    placeholder="/message"
+                    value={config.integrations.hermes.messagePath}
+                    onChange={(e) =>
+                      saveConfig({
+                        integrations: { ...config.integrations, hermes: { ...config.integrations.hermes, messagePath: e.target.value } }
+                      })
+                    }
+                  />
+                </Field>
+                <Field label="Rota de status">
+                  <input
+                    className="input"
+                    placeholder="/health"
+                    value={config.integrations.hermes.healthPath}
+                    onChange={(e) =>
+                      saveConfig({
+                        integrations: { ...config.integrations, hermes: { ...config.integrations.hermes, healthPath: e.target.value } }
+                      })
+                    }
+                  />
+                </Field>
+              </div>
+              <Field label="Token do Hermes">
+                <input
+                  className="input"
+                  type="password"
+                  placeholder="opcional"
+                  value={config.integrations.hermes.apiKey}
+                  onChange={(e) =>
+                    saveConfig({
+                      integrations: { ...config.integrations, hermes: { ...config.integrations.hermes, apiKey: e.target.value } }
+                    })
+                  }
+                />
+              </Field>
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Cabeçalho auth">
+                  <input
+                    className="input"
+                    value={config.integrations.hermes.authHeader}
+                    onChange={(e) =>
+                      saveConfig({
+                        integrations: { ...config.integrations, hermes: { ...config.integrations.hermes, authHeader: e.target.value } }
+                      })
+                    }
+                  />
+                </Field>
+                <Field label="Timeout (ms)">
+                  <input
+                    className="input"
+                    type="number"
+                    min={1000}
+                    max={60000}
+                    step={500}
+                    value={config.integrations.hermes.timeoutMs}
+                    onChange={(e) =>
+                      saveConfig({
+                        integrations: {
+                          ...config.integrations,
+                          hermes: { ...config.integrations.hermes, timeoutMs: Number(e.target.value) || 4000 }
+                        }
+                      })
+                    }
+                  />
+                </Field>
+              </div>
+              <Field label="Caminho da resposta">
+                <input
+                  className="input"
+                  placeholder="ex.: data.reply (opcional)"
+                  value={config.integrations.hermes.responsePath}
+                  onChange={(e) =>
+                    saveConfig({
+                      integrations: { ...config.integrations, hermes: { ...config.integrations.hermes, responsePath: e.target.value } }
+                    })
+                  }
+                />
+              </Field>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={async () => {
+                    setHermesTest('testando…')
+                    const r = await testHermes()
+                    setHermesTest(r.ok ? '✓ ' + r.detail : '✕ ' + r.detail)
+                  }}
+                  className="btn-ghost"
+                >
+                  TESTAR PONTE
+                </button>
+                {hermesTest && <span className="text-[11px] text-cyan-200/60">{hermesTest}</span>}
+              </div>
               <p className="text-[11px] text-cyan-200/45">
-                Quando ligada, o Ares pode delegar comandos ao Hermes por voz. Confirme o endpoint do seu Hermes.
+                Quando ligada, o Ares delega comandos ao Hermes por voz e envia o id da sessão para preservar contexto.
               </p>
             </Section>
 

@@ -21,5 +21,5 @@
       "@/*": ["src/renderer/*"]
     }
   },
-  "include": ["src", "electron.vite.config.ts"]
+  "include": ["src", "tests", "electron.vite.config.ts"]
 }

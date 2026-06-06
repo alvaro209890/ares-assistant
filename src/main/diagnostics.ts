@@ -4,6 +4,7 @@ import { join } from 'path'
 import type { DiagnosticsResult, DataFileInfo } from '../shared/types'
 import { readConfig } from './config'
 import { isPiperReady, listPiperVoices } from './piper'
+import { pingHermes } from './hermes'
 
 // Coleta o status local do Ares: app, serviços (9 Router/Groq/Piper), localização e
 // arquivos de dados. Tudo local; só o ping do 9 Router toca a rede (com timeout curto).
@@ -38,7 +39,7 @@ function fileInfo(name: string): DataFileInfo {
 
 export async function getDiagnostics(): Promise<DiagnosticsResult> {
   const cfg = readConfig()
-  const nine = await pingNineRouter(cfg.nineRouter.baseUrl)
+  const [nine, hermes] = await Promise.all([pingNineRouter(cfg.nineRouter.baseUrl), pingHermes(cfg.integrations.hermes)])
   const groqConfigured = !!cfg.grog.apiKey
   return {
     app: {
@@ -51,6 +52,7 @@ export async function getDiagnostics(): Promise<DiagnosticsResult> {
     },
     userDataPath: app.getPath('userData'),
     nineRouter: { ...nine, baseUrl: cfg.nineRouter.baseUrl, model: cfg.nineRouter.model },
+    hermes,
     groq: {
       configured: groqConfigured,
       ok: groqConfigured,

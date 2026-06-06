@@ -21,7 +21,16 @@ export interface AppConfig {
     weatherCity: string // cidade padrão (widget de clima)
     newsTopic: string // tema padrão de notícias ("" = manchetes gerais)
     location: UserLocation // localização aproximada local, com permissão do usuário
-    hermes: { enabled: boolean; baseUrl: string } // ponte opcional com o Hermes (groundwork)
+    hermes: {
+      enabled: boolean
+      baseUrl: string
+      messagePath: string // rota de comando do Hermes
+      healthPath: string // rota de status/ping do Hermes
+      apiKey: string // token opcional da ponte
+      authHeader: string // cabeçalho usado quando apiKey existir
+      timeoutMs: number
+      responsePath: string // caminho opcional da resposta, ex.: data.reply
+    }
   }
   ui: {
     continuousMode: boolean
@@ -316,6 +325,13 @@ export interface ServiceStatus {
   ok: boolean
   detail: string
 }
+export interface HermesStatus extends ServiceStatus {
+  enabled: boolean
+  baseUrl: string
+  messagePath: string
+  healthPath: string
+  timeoutMs: number
+}
 export interface DataFileInfo {
   name: string
   path: string
@@ -326,6 +342,7 @@ export interface DiagnosticsResult {
   app: { name: string; version: string; platform: string; electron: string; node: string; chrome: string }
   userDataPath: string
   nineRouter: ServiceStatus & { baseUrl: string; model: string }
+  hermes: HermesStatus
   groq: ServiceStatus & { configured: boolean }
   piper: { ready: boolean; voices: string[] }
   location: UserLocation

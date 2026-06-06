@@ -37,7 +37,16 @@ const DEFAULT_CONFIG: AppConfig = {
     weatherCity: 'São Paulo',
     newsTopic: '',
     location: { enabled: true },
-    hermes: { enabled: false, baseUrl: 'http://localhost:18789' }
+    hermes: {
+      enabled: false,
+      baseUrl: 'http://localhost:18789',
+      messagePath: '/message',
+      healthPath: '/health',
+      apiKey: '',
+      authHeader: 'Authorization',
+      timeoutMs: 4000,
+      responsePath: ''
+    }
   },
   ui: {
     continuousMode: false,

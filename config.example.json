@@ -27,7 +27,7 @@
   },
 
   "integrations": {
-    "_doc": "Integrações sem chave: clima Open-Meteo, geolocalização local via Chromium + Nominatim, busca DuckDuckGo HTML, notícias Google News RSS. hermes: ponte opcional (groundwork) para delegar comandos ao Hermes.",
+    "_doc": "Integrações sem chave: clima Open-Meteo, geolocalização local via Chromium + Nominatim, busca DuckDuckGo HTML, notícias Google News RSS. hermes: ponte opcional para delegar comandos externos ao Hermes.",
     "weatherCity": "São Paulo",
     "newsTopic": "",
     "location": {
@@ -41,7 +41,16 @@
       "label": "",
       "updatedAt": null
     },
-    "hermes": { "enabled": false, "baseUrl": "http://localhost:18789" }
+    "hermes": {
+      "enabled": false,
+      "baseUrl": "http://localhost:18789",
+      "messagePath": "/message",
+      "healthPath": "/health",
+      "apiKey": "",
+      "authHeader": "Authorization",
+      "timeoutMs": 4000,
+      "responsePath": ""
+    }
   },
 
   "ui": {

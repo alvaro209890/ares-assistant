@@ -10,6 +10,7 @@ import { initOverlay, toggleOverlay, setOverlayState, focusMain, requestListen }
 import { setupTray, destroyTray, registerGlobalShortcut, setAutostart } from './desktop'
 import { exportData, importData } from './backup'
 import { getSystemMetrics, readClipboard } from './system'
+import { pingHermes } from './hermes'
 import { startReminders } from './notify'
 import { synthesize, listPiperVoices, isPiperReady, ensurePiper } from './piper'
 import { getWeather, getWeatherAt, getNews, reverseGeocode } from './tools'
@@ -290,5 +291,9 @@ function registerIpc(): void {
       clearTimeout(timer)
       return { ok: false, detail: e?.name === 'AbortError' ? 'sem resposta (timeout)' : 'offline / inacessível' }
     }
+  })
+
+  ipcMain.handle('hermes:test', async () => {
+    return pingHermes(readConfig().integrations.hermes)
   })
 }

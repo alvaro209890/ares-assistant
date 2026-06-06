@@ -85,8 +85,9 @@ FERRAMENTAS DE CONSULTA (dê uma fala curta tipo "Deixe-me verificar." e AGUARDE
 - pagina.ler {url}   (lê uma página da web e resume/responde a partir do conteúdo real dela)
 - sistema.status {}   (uso de CPU, memória e tempo ligado do computador — "como está o sistema?", "quanta memória livre?")
 - area.ler {}   (lê o texto da área de transferência para resumir/traduzir/explicar o que o usuário copiou — "resuma o que eu copiei")
+- hermes.executar {comando}   (delegue ao Hermes pedidos externos que são dele: WhatsApp, Trello, Obsidian, office de agentes, Pedro/Junim/Maicom ou automações já existentes no Hermes)
 
-Regras: use nomes de colunas/tarefas/listas existentes (ver CONTEXTO). Datas SEMPRE em ISO local sem fuso (ex.: 2026-06-03T09:00), resolvidas pela seção DATAS. memoria.salvar só para fatos duradouros do usuário (preferências, perfil, rotina), nunca para pedidos pontuais. Para rascunho de mensagem/e-mail: escreva o texto em "fala" para o usuário revisar e, se ele pedir para guardar, use nota.salvar.`
+Regras: use nomes de colunas/tarefas/listas existentes (ver CONTEXTO). Datas SEMPRE em ISO local sem fuso (ex.: 2026-06-03T09:00), resolvidas pela seção DATAS. memoria.salvar só para fatos duradouros do usuário (preferências, perfil, rotina), nunca para pedidos pontuais. Para rascunho de mensagem/e-mail: escreva o texto em "fala" para o usuário revisar e, se ele pedir para guardar, use nota.salvar. Para ações externas sensíveis via Hermes (enviar mensagem, publicar, alterar Trello/Obsidian), só execute quando destinatário/conteúdo/alvo estiverem claros; se faltar algo, peça confirmação em vez de chamar a ferramenta.`
 }
 
 // Âncoras de datas relativas, pré-calculadas, para o LLM resolver "hoje", "amanhã",
@@ -121,6 +122,7 @@ function buildSystemPrompt(ctx: {
   board: Board
   events: CalendarEvent[]
   location: UserLocation
+  hermes: AppConfig['integrations']['hermes']
   summary?: string
   voice: boolean
 }): string {
@@ -134,6 +136,9 @@ function buildSystemPrompt(ctx: {
     ctx.location.enabled && typeof ctx.location.latitude === 'number' && typeof ctx.location.longitude === 'number'
       ? `${ctx.location.label || ctx.location.city || 'localização atual'} (aprox.)`
       : '(não disponível; use a cidade padrão quando necessário)'
+  const hermes = ctx.hermes.enabled
+    ? `Ativada em ${ctx.hermes.baseUrl}${ctx.hermes.messagePath || '/message'}. Use hermes.executar para comandos de WhatsApp, Trello, Obsidian, office de agentes e automações do Hermes.`
+    : 'Desativada nas Configurações. Se o usuário pedir algo que depende do Hermes, explique que a ponte precisa ser ativada.'
   return [
     PERSONA,
     ctx.voice ? VOICE_HINT : TEXT_HINT,
@@ -141,6 +146,7 @@ function buildSystemPrompt(ctx: {
     `# CONTEXTO`,
     `## DATAS\n${dateAnchors(now)}`,
     `## Localização aproximada do usuário\n${loc}`,
+    `## Ponte com o Hermes\n${hermes}`,
     `## Sobre o usuário (memória de longo prazo)\n${memorySummary()}`,
     `## Tarefas atuais\n${boardSummary(ctx.board)}`,
     `## Próximos eventos\n${upcoming || '(nenhum)'}`,
@@ -152,7 +158,7 @@ function buildSystemPrompt(ctx: {
     .join('\n\n')
 }
 
-async function runQuery(a: Acao, cfg: AppConfig): Promise<unknown> {
+async function runQuery(a: Acao, cfg: AppConfig, sessionId: string): Promise<unknown> {
   const integrations = cfg.integrations
   try {
     switch (a.tipo) {
@@ -198,7 +204,7 @@ async function runQuery(a: Acao, cfg: AppConfig): Promise<unknown> {
       }
       case 'hermes.executar': {
         if (!integrations.hermes?.enabled) return { tipo: a.tipo, erro: 'Ponte com o Hermes desativada nas Configurações.' }
-        return { tipo: a.tipo, resultado: await hermesExecute(integrations.hermes.baseUrl, String(a.comando || a.texto || '')) }
+        return { tipo: a.tipo, resultado: await hermesExecute(integrations.hermes, String(a.comando || a.texto || ''), sessionId) }
       }
       case 'briefing.consultar': {
         const b = await buildBriefing(cfg)
@@ -368,6 +374,7 @@ export async function runTurn(
     board: loadBoard(),
     events: loadEvents(),
     location: cfg.integrations.location,
+    hermes: cfg.integrations.hermes,
     summary: session?.summary,
     voice
   })
@@ -385,7 +392,7 @@ export async function runTurn(
 
   if (queries.length) {
     const results: unknown[] = []
-    for (const q of queries) results.push(await runQuery(q, cfg))
+    for (const q of queries) results.push(await runQuery(q, cfg, sessionId))
     const followup: ChatMessage[] = [
       ...messages,
       { role: 'assistant', content: env.fala || '...' },

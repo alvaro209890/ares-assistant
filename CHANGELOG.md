@@ -4,6 +4,46 @@ Todas as mudanças relevantes do Ares. O formato segue de perto
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/) e o projeto usa
 versionamento semântico.
 
+## [0.4.0] — 2026-06-05
+
+Foco: fechar a **ponte com o Hermes** para o Ares atuar como controle de voz/
+desktop sem reimplementar o Hermes.
+
+### Adicionado
+
+- **Cliente Hermes configurável** — a ponte agora aceita rota de comando, rota de
+  status, token opcional, cabeçalho de autenticação, timeout e caminho da resposta
+  (`responsePath`). Continua compatível com o contrato simples `POST /message`.
+- **Roteamento de intenção no agente** — o prompt orienta o Ares a delegar ao
+  Hermes pedidos de WhatsApp, Trello, Obsidian, office de agentes e automações já
+  existentes no Hermes, mantendo ações locais dentro do Ares.
+- **Contexto de sessão para o Hermes** — chamadas `hermes.executar` enviam
+  `sessionId`, `source: "ares"` e `client: "ares-desktop"` para o Hermes manter
+  contexto do office.
+- **Status do Hermes no diagnóstico** — a tela Sistema mostra se a ponte está
+  ativada, online, endpoint, rotas e timeout.
+- **Teste manual da ponte** — Configurações > Ponte com o Hermes ganhou o botão
+  **TESTAR PONTE**.
+- **Suíte unitária da ponte** — Vitest cobre montagem de URL, extração de resposta,
+  POST com token/sessão, rotas configuráveis, ping e ponte desativada.
+
+### Documentação
+
+- Novo guia [`docs/PONTE_HERMES.md`](docs/PONTE_HERMES.md) com contrato HTTP,
+  configuração, payload, formatos de resposta, diagnóstico e troubleshooting.
+- README, ROADMAP, `config.example.json` e scripts de verificação atualizados.
+
+### Técnico
+
+- `src/main/hermes.ts` (novo): `hermesExecute()`, `pingHermes()`,
+  `extractHermesReply()` e montagem segura de URL.
+- `src/main/agent.ts`: ferramenta `hermes.executar` documentada no prompt e
+  executada com config completa + sessão.
+- `src/main/diagnostics.ts`, `src/renderer/screens/System.tsx` e
+  `src/renderer/components/SettingsPanel.tsx`: status e teste da ponte.
+- `package.json`: versão `0.4.0`, scripts `typecheck`, `test:unit`, `test` e
+  `verify`.
+
 ## [0.3.0] — 2026-06-05
 
 Foco: deixar o Ares **mais "JARVIS"** — consciente do próprio computador e do que

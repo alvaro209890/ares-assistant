@@ -22,7 +22,8 @@ O projeto roda em modo de desenvolvimento. O empacotamento `.deb` está configur
 - **Briefing do dia**: painel e comando de voz com clima, agenda, tarefas vencidas/próximas, lembretes, notícias e sugestões proativas discretas.
 - **Kanban e calendário**: etiquetas nomeadas, links/anexos locais, tarefas e eventos recorrentes, lembrete configurável antes do evento, visões “Hoje”, “Vencidas”, “Próximos 7 dias” e agenda por dia/semana.
 - **Conversa contínua melhor**: sensibilidade do microfone, tempo de silêncio e pausa pós-fala configuráveis (evita que o Ares escute a própria voz).
-- **Tela Sistema/Diagnóstico**: status do 9 Router, Groq, Piper, localização, arquivos de dados locais e versões do app.
+- **Ponte com o Hermes**: delegação por voz para WhatsApp, Trello, Obsidian, office de agentes e automações externas do Hermes.
+- **Tela Sistema/Diagnóstico**: status do 9 Router, Hermes, Groq, Piper, localização, arquivos de dados locais e versões do app.
 
 ### Recursos avançados de voz e presença
 
@@ -30,6 +31,13 @@ O projeto roda em modo de desenvolvimento. O empacotamento `.deb` está configur
 - **Palavra de ativação ("Ares")**: na conversa contínua, opcionalmente só responde quando você começa pela palavra-chave (ex.: "Ares, que horas são?"). Diga só "Ares" para ele confirmar e aguardar o comando.
 - **Orbe flutuante (companion)**: uma mini-orbe always-on-top que reflete o estado do Ares; clique para abrir o app, ou use o microfone dela para falar sem trazer a janela principal.
 - **Barge-in (interromper a fala)**: na conversa contínua, comece a falar por cima e o Ares para na hora e te ouve; a tecla `Esc` também interrompe a fala a qualquer momento.
+
+### Novidades da versão 0.4
+
+- **Ponte com o Hermes fechada**: contrato HTTP configurável, token opcional, timeout, rota de status, resposta por caminho configurável e envio do `sessionId`.
+- **Roteamento de intenção para o Hermes**: comandos de WhatsApp, Trello, Obsidian, office de agentes e automações do Hermes são delegados via `hermes.executar`.
+- **Status e teste da ponte**: tela Sistema mostra o estado do Hermes e Configurações > Ponte com o Hermes ganhou **TESTAR PONTE**.
+- **Testes automatizados**: suíte Vitest cobre o cliente Hermes e o projeto ganhou `npm test` / `npm run verify`.
 
 ### Novidades da versão 0.3
 
@@ -59,7 +67,7 @@ Histórico completo em [`CHANGELOG.md`](CHANGELOG.md).
 - **Presença no sistema**: ícone na bandeja, atalho global (Ctrl+Shift+Espaço) e iniciar com o sistema.
 - **"Bom dia" automático**: opção de falar o briefing ao abrir, 1x por dia.
 - **Indicador de microfone**: aviso visível sempre que o microfone está ativo.
-- **Ponte com o Hermes (avançado/groundwork)**: opção para delegar comandos por voz a um Hermes existente.
+- **Ponte com o Hermes (avançado)**: delegação por voz para um Hermes existente, com contrato HTTP configurável e teste de conexão.
 
 ## Rodar em Desenvolvimento
 
@@ -72,8 +80,9 @@ npm run dev
 Scripts úteis:
 
 ```bash
-npx tsc --noEmit
+npm test
 npm run build
+npm run verify
 npm run dev
 ```
 
@@ -94,6 +103,7 @@ Arquivos importantes:
 - `src/main/index.ts`: janela Electron, permissões, IPC e inicialização.
 - `src/main/agent.ts`: prompt do Ares, datas relativas, validação, execução de ferramentas e auto-extração de memória.
 - `src/main/tools.ts`: clima (com períodos/alerta), busca web, notícias, geocodificação reversa, conversão de unidades (`convertUnit`) e leitura de páginas (`readPage`).
+- `src/main/hermes.ts`: cliente da ponte Hermes, ping, autenticação opcional, timeout e extração robusta da resposta.
 - `src/main/briefing.ts`: monta o briefing do dia e sua versão falável.
 - `src/main/diagnostics.ts`: status de serviços, localização e arquivos de dados.
 - `src/main/system.ts`: telemetria do sistema (`getSystemMetrics`) e leitura da área de transferência (`readClipboard`).
@@ -142,6 +152,14 @@ Campos principais:
 | `integrations.weatherCity` | cidade padrão quando a localização não está disponível |
 | `integrations.location.enabled` | ativa uso de localização aproximada |
 | `integrations.location.latitude/longitude` | coordenadas salvas localmente após permissão |
+| `integrations.hermes.enabled` | ativa a delegação de comandos ao Hermes |
+| `integrations.hermes.baseUrl` | URL base do Hermes |
+| `integrations.hermes.messagePath` | rota usada para `POST` de comandos, padrão `/message` |
+| `integrations.hermes.healthPath` | rota usada para status, padrão `/health` |
+| `integrations.hermes.apiKey` | token opcional da ponte |
+| `integrations.hermes.authHeader` | cabeçalho do token, padrão `Authorization` |
+| `integrations.hermes.timeoutMs` | timeout das chamadas ao Hermes |
+| `integrations.hermes.responsePath` | caminho opcional da resposta, ex.: `data.reply` |
 | `ui.continuousMode` | mantém o modo de conversa contínua ativo entre reinícios |
 | `ui.micSensitivity` | 0..1 — quanto maior, mais sensível o microfone na conversa contínua |
 | `ui.silenceMs` | tempo de silêncio (ms) para encerrar a fala no modo contínuo |
@@ -399,7 +417,34 @@ Em Configurações > Sistema e Atalhos:
 
 ## Ponte com o Hermes (avançado)
 
-O Ares e o Hermes compartilham o mesmo cérebro (9 Router). Em vez de reimplementar o Hermes, o Ares pode atuar como **controle de voz/cliente** dele: em Configurações > Ponte com o Hermes, ative e informe o endpoint; assim o Ares delega comandos ao Hermes (ferramenta `hermes.executar`) preservando a qualidade do Hermes. É um groundwork — confirme o contrato HTTP do seu Hermes antes de usar em produção.
+O Ares e o Hermes compartilham o mesmo cérebro (9 Router). Em vez de reimplementar o Hermes, o Ares atua como **controle de voz/cliente** dele: em Configurações > Ponte com o Hermes, ative a ponte, configure o endpoint e teste a conexão. Quando o pedido é de Hermes, o agente usa `hermes.executar` e fala a resposta pelo fluxo normal do Ares.
+
+Padrão de comando:
+
+```http
+POST {baseUrl}{messagePath}
+Content-Type: application/json
+Authorization: Bearer <apiKey opcional>
+```
+
+Payload enviado:
+
+```json
+{
+  "message": "comando do usuário",
+  "text": "comando do usuário",
+  "command": "comando do usuário",
+  "source": "ares",
+  "client": "ares-desktop",
+  "sessionId": "sessão atual"
+}
+```
+
+A resposta pode vir como texto puro ou JSON em `reply`, `response`, `answer`, `text`, `message`, `content`, `data.*`, `result.*` ou no caminho configurado em `responsePath`.
+
+Use a ponte para comandos de WhatsApp, Trello, Obsidian, office de agentes (Pedro/Junim/Maicom) e automações já existentes no Hermes. Ações externas sensíveis devem ter destinatário, conteúdo e alvo claros; se algo faltar, o Ares pede confirmação antes de delegar.
+
+Detalhes completos: [`docs/PONTE_HERMES.md`](docs/PONTE_HERMES.md).
 
 ## Kanban
 
@@ -567,7 +612,7 @@ Ferramentas de consulta:
 - `pagina.ler` `{url}` (lê uma página web e responde/resume a partir do conteúdo dela)
 - `sistema.status` `{}` (uso de CPU, memória e tempo ligado do computador)
 - `area.ler` `{}` (lê o texto da área de transferência para resumir/traduzir/explicar)
-- `hermes.executar` `{comando}` (só com a ponte do Hermes ativada)
+- `hermes.executar` `{comando}` (delega comandos externos ao Hermes; só age com a ponte ativada)
 
 As ferramentas de consulta são executadas pelo processo principal. O resultado volta ao LLM para gerar a resposta final em linguagem natural.
 
@@ -599,6 +644,8 @@ Com a palavra de ativação ligada, comece pela palavra (ex.: "**Ares**, faça m
 - "leia esta página e me resuma: https://exemplo.com/artigo"
 - "como está o sistema?" / "quanta memória está livre?" / "há quanto tempo o PC está ligado?"
 - "resuma o que eu copiei" / "traduza o que está na área de transferência"
+- "mande no WhatsApp pelo Hermes que vou atrasar 10 minutos"
+- "peça ao Hermes para criar um card no Trello do projeto Ares"
 - "crie uma tarefa semanal de regar as plantas" / "mova comprar café para concluído"
 - "lembre-se que prefiro respostas curtas" / "anote que trabalho com fotografia"
 - "quais as notícias de hoje?" / "pesquise na web sobre ..."
@@ -635,12 +682,19 @@ Os arquivos locais antigos continuam funcionando. Campos novos são preenchidos 
 - **A orbe flutuante não aparece ou fica preta**: depende de um compositor com transparência. Ative/desative em Configurações > Orbe Flutuante; ela some ao fechar a janela principal.
 - **O barge-in interrompe sozinho**: aumente o silêncio/baixe a sensibilidade do microfone ou desligue `ui.bargeIn`. Ele só age na conversa contínua; a tecla `Esc` continua interrompendo manualmente.
 - **A busca global não abre**: use `Ctrl+K` (ou `⌘K` no Mac) com o foco na janela do Ares, ou clique em **Buscar** na barra lateral; `Esc` fecha.
+- **Hermes indisponível**: confira Configurações > Ponte com o Hermes, rode **TESTAR PONTE** e veja a tela Sistema. Ajuste `baseUrl`, `messagePath`, `healthPath`, token e `responsePath` conforme o contrato real do Hermes.
 
 ## Verificação Antes de Publicar
 
 ```bash
-npx tsc --noEmit
+npm test
 npm run build
+```
+
+Atalho completo:
+
+```bash
+npm run verify
 ```
 
 Para desenvolvimento visual:
