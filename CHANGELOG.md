@@ -4,6 +4,42 @@ Todas as mudanças relevantes do Ares. O formato segue de perto
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/) e o projeto usa
 versionamento semântico.
 
+## [0.8.0] — 2026-06-06
+
+Foco: **fechar a ponte com o Hermes de ponta a ponta neste PC**, com um servidor
+local movido ao **mesmo cérebro do Ares** (9Router `cx/gpt-5.5`).
+
+### Adicionado
+
+- **Servidor de ponte local (`bridge/server.mjs`, `npm run bridge`)** — sem
+  dependências (só `node:http` + `fetch`, Node ≥ 18). Expõe as rotas que o Ares
+  chama:
+  - `GET /health` — status (serviço, modelo, 9Router);
+  - `POST /message` — comando geral respondido pelo 9Router; avisa quando o pedido
+    exige WhatsApp/Trello/Obsidian de verdade (precisa do Hermes Desktop completo);
+  - `POST /code` — "Hermes Code" com resposta **estruturada** (`summary`,
+    `patches`, `tests`, `risks`, `commands`, `needsConfirmation`), no contrato que o
+    cliente do Ares já preserva em `structured`.
+- **Configurável por ambiente** — `ARES_BRIDGE_PORT`, `ARES_BRIDGE_HOST`,
+  `NINEROUTER_BASE_URL`, `NINEROUTER_MODEL`, `NINEROUTER_API_KEY`,
+  `ARES_BRIDGE_TOKEN`, `ARES_BRIDGE_TIMEOUT_MS`.
+- **Sempre ligado (systemd --user)** — unit `bridge/ares-bridge.service`; sobe no
+  login e persiste com `linger`. Guard de `EADDRINUSE` com mensagem clara.
+- **Aviso de conflito de porta** — documentado em todo lugar: a `:18789` é
+  disputada com o Hermes Desktop; rode só um de cada vez (ou mude
+  `ARES_BRIDGE_PORT`).
+
+### Testes
+
+- `tests/bridge.test.ts`: `/health`, `/message` e `/code` (estruturado + fallback
+  para `summary` + 400 em tarefa vazia) contra um 9Router falso e hermético. Total:
+  30 testes.
+
+### Notas
+
+- O `npm run dev`/build exige Node ≥ 20.19; o **bridge** roda em Node ≥ 18 (por isso
+  o `systemd` usa `/usr/bin/node`).
+
 ## [0.7.0] — 2026-06-06
 
 Foco: dar ao Ares um **terminal de verdade** integrado ao modo programador, com

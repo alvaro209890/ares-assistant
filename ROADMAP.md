@@ -27,6 +27,12 @@ conhecimento técnico), com o motivo de cada uma.
 > (`codigo.terminal` via shell, classificação allowed/confirm/blocked,
 > `codigo.confirmar`/`codigo.cancelar`) e ✅ **persona de engenheiro sênior** que
 > pede autorização antes de alterar o sistema. Detalhes em [`CHANGELOG.md`](CHANGELOG.md).
+>
+> **Versão 0.8 (entregue):** ✅ **ponte com o Hermes fechada de ponta a ponta** — servidor
+> local `bridge/server.mjs` (`npm run bridge`) com `/health`, `/message` e `/code` movido ao
+> **mesmo 9Router `cx/gpt-5.5`** do Ares, resposta estruturada do Hermes Code, unit `systemd
+> --user` para ficar sempre ligado e testes em `tests/bridge.test.ts`. Detalhes em
+> [`docs/PONTE_HERMES.md`](docs/PONTE_HERMES.md).
 
 Legenda de esforço: 🟢 baixo · 🟡 médio · 🔴 alto. ✅ = já implementado.
 

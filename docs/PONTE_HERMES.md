@@ -5,6 +5,76 @@ desktop do Hermes. A ideia é preservar a qualidade do Hermes, delegando a ele o
 já é responsabilidade dele: WhatsApp, Trello, Obsidian, office de agentes e
 automações externas.
 
+## Servidor local da ponte (9Router) — `bridge/server.mjs`
+
+Para a ponte funcionar de ponta a ponta **neste PC**, o repositório traz um servidor
+local pronto em `bridge/server.mjs`. Ele expõe exatamente as rotas que o Ares chama
+e usa o **mesmo cérebro do Ares**: 9Router `cx/gpt-5.5` (em `http://localhost:20128`).
+Sem dependências externas (só `node:http` + `fetch`), roda em Node ≥ 18.
+
+Rotas:
+
+- `GET /health` — status (serviço, modelo, 9Router).
+- `POST /message` — comando geral, respondido pelo 9Router (quando o pedido exige
+  WhatsApp/Trello/Obsidian de verdade, ele avisa que isso requer o Hermes Desktop
+  completo ligado).
+- `POST /code` — tarefa de programação ("Hermes Code") com resposta **estruturada**
+  (`summary`, `patches`, `tests`, `risks`, `commands`, `needsConfirmation`).
+
+### Rodar
+
+```bash
+nvm use            # Node do .nvmrc (qualquer Node >=18 serve para o bridge)
+npm run bridge     # sobe em http://127.0.0.1:18789
+```
+
+Variáveis de ambiente (todas opcionais):
+
+| Variável | Padrão | Função |
+| --- | --- | --- |
+| `ARES_BRIDGE_PORT` | `18789` | porta de escuta |
+| `ARES_BRIDGE_HOST` | `127.0.0.1` | host de escuta |
+| `NINEROUTER_BASE_URL` | `http://localhost:20128/v1` | endpoint do 9Router |
+| `NINEROUTER_MODEL` | `cx/gpt-5.5` | modelo (o mesmo do Ares) |
+| `NINEROUTER_API_KEY` | `` | chave do 9Router (local é keyless) |
+| `ARES_BRIDGE_TOKEN` | `` | se definido, exige `Authorization: Bearer <token>` |
+
+### Sempre ligado (systemd --user)
+
+Há um unit pronto em `bridge/ares-bridge.service`. Para deixar a ponte **sempre no ar
+neste PC** (sobe no login; com `linger` ligado, persiste sem sessão aberta):
+
+```bash
+install -D -m 644 bridge/ares-bridge.service ~/.config/systemd/user/ares-bridge.service
+systemctl --user daemon-reload
+systemctl --user enable --now ares-bridge.service
+systemctl --user status ares-bridge.service     # conferir
+curl -s http://127.0.0.1:18789/health           # testar
+```
+
+Parar / desligar de vez:
+
+```bash
+systemctl --user stop ares-bridge.service       # parar agora
+systemctl --user disable --now ares-bridge.service  # não subir mais no boot
+```
+
+### ⚠️ Conflito com o Hermes Desktop na :18789
+
+O Hermes Desktop completo (WhatsApp/Trello/Obsidian/office) também ocupa a **:18789**
+e **não divide a porta** — subir os dois ali dá `adapter exited code 1` no Hermes
+Desktop. Regra: **rode só um de cada vez na :18789.**
+
+- Vai usar o **Hermes Desktop**? Pare a ponte local antes:
+  `systemctl --user stop ares-bridge.service`. O Ares já aponta para `:18789` e passa
+  a falar com o Hermes real (inclusive WhatsApp/Trello).
+- Quer os **dois ao mesmo tempo**? Rode a ponte local em outra porta
+  (`ARES_BRIDGE_PORT=18790`) — mas lembre que o Ares só aponta para **uma** `baseUrl`
+  por vez (Configurações > Ponte com o Hermes).
+
+O servidor já recusa subir com mensagem clara se a porta estiver ocupada (`EADDRINUSE`),
+então não chega a derrubar nada por acidente.
+
 ## Configuração
 
 A config real fica em `~/.config/ares/config.json`. O template está em
@@ -131,7 +201,8 @@ Verificação completa antes de publicar:
 npm run verify
 ```
 
-A suíte `tests/hermes.test.ts` usa um servidor HTTP local e valida:
+A suíte `tests/hermes.test.ts` usa um servidor HTTP local e valida o **cliente**
+(lado Ares):
 
 - montagem de URL;
 - extração de resposta;
@@ -140,6 +211,15 @@ A suíte `tests/hermes.test.ts` usa um servidor HTTP local e valida:
 - rota dedicada do Hermes Code e fallback para `messagePath`;
 - ping de saúde;
 - ponte desativada sem tocar a rede.
+
+A suíte `tests/bridge.test.ts` valida o **servidor** (`bridge/server.mjs`) com um
+9Router falso (hermético, sem rede real):
+
+- `/health` informa serviço e modelo;
+- `/message` responde via 9Router com `{reply}`;
+- `/code` devolve resposta estruturada (`summary`/`patches`/`tests`/...);
+- `/code` faz fallback para `summary` quando o modelo não devolve JSON;
+- tarefa de código vazia retorna HTTP 400.
 
 ## Troubleshooting
 

@@ -1,6 +1,6 @@
 {
   "name": "ares-assistant",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "ARES — Assistente de IA pessoal estilo JARVIS (app desktop Electron)",
   "author": "acer",
   "license": "MIT",
@@ -16,6 +16,7 @@
     "verify": "npm run test && npm run build",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
+    "bridge": "node bridge/server.mjs",
     "dist:deb": "electron-vite build && electron-builder --linux deb"
   },
   "dependencies": {

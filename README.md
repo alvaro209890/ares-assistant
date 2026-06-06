@@ -33,6 +33,12 @@ O projeto roda em modo de desenvolvimento. O empacotamento `.deb` está configur
 - **Orbe flutuante (companion)**: uma mini-orbe always-on-top que reflete o estado do Ares; clique para abrir o app, ou use o microfone dela para falar sem trazer a janela principal.
 - **Barge-in (interromper a fala)**: na conversa contínua, comece a falar por cima e o Ares para na hora e te ouve; a tecla `Esc` também interrompe a fala a qualquer momento.
 
+### Novidades da versão 0.8
+
+- **Ponte local de ponta a ponta** (`bridge/server.mjs`, `npm run bridge`): servidor sem dependências que expõe `/health`, `/message` e `/code` usando o **mesmo modelo do Ares** (9Router `cx/gpt-5.5`). Agora o Modo Programador delega ao "Hermes Code" e recebe resposta **estruturada** de verdade, sem precisar da stack pesada do Hermes.
+- **Sempre ligado neste PC**: unit `systemd --user` pronto (`bridge/ares-bridge.service`), com aviso claro do conflito de porta com o Hermes Desktop na `:18789`.
+- **Testes do servidor**: `tests/bridge.test.ts` valida `/health`, `/message`, `/code` (estruturado + fallback) com um 9Router falso — 30 testes no total.
+
 ### Novidades da versão 0.7
 
 - **Terminal de verdade com autorização por voz**: `codigo.terminal` roda comandos via shell (pipes, `&&`, redirecionamento). Comandos seguros rodam direto; qualquer outro o Ares descreve e pede o "sim" antes de executar (`codigo.confirmar`/`codigo.cancelar`).
@@ -111,6 +117,7 @@ npm test
 npm run build
 npm run verify
 npm run dev
+npm run bridge     # servidor local da ponte (Hermes/Code via 9Router)
 ```
 
 Não rode `npm run dist:deb` agora. Esse comando existe apenas para empacotamento futuro.
@@ -460,6 +467,24 @@ Em Configurações > Sistema e Atalhos:
 ## Ponte com o Hermes (avançado)
 
 O Ares e o Hermes compartilham o mesmo cérebro (9 Router). Em vez de reimplementar o Hermes, o Ares atua como **controle de voz/cliente** dele: em Configurações > Ponte com o Hermes, ative a ponte, configure o endpoint e teste a conexão. Quando o pedido é de Hermes, o agente usa `hermes.executar` e fala a resposta pelo fluxo normal do Ares.
+
+### Servidor local da ponte (`npm run bridge`)
+
+O repositório traz um servidor de ponte pronto em `bridge/server.mjs`, sem dependências, que expõe `/health`, `/message` e `/code` usando o **mesmo modelo do Ares** (9Router `cx/gpt-5.5`). É o que faz a ponte funcionar de ponta a ponta neste PC sem a stack pesada do Hermes:
+
+```bash
+npm run bridge        # http://127.0.0.1:18789 (Node >=18)
+```
+
+Para deixá-lo **sempre ligado**, há um `systemd --user` pronto (`bridge/ares-bridge.service`):
+
+```bash
+install -D -m 644 bridge/ares-bridge.service ~/.config/systemd/user/ares-bridge.service
+systemctl --user daemon-reload
+systemctl --user enable --now ares-bridge.service
+```
+
+`/code` devolve resposta **estruturada** (`summary`, `patches`, `tests`, `risks`, `commands`) que o Ares usa no fluxo de preview/aplicação de patches. **Atenção:** o Hermes Desktop completo também usa a `:18789` e não divide a porta — rode só um de cada vez ali (pare a ponte com `systemctl --user stop ares-bridge.service` antes de abrir o Hermes Desktop, ou suba a ponte em `ARES_BRIDGE_PORT=18790`). Detalhes em [`bridge/README.md`](bridge/README.md) e [`docs/PONTE_HERMES.md`](docs/PONTE_HERMES.md).
 
 Padrão de comando:
 
