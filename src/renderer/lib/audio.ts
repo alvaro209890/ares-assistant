@@ -22,7 +22,11 @@ export async function ensureMic(): Promise<void> {
     if (audioCtx.state === 'suspended') await audioCtx.resume()
     return
   }
-  stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+  // echoCancellation reduz o áudio da própria voz do Ares no microfone, o que
+  // torna o barge-in (interromper falando) confiável e melhora a captação geral.
+  stream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+  })
   audioCtx = new AudioContext()
   if (audioCtx.state === 'suspended') await audioCtx.resume()
   const source = audioCtx.createMediaStreamSource(stream)
@@ -135,4 +139,35 @@ export async function recordUntilSilence(
 
   const { blob, mimeType: mt } = await stopRecording()
   return { blob, mimeType: mt, spoke }
+}
+
+/**
+ * Monitora o microfone (sem gravar) enquanto o Ares fala e resolve `true` quando
+ * detecta fala SUSTENTADA do usuário — o gatilho do barge-in (interromper a fala).
+ * Resolve `false` se shouldStop() ficar verdadeiro (a fala do Ares terminou).
+ * Usa um limiar mais alto que a escuta normal e, com echoCancellation ativo, a
+ * própria voz do Ares some do microfone, evitando auto-interrupção.
+ */
+export async function watchForSpeech(
+  opts: { threshold?: number; sustainMs?: number; shouldStop?: () => boolean } = {}
+): Promise<boolean> {
+  await ensureMic()
+  const threshold = opts.threshold ?? 0.12
+  const sustainMs = opts.sustainMs ?? 380
+  return new Promise<boolean>((resolve) => {
+    let voiceMs = 0
+    let last = performance.now()
+    const tick = (): void => {
+      if (opts.shouldStop?.()) return resolve(false)
+      const now = performance.now()
+      const dt = now - last
+      last = now
+      const level = getLevel()
+      if (level > threshold) voiceMs += dt
+      else voiceMs = Math.max(0, voiceMs - dt * 0.6)
+      if (voiceMs >= sustainMs) return resolve(true)
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  })
 }

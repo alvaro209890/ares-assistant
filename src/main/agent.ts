@@ -30,7 +30,7 @@ import {
   remindersSummary,
   loadReminders
 } from './data'
-import { getWeather, getWeatherAt, getNews, webSearch, calcExpression, convertCurrency, hermesExecute } from './tools'
+import { getWeather, getWeatherAt, getNews, webSearch, calcExpression, convertCurrency, convertUnit, readPage, hermesExecute } from './tools'
 import { buildBriefing, briefingToSpeech } from './briefing'
 
 const norm = (s: unknown) => String(s ?? '').toLowerCase().trim()
@@ -80,6 +80,8 @@ FERRAMENTAS DE CONSULTA (dê uma fala curta tipo "Deixe-me verificar." e AGUARDE
 - briefing.consultar {}   (use quando pedirem "briefing", "resumo do dia", "como está meu dia")
 - calcular {expressao}   (contas: "30% de 250", "12*7+3")
 - converter.moeda {de, para, valor}   (ex.: de:"USD", para:"BRL", valor:50)
+- converter.unidade {de, para, valor}   (medidas locais: comprimento, massa, volume, área, velocidade, tempo, dados e temperatura — ex.: de:"km", para:"milhas", valor:10; de:"C", para:"F", valor:30)
+- pagina.ler {url}   (lê uma página da web e resume/responde a partir do conteúdo real dela)
 
 Regras: use nomes de colunas/tarefas/listas existentes (ver CONTEXTO). Datas SEMPRE em ISO local sem fuso (ex.: 2026-06-03T09:00), resolvidas pela seção DATAS. memoria.salvar só para fatos duradouros do usuário (preferências, perfil, rotina), nunca para pedidos pontuais. Para rascunho de mensagem/e-mail: escreva o texto em "fala" para o usuário revisar e, se ele pedir para guardar, use nota.salvar.`
 }
@@ -101,8 +103,11 @@ function dateAnchors(now: Date): string {
   const delta = ((8 - nextMon.getDay()) % 7) || 7
   nextMon.setDate(nextMon.getDate() + delta)
   const weekday = now.toLocaleDateString('pt-BR', { weekday: 'long' })
+  const h = now.getHours()
+  const periodo = h < 5 ? 'madrugada' : h < 12 ? 'manhã' : h < 18 ? 'tarde' : 'noite'
   return [
-    `Agora: ${weekday}, ${now.toLocaleString('pt-BR')} (ISO local ${localISO(now)})`,
+    `Agora: ${weekday}, ${now.toLocaleString('pt-BR')} (ISO local ${localISO(now)}) — período: ${periodo}`,
+    `Saudações coerentes com o período: "bom dia" de manhã, "boa tarde" à tarde, "boa noite" à noite.`,
     `Hoje=${day(0)} · Amanhã=${day(1)} · Depois de amanhã=${day(2)}`,
     `Próxima segunda (semana que vem começa aqui)=${nextMon.getFullYear()}-${String(nextMon.getMonth() + 1).padStart(2, '0')}-${String(nextMon.getDate()).padStart(2, '0')}`,
     `"daqui a N horas/minutos" = some à hora atual. Sem horário dito, assuma 09:00 para o dia indicado.`
@@ -175,6 +180,13 @@ async function runQuery(a: Acao, cfg: AppConfig): Promise<unknown> {
           tipo: a.tipo,
           resultado: await convertCurrency(String(a.de || ''), String(a.para || ''), Number(a.valor))
         }
+      case 'converter.unidade':
+        return {
+          tipo: a.tipo,
+          resultado: convertUnit(String(a.de || ''), String(a.para || ''), Number(a.valor))
+        }
+      case 'pagina.ler':
+        return { tipo: a.tipo, resultado: await readPage(String(a.url || a.endereco || a.link || '')) }
       case 'hermes.executar': {
         if (!integrations.hermes?.enabled) return { tipo: a.tipo, erro: 'Ponte com o Hermes desativada nas Configurações.' }
         return { tipo: a.tipo, resultado: await hermesExecute(integrations.hermes.baseUrl, String(a.comando || a.texto || '')) }

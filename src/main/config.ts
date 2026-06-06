@@ -47,6 +47,7 @@ const DEFAULT_CONFIG: AppConfig = {
     proactiveSuggestions: true,
     wakeWord: 'ares',
     wakeWordEnabled: false,
+    bargeIn: true,
     overlayEnabled: false,
     onboarded: false,
     userName: '',

@@ -31,6 +31,7 @@ export interface AppConfig {
     proactiveSuggestions: boolean // sugestões proativas discretas no briefing/assistente
     wakeWord: string // palavra de ativação (ex.: "ares")
     wakeWordEnabled: boolean // na conversa contínua, só age se ouvir a palavra de ativação
+    bargeIn: boolean // permite interromper a fala do Ares falando por cima (conversa contínua)
     overlayEnabled: boolean // mini-orbe flutuante (always-on-top)
     onboarded: boolean // primeiro uso já concluído
     userName: string // como o Ares chama o usuário

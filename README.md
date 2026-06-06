@@ -29,6 +29,17 @@ O projeto roda em modo de desenvolvimento. O empacotamento `.deb` está configur
 - **Resposta em streaming + fala por sentença**: o Ares começa a exibir e a falar a resposta enquanto ela é gerada (frase a frase), reduzindo muito a latência percebida — parece "pensar em voz alta".
 - **Palavra de ativação ("Ares")**: na conversa contínua, opcionalmente só responde quando você começa pela palavra-chave (ex.: "Ares, que horas são?"). Diga só "Ares" para ele confirmar e aguardar o comando.
 - **Orbe flutuante (companion)**: uma mini-orbe always-on-top que reflete o estado do Ares; clique para abrir o app, ou use o microfone dela para falar sem trazer a janela principal.
+- **Barge-in (interromper a fala)**: na conversa contínua, comece a falar por cima e o Ares para na hora e te ouve; a tecla `Esc` também interrompe a fala a qualquer momento.
+
+### Novidades da versão 0.2
+
+- **Busca global (`Ctrl+K`)**: uma paleta de comandos que procura em tarefas, agenda, lembretes, notas, listas, memória e conversas, navega para a tela certa e encaminha qualquer texto como pergunta ao Ares. Veja [Busca Global](#busca-global-ctrlk).
+- **Barge-in**: interromper a fala falando por cima (conversa contínua) ou com `Esc`.
+- **Conversão de unidades local** (`converter.unidade`): comprimento, massa, volume, área, velocidade, tempo, dados e temperatura — tudo offline.
+- **Leitura de páginas web** (`pagina.ler`): o Ares abre uma URL e responde/resume a partir do conteúdo real dela.
+- **Microfone com cancelamento de eco**, para captar melhor e dar suporte confiável ao barge-in.
+
+Histórico completo em [`CHANGELOG.md`](CHANGELOG.md).
 
 ### Fácil para o dia a dia (pessoas comuns)
 
@@ -76,7 +87,7 @@ Arquivos importantes:
 
 - `src/main/index.ts`: janela Electron, permissões, IPC e inicialização.
 - `src/main/agent.ts`: prompt do Ares, datas relativas, validação, execução de ferramentas e auto-extração de memória.
-- `src/main/tools.ts`: clima (com períodos/alerta), busca web, notícias e geocodificação reversa.
+- `src/main/tools.ts`: clima (com períodos/alerta), busca web, notícias, geocodificação reversa, conversão de unidades (`convertUnit`) e leitura de páginas (`readPage`).
 - `src/main/briefing.ts`: monta o briefing do dia e sua versão falável.
 - `src/main/diagnostics.ts`: status de serviços, localização e arquivos de dados.
 - `src/main/overlay.ts`: janela da mini-orbe flutuante (always-on-top) e sincronização de estado.
@@ -92,6 +103,8 @@ Arquivos importantes:
 - `src/renderer/components/Overlay.tsx`: UI da mini-orbe flutuante.
 - `src/renderer/components/Onboarding.tsx`: assistente de primeiros passos.
 - `src/renderer/components/Help.tsx`: ajuda com exemplos clicáveis.
+- `src/renderer/components/CommandPalette.tsx`: busca global / paleta de comandos (Ctrl+K).
+- `src/renderer/lib/audio.ts`: microfone, nível de áudio, conversa contínua e detecção de barge-in (`watchForSpeech`).
 - `src/renderer/lib/tts.ts`: síntese de voz e fila de fala por sentença (streaming).
 - `src/renderer/screens/Assistant.tsx`: palco principal da orbe, widgets e conversa.
 - `src/renderer/screens/Lists.tsx`: listas simples e notas rápidas.
@@ -129,6 +142,7 @@ Campos principais:
 | `ui.proactiveSuggestions` | liga as sugestões proativas no briefing |
 | `ui.wakeWord` | palavra de ativação (padrão `ares`) |
 | `ui.wakeWordEnabled` | na conversa contínua, só age após ouvir a palavra de ativação |
+| `ui.bargeIn` | permite interromper a fala falando por cima (conversa contínua); padrão ligado |
 | `ui.overlayEnabled` | mini-orbe flutuante always-on-top |
 | `memory.autoExtract` | extrair fatos úteis da conversa automaticamente |
 | `memory.autoApprove` | `true` salva direto; `false` deixa o fato pendente para revisão |
@@ -149,7 +163,8 @@ No painel Configurações você pode:
 - escolher voz Chromium carregada pelo evento `voiceschanged`;
 - ajustar velocidade, tom e volume;
 - testar a voz;
-- ajustar a **sensibilidade do microfone**, o **tempo de silêncio** para encerrar a fala e a **pausa após o Ares falar**.
+- ajustar a **sensibilidade do microfone**, o **tempo de silêncio** para encerrar a fala e a **pausa após o Ares falar**;
+- ligar/desligar o **barge-in** (interromper a fala falando por cima).
 
 O modo Conversa Contínua usa o microfone em ciclos:
 
@@ -196,6 +211,26 @@ Em Configurações > Orbe Flutuante (`ui.overlayEnabled`) você ativa uma mini-o
 - arraste pela borda para reposicionar.
 
 Tecnicamente, a mesma janela renderer é carregada com `#overlay` e renderiza só a orbe (sem microfone/STT próprios). O estado é espelhado da janela principal via IPC (`overlay:pushState` → evento `overlay:state`). Fechar a janela principal encerra a orbe e o app.
+
+## Busca Global (Ctrl+K)
+
+Pressione `Ctrl+K` (ou clique em **Buscar** na barra lateral) para abrir a paleta de comandos — a forma mais rápida de chegar a qualquer lugar do Ares:
+
+- procura, ao mesmo tempo, em **tarefas, agenda, lembretes, notas, itens de listas, memória e conversas**;
+- entradas de **navegação** (todas as telas) e **ações** (briefing, nova conversa, configurações, ajuda);
+- digitando qualquer texto, a primeira opção é **"Perguntar ao Ares: …"**, que encaminha o texto ao assistente;
+- navegação por teclado: `↑`/`↓` para mover, `↵` para abrir, `Esc` para fechar; passar o mouse também seleciona.
+
+A busca é local e instantânea (sobre os dados já carregados na memória do app) e ignora acentos. Implementação em `src/renderer/components/CommandPalette.tsx`.
+
+## Interromper a Fala (barge-in)
+
+O Ares não te obriga a esperar ele terminar de falar:
+
+- **Por voz (conversa contínua)**: comece a falar por cima e ele para na hora e volta a ouvir. O microfone usa cancelamento de eco (`echoCancellation`), então a própria voz do Ares não dispara a interrupção por engano.
+- **Manual**: a tecla `Esc` interrompe a fala a qualquer momento, em qualquer modo.
+
+Liga/desliga em Configurações > Conversa Contínua (`ui.bargeIn`, ligado por padrão). Tecnicamente, enquanto a fila de fala (`whenSpeechQueueIdle`) está ativa, o renderer monitora o nível do microfone com um limiar mais alto (`watchForSpeech` em `src/renderer/lib/audio.ts`); ao detectar fala sustentada, esvazia a fila (`clearSpeechQueue`) e libera o microfone para o novo comando.
 
 ## Localização
 
@@ -283,6 +318,8 @@ Atalhos:
 - `Alt+5`: Listas.
 - `Alt+6`: Memória.
 - `Alt+7`: Sistema (diagnóstico).
+- `Ctrl+K`: busca global / paleta de comandos.
+- `Esc`: interrompe a fala do Ares (barge-in manual); fecha a paleta/painéis.
 - `Ctrl+Shift+Espaço`: atalho global (quando ativado) para chamar o Ares e ouvir.
 
 As telas foram estruturadas com `min-h-0`, `overflow-y-auto` e `overscroll-contain` para evitar travamento de rolagem dentro do Electron. O Kanban mantém rolagem horizontal própria para colunas e rolagem vertical por coluna para cartões.
@@ -500,6 +537,8 @@ Ferramentas de consulta:
 - `briefing.consultar` `{}`
 - `calcular` `{expressao}`
 - `converter.moeda` `{de, para, valor}`
+- `converter.unidade` `{de, para, valor}` (comprimento, massa, volume, área, velocidade, tempo, dados e temperatura; local/offline)
+- `pagina.ler` `{url}` (lê uma página web e responde/resume a partir do conteúdo dela)
 - `hermes.executar` `{comando}` (só com a ponte do Hermes ativada)
 
 As ferramentas de consulta são executadas pelo processo principal. O resultado volta ao LLM para gerar a resposta final em linguagem natural.
@@ -528,6 +567,8 @@ Com a palavra de ativação ligada, comece pela palavra (ex.: "**Ares**, faça m
 - "me lembra de tomar o remédio todo dia às 8h" / "põe um timer de 10 minutos" / "me acorda às 7h"
 - "adiciona leite na lista de compras" / "cria uma lista de viagem"
 - "quanto é 30% de 250?" / "quantos reais são 50 dólares?"
+- "quantos quilômetros são 10 milhas?" / "30 graus Celsius em Fahrenheit" / "5 GB em MB"
+- "leia esta página e me resuma: https://exemplo.com/artigo"
 - "crie uma tarefa semanal de regar as plantas" / "mova comprar café para concluído"
 - "lembre-se que prefiro respostas curtas" / "anote que trabalho com fotografia"
 - "quais as notícias de hoje?" / "pesquise na web sobre ..."
@@ -562,6 +603,8 @@ Os arquivos locais antigos continuam funcionando. Campos novos são preenchidos 
 - **A fala sai picotada ou começa antes da hora**: é o streaming por sentença; se preferir, o conteúdo final é sempre reconciliado no balão. Modelos que não suportam streaming caem automaticamente na resposta única.
 - **A palavra de ativação não é reconhecida**: fale "Ares" no começo da frase; ajuste a palavra em Configurações > Conversa Contínua e a sensibilidade do microfone. O reconhecimento depende do Whisper (Groq).
 - **A orbe flutuante não aparece ou fica preta**: depende de um compositor com transparência. Ative/desative em Configurações > Orbe Flutuante; ela some ao fechar a janela principal.
+- **O barge-in interrompe sozinho**: aumente o silêncio/baixe a sensibilidade do microfone ou desligue `ui.bargeIn`. Ele só age na conversa contínua; a tecla `Esc` continua interrompendo manualmente.
+- **A busca global não abre**: use `Ctrl+K` (ou `⌘K` no Mac) com o foco na janela do Ares, ou clique em **Buscar** na barra lateral; `Esc` fecha.
 
 ## Verificação Antes de Publicar
 

@@ -320,6 +320,135 @@ export async function convertCurrency(
   return { de: f, para: t, valor: amt, resultado: Math.round(amt * rate * 100) / 100, taxa: rate }
 }
 
+// ---------------- Conversão de unidades (local, sem rede) ----------------
+// Comprimento, massa, volume, área, velocidade, tempo e dados via fator para a
+// base da dimensão; temperatura é tratada à parte (relação afim). Tudo offline.
+function normUnit(s: string): string {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/²/g, '2')
+    .replace(/³/g, '3')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9/]/g, '')
+    .trim()
+}
+
+interface UnitDef {
+  dim: string
+  factor: number // valor de 1 unidade na base da dimensão
+  canon: string
+}
+const UNITS: Record<string, UnitDef> = {}
+function regUnit(dim: string, canon: string, factor: number, aliases: string[] = []): void {
+  for (const a of [canon, ...aliases]) UNITS[normUnit(a)] = { dim, factor, canon }
+}
+// Comprimento (base: metro)
+regUnit('comprimento', 'm', 1, ['metro', 'metros'])
+regUnit('comprimento', 'km', 1000, ['quilometro', 'quilometros'])
+regUnit('comprimento', 'cm', 0.01, ['centimetro', 'centimetros'])
+regUnit('comprimento', 'mm', 0.001, ['milimetro', 'milimetros'])
+regUnit('comprimento', 'mi', 1609.344, ['milha', 'milhas'])
+regUnit('comprimento', 'yd', 0.9144, ['jarda', 'jardas'])
+regUnit('comprimento', 'ft', 0.3048, ['pe', 'pes', 'foot', 'feet'])
+regUnit('comprimento', 'in', 0.0254, ['polegada', 'polegadas', 'inch'])
+regUnit('comprimento', 'nmi', 1852, ['milhanautica'])
+// Massa (base: grama)
+regUnit('massa', 'g', 1, ['grama', 'gramas'])
+regUnit('massa', 'kg', 1000, ['quilo', 'quilos', 'quilograma', 'quilogramas'])
+regUnit('massa', 'mg', 0.001, ['miligrama', 'miligramas'])
+regUnit('massa', 't', 1_000_000, ['tonelada', 'toneladas'])
+regUnit('massa', 'lb', 453.59237, ['libra', 'libras', 'pound', 'pounds'])
+regUnit('massa', 'oz', 28.349523, ['onca', 'oncas', 'ounce'])
+// Volume (base: litro)
+regUnit('volume', 'l', 1, ['litro', 'litros'])
+regUnit('volume', 'ml', 0.001, ['mililitro', 'mililitros'])
+regUnit('volume', 'm3', 1000, ['metrocubico'])
+regUnit('volume', 'gal', 3.785411784, ['galao', 'galoes', 'gallon'])
+// Área (base: metro quadrado)
+regUnit('area', 'm2', 1, ['metroquadrado'])
+regUnit('area', 'km2', 1_000_000, ['quilometroquadrado'])
+regUnit('area', 'cm2', 0.0001)
+regUnit('area', 'ha', 10000, ['hectare', 'hectares'])
+regUnit('area', 'ft2', 0.09290304, ['pequadrado'])
+// Velocidade (base: m/s)
+regUnit('velocidade', 'm/s', 1, ['ms'])
+regUnit('velocidade', 'km/h', 1 / 3.6, ['kmh'])
+regUnit('velocidade', 'mph', 0.44704)
+regUnit('velocidade', 'kn', 0.514444, ['no', 'nos', 'knot', 'knots'])
+// Tempo (base: segundo)
+regUnit('tempo', 's', 1, ['segundo', 'segundos', 'seg'])
+regUnit('tempo', 'min', 60, ['minuto', 'minutos'])
+regUnit('tempo', 'h', 3600, ['hora', 'horas'])
+regUnit('tempo', 'dia', 86400, ['dias'])
+regUnit('tempo', 'semana', 604800, ['semanas'])
+// Dados (base: byte)
+regUnit('dados', 'B', 1, ['byte', 'bytes'])
+regUnit('dados', 'KB', 1024, ['kb', 'kbytes'])
+regUnit('dados', 'MB', 1024 ** 2, ['mb'])
+regUnit('dados', 'GB', 1024 ** 3, ['gb'])
+regUnit('dados', 'TB', 1024 ** 4, ['tb'])
+
+const TEMP_UNIT: Record<string, 'C' | 'F' | 'K'> = {
+  c: 'C', celsius: 'C', grausc: 'C',
+  f: 'F', fahrenheit: 'F', grausf: 'F',
+  k: 'K', kelvin: 'K'
+}
+
+export function convertUnit(
+  from: string,
+  to: string,
+  value: number
+): { de: string; para: string; valor: number; resultado: number; dimensao: string } {
+  const amt = Number(value)
+  if (!Number.isFinite(amt)) throw new Error('Valor inválido para conversão.')
+  const f = normUnit(from)
+  const t = normUnit(to)
+  if (!f || !t) throw new Error('Diga a unidade de origem e de destino.')
+
+  // Temperatura (relação afim: passa por Celsius)
+  if (TEMP_UNIT[f] && TEMP_UNIT[t]) {
+    const uf = TEMP_UNIT[f]
+    const ut = TEMP_UNIT[t]
+    const c = uf === 'C' ? amt : uf === 'F' ? ((amt - 32) * 5) / 9 : amt - 273.15
+    const r = ut === 'C' ? c : ut === 'F' ? (c * 9) / 5 + 32 : c + 273.15
+    return { de: `°${uf}`, para: `°${ut}`, valor: amt, resultado: Math.round(r * 100) / 100, dimensao: 'temperatura' }
+  }
+
+  const uf = UNITS[f]
+  const ut = UNITS[t]
+  if (!uf) throw new Error(`Não conheço a unidade "${from}".`)
+  if (!ut) throw new Error(`Não conheço a unidade "${to}".`)
+  if (uf.dim !== ut.dim) {
+    throw new Error(`Não dá para converter ${uf.canon} (${uf.dim}) em ${ut.canon} (${ut.dim}).`)
+  }
+  const resultado = (amt * uf.factor) / ut.factor
+  return { de: uf.canon, para: ut.canon, valor: amt, resultado: Math.round(resultado * 1e6) / 1e6, dimensao: uf.dim }
+}
+
+// ---------------- Leitura de página web (resumo/leitura assistida) ----------------
+// Busca uma URL, remove script/style e tags, e devolve um texto legível (limitado)
+// para o LLM resumir ou responder a partir do conteúdo real da página.
+export async function readPage(url: string): Promise<{ url: string; title: string; texto: string }> {
+  const u = String(url || '').trim()
+  if (!/^https?:\/\//i.test(u)) throw new Error('Informe uma URL http(s) válida para eu ler.')
+  let html: string
+  try {
+    html = await fetchText(u)
+  } catch {
+    throw new Error('Não consegui abrir a página agora (sem internet, bloqueio do site ou fora do ar).')
+  }
+  const title = decodeEntities(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '') || u
+  const body = html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+    .replace(/<head[\s\S]*?<\/head>/gi, ' ')
+  const texto = decodeEntities(body).replace(/\s+/g, ' ').trim().slice(0, 4000)
+  if (!texto) throw new Error('A página não tem texto legível para mim.')
+  return { url: u, title, texto }
+}
+
 // ---------------- Ponte com o Hermes (groundwork, opcional) ----------------
 // Delegação genérica: envia um comando em texto ao Hermes e devolve a resposta.
 // Off por padrão; o contrato real do endpoint do Hermes deve ser confirmado.

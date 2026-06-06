@@ -8,6 +8,11 @@ conhecimento técnico), com o motivo de cada uma.
 > contas/conversões, acessibilidade, atalho global + bandeja + autostart, backup,
 > indicador de microfone, briefing automático, rascunho via nota). O que segue como
 > próximo grande passo é a **ponte com o Hermes** (ver no fim).
+>
+> **Versão 0.2 (entregue):** ✅ **busca global / paleta de comandos (`Ctrl+K`)**, ✅
+> **barge-in** (interromper a fala por voz ou com `Esc`), ✅ **conversão de unidades
+> local** (`converter.unidade`), ✅ **leitura/resumo de páginas web** (`pagina.ler`) e
+> ✅ microfone com cancelamento de eco. Detalhes em [`CHANGELOG.md`](CHANGELOG.md).
 
 Legenda de esforço: 🟢 baixo · 🟡 médio · 🔴 alto. ✅ = já implementado.
 

@@ -52,6 +52,7 @@ interface AresStore {
   continuous: boolean
   settingsOpen: boolean
   helpOpen: boolean
+  paletteOpen: boolean
   briefing: BriefingData | null
   briefingLoading: boolean
   briefingOpen: boolean
@@ -62,6 +63,8 @@ interface AresStore {
   navigate: (s: Screen) => void
   openSettings: (b: boolean) => void
   openHelp: (b: boolean) => void
+  openPalette: (b: boolean) => void
+  stopSpeaking: () => void
   saveConfig: (patch: DeepPartial<AppConfig>) => Promise<void>
   setBoard: (updater: Board | ((b: Board) => Board)) => void
   sendText: (text: string) => Promise<void>
@@ -183,6 +186,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   const [continuous, setContinuous] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const [briefing, setBriefing] = useState<BriefingData | null>(null)
   const [briefingLoading, setBriefingLoading] = useState(false)
   const [briefingOpen, setBriefingOpen] = useState(false)
@@ -191,6 +195,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   const [actionToast, setActionToast] = useState<string | null>(null)
 
   const configRef = useRef<AppConfig | null>(null)
+  const aresStateRef = useRef<AresState>('idle')
   const boardRef = useRef<Board>(emptyBoard)
   const currentSessionRef = useRef<string | null>(null)
   const continuousRef = useRef(false)
@@ -322,6 +327,11 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     window.ares.overlay.pushState(aresState).catch(() => {})
   }, [aresState])
 
+  // Mantém um ref do estado para handlers globais (ex.: Esc interrompe a fala).
+  useEffect(() => {
+    aresStateRef.current = aresState
+  }, [aresState])
+
   // Acessibilidade: escala de fonte, alto contraste e modo simples.
   useEffect(() => {
     if (!config) return
@@ -343,6 +353,33 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     },
     [persistBoard]
   )
+
+  // Aguarda a fila de fala terminar. Na conversa contínua, se "barge-in" estiver
+  // ligado, monitora o microfone em paralelo: se o usuário começar a falar por
+  // cima, interrompe a fala do Ares na hora e libera o microfone para o comando.
+  const waitForSpeechWithBargeIn = useCallback(async (): Promise<void> => {
+    const cfg = configRef.current
+    const idle = whenSpeechQueueIdle()
+    if (!cfg?.ui.bargeIn || !continuousRef.current) {
+      await idle
+      return
+    }
+    let finished = false
+    void idle.then(() => {
+      finished = true
+    })
+    const sens = cfg.ui.micSensitivity ?? 0.5
+    const interrupted = await audio.watchForSpeech({
+      threshold: Math.max(0.1, (0.09 - sens * 0.075) * 2.4 + 0.05),
+      sustainMs: 400,
+      shouldStop: () => finished
+    })
+    if (interrupted && !finished) {
+      clearSpeechQueue()
+      setStatus('Interrompido — pode falar.')
+    }
+    await idle
+  }, [])
 
   const runTurn = useCallback(
     async (userText: string, viaVoice = false) => {
@@ -432,7 +469,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
             .then((mem) => setMemory(mem))
             .catch(() => {})
         }
-        if (voice) await whenSpeechQueueIdle()
+        if (voice) await waitForSpeechWithBargeIn()
         setAresState('idle')
         busyRef.current = false
       } catch (e) {
@@ -444,7 +481,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
         busyRef.current = false
       }
     },
-    [refreshSessions, refreshWidgets, showToast, voiceOpts]
+    [refreshSessions, refreshWidgets, showToast, voiceOpts, waitForSpeechWithBargeIn]
   )
 
   const sendText = useCallback(
@@ -952,7 +989,21 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   const navigate = useCallback((s: Screen) => setScreen(s), [])
   const openSettings = useCallback((b: boolean) => setSettingsOpen(b), [])
   const openHelp = useCallback((b: boolean) => setHelpOpen(b), [])
+  const openPalette = useCallback((b: boolean) => setPaletteOpen(b), [])
+  const stopSpeaking = useCallback(() => {
+    clearSpeechQueue()
+    if (!busyRef.current) setAresState('idle')
+  }, [])
   const clearError = useCallback(() => setError(null), [])
+
+  // Esc interrompe a fala do Ares a qualquer momento (barge-in manual).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape' && aresStateRef.current === 'speaking') stopSpeaking()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [stopSpeaking])
 
   const value: AresStore = {
     ready,
@@ -975,6 +1026,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     continuous,
     settingsOpen,
     helpOpen,
+    paletteOpen,
     briefing,
     briefingLoading,
     briefingOpen,
@@ -984,6 +1036,8 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     navigate,
     openSettings,
     openHelp,
+    openPalette,
+    stopSpeaking,
     saveConfig,
     setBoard,
     sendText,

@@ -163,6 +163,15 @@ export default function SettingsPanel(): JSX.Element {
                 ouvir.
               </p>
               <Toggle
+                label="Permitir interromper a fala (barge-in)"
+                checked={config.ui.bargeIn}
+                onChange={(v) => saveConfig({ ui: { bargeIn: v } })}
+              />
+              <p className="text-[11px] text-cyan-200/45">
+                Na conversa contínua, comece a falar por cima para o Ares parar na hora e te ouvir. A tecla Esc também
+                interrompe a fala a qualquer momento.
+              </p>
+              <Toggle
                 label="Exigir palavra de ativação"
                 checked={config.ui.wakeWordEnabled}
                 onChange={(v) => saveConfig({ ui: { wakeWordEnabled: v } })}

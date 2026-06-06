@@ -15,6 +15,8 @@ export const QUERY_TOOLS = new Set([
   'briefing.consultar',
   'calcular',
   'converter.moeda',
+  'converter.unidade',
+  'pagina.ler',
   'hermes.executar'
 ])
 

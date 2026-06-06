@@ -15,7 +15,7 @@ const tabs: { id: Screen; label: string; hint: string; icon: JSX.Element }[] = [
 ]
 
 export default function TopBar(): JSX.Element {
-  const { screen, navigate, openSettings, openHelp, config, saveConfig } = useAres()
+  const { screen, navigate, openSettings, openHelp, openPalette, config, saveConfig } = useAres()
   const muted = !config?.tts.enabled
 
   useEffect(() => {
@@ -96,6 +96,17 @@ export default function TopBar(): JSX.Element {
             <span>{muted ? 'Fala muda' : 'Fala ativa'}</span>
           </button>
         )}
+        <button
+          onClick={() => openPalette(true)}
+          className="flex min-h-[42px] items-center gap-3 rounded-xl border border-cyan-300/12 bg-white/[0.03] px-3 text-sm text-cyan-200/70 transition hover:text-cyan-50"
+          title="Busca global (Ctrl+K)"
+        >
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-cyan-300/15">
+            <SearchIcon />
+          </span>
+          <span className="flex-1">Buscar</span>
+          <kbd className="rounded border border-cyan-300/15 px-1 py-0.5 text-[9px] text-cyan-200/40">⌘K</kbd>
+        </button>
         <button
           onClick={() => openHelp(true)}
           className="flex min-h-[42px] items-center gap-3 rounded-xl border border-cyan-300/12 bg-white/[0.03] px-3 text-sm text-cyan-200/70 transition hover:text-cyan-50"
@@ -193,6 +204,15 @@ function SpeakerOffIcon(): JSX.Element {
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
       <path d="M4 9v6h4l5 4V5L9 8" strokeLinejoin="round" />
       <path d="M3 3l18 18M17 9l4 4M21 9l-4 4" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function SearchIcon(): JSX.Element {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+      <circle cx="11" cy="11" r="7" />
+      <path d="M21 21l-4.3-4.3" strokeLinecap="round" />
     </svg>
   )
 }

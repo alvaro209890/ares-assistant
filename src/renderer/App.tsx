@@ -6,6 +6,7 @@ import SettingsPanel from './components/SettingsPanel'
 import BriefingPanel from './components/BriefingPanel'
 import Onboarding from './components/Onboarding'
 import Help from './components/Help'
+import CommandPalette from './components/CommandPalette'
 import Assistant from './screens/Assistant'
 import Tasks from './screens/Tasks'
 import Calendar from './screens/Calendar'
@@ -44,6 +45,7 @@ export default function App(): JSX.Element {
       <BriefingPanel />
       <Help />
       <Onboarding />
+      <CommandPalette />
 
       {/* Indicador global de microfone ativo (privacidade/confiança) */}
       <AnimatePresence>
