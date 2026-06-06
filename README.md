@@ -93,8 +93,13 @@ Histórico completo em [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Rodar em Desenvolvimento
 
+> **Node ≥ 20.19** (ou ≥ 22.12) — exigido pelo Vite 7 e pelo Vitest 4. O arquivo
+> `.nvmrc` fixa o Node 22; rode `nvm use` antes dos comandos. Com Node 18 o
+> `vitest` e o `electron-vite build` falham (ex.: `node:util` sem `styleText`).
+
 ```bash
 cd /home/acer/Documentos/Ares
+nvm use            # usa o Node do .nvmrc (22)
 npm install
 npm run dev
 ```
