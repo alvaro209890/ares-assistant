@@ -1,8 +1,37 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import type { DiagnosticsResult } from '../../shared/types'
+import { useAres } from '../lib/store'
+
+function formatUptime(sec: number): string {
+  const d = Math.floor(sec / 86400)
+  const h = Math.floor((sec % 86400) / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  if (d > 0) return `${d}d ${h}h ${m}m`
+  if (h > 0) return `${h}h ${m}m`
+  return `${m}m`
+}
+
+function Bar({ label, percent }: { label: string; percent: number }): JSX.Element {
+  const high = percent >= 85
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-[12px]">
+        <span className="text-cyan-200/55">{label}</span>
+        <span className={high ? 'text-amber-300/85' : 'text-cyan-100/85'}>{percent}%</span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-black/40">
+        <div
+          className={`h-full rounded-full transition-all ${high ? 'bg-amber-400/80' : 'bg-cyan-400/70'}`}
+          style={{ width: `${Math.max(2, Math.min(100, percent))}%` }}
+        />
+      </div>
+    </div>
+  )
+}
 
 export default function System(): JSX.Element {
+  const { metrics } = useAres()
   const [diag, setDiag] = useState<DiagnosticsResult | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -41,6 +70,21 @@ export default function System(): JSX.Element {
           <div className="grid h-40 place-items-center text-sm text-cyan-200/40">Coletando diagnóstico…</div>
         ) : (
           <div className="grid gap-4 lg:grid-cols-2">
+            <Panel title="RECURSOS DO SISTEMA · AO VIVO">
+              {metrics ? (
+                <>
+                  <Bar label="CPU" percent={metrics.cpuPercent} />
+                  <Bar label={`Memória · ${metrics.memUsedGB}/${metrics.memTotalGB} GB`} percent={metrics.memPercent} />
+                  <Row k="Tempo ligado" v={formatUptime(metrics.uptimeSec)} />
+                  <Row k="Núcleos" v={String(metrics.cores)} />
+                  <Row k="Carga (1 min)" v={String(metrics.loadAvg1)} />
+                  <Row k="Host" v={metrics.hostname} />
+                </>
+              ) : (
+                <span className="text-[12px] text-cyan-200/45">Coletando telemetria…</span>
+              )}
+            </Panel>
+
             <Panel title="CÉREBRO · 9 ROUTER">
               <Status ok={diag.nineRouter.ok} label={diag.nineRouter.ok ? 'Online' : 'Indisponível'} detail={diag.nineRouter.detail} />
               <Row k="URL" v={diag.nineRouter.baseUrl} />

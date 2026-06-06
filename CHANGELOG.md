@@ -4,6 +4,36 @@ Todas as mudanças relevantes do Ares. O formato segue de perto
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/) e o projeto usa
 versionamento semântico.
 
+## [0.3.0] — 2026-06-05
+
+Foco: deixar o Ares **mais "JARVIS"** — consciente do próprio computador e do que
+você acabou de copiar.
+
+### Adicionado
+
+- **Telemetria do sistema no HUD (estilo JARVIS)** — uso de **CPU**, **memória**
+  (% e GB) e **tempo ligado** ao vivo no rodapé do palco do assistente
+  (atualização a cada 3 s) e um painel **"Recursos do Sistema · ao vivo"** com
+  barras de progresso na tela Sistema (CPU, memória, uptime, núcleos, carga,
+  host). Valores ficam âmbar quando o uso está alto.
+- **Ferramenta de voz `sistema.status`** — pergunte "Ares, como está o sistema?"
+  ou "quanta memória está livre?" e ele responde a partir da telemetria real.
+- **Consciência da área de transferência (`area.ler`)** — o Ares lê o texto que
+  você copiou para **resumir, traduzir ou explicar**: "Ares, resuma o que eu
+  copiei", "traduza o que está na área de transferência". Tudo local.
+
+### Técnico
+
+- `src/main/system.ts` (novo): `getSystemMetrics()` (amostragem de CPU via `os`,
+  memória, uptime, carga) e `readClipboard()` (Electron `clipboard`).
+- IPC `metrics:get` e `clipboard:read`; preload `system.metrics()` /
+  `system.readClipboard()`.
+- `src/shared/protocol.ts`: `sistema.status` e `area.ler` em `QUERY_TOOLS`.
+- `src/main/agent.ts`: roteamento das duas novas ferramentas.
+- `src/shared/types.ts`: tipo `SystemMetrics`.
+- `src/renderer/lib/store.tsx`: polling de telemetria (3 s) exposto como `metrics`.
+- HUD em `screens/Assistant.tsx` e painel em `screens/System.tsx`.
+
 ## [0.2.0] — 2026-06-05
 
 Foco: deixar o Ares **mais inteligente, mais natural na voz e mais rápido de

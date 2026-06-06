@@ -9,6 +9,7 @@ import { getDiagnostics } from './diagnostics'
 import { initOverlay, toggleOverlay, setOverlayState, focusMain, requestListen } from './overlay'
 import { setupTray, destroyTray, registerGlobalShortcut, setAutostart } from './desktop'
 import { exportData, importData } from './backup'
+import { getSystemMetrics, readClipboard } from './system'
 import { startReminders } from './notify'
 import { synthesize, listPiperVoices, isPiperReady, ensurePiper } from './piper'
 import { getWeather, getWeatherAt, getNews, reverseGeocode } from './tools'
@@ -198,6 +199,10 @@ function registerIpc(): void {
   // Briefing do dia + diagnóstico do sistema
   ipcMain.handle('briefing:get', async () => buildBriefing(readConfig()))
   ipcMain.handle('diagnostics:get', async () => getDiagnostics())
+
+  // Telemetria do sistema (HUD) + leitura da área de transferência
+  ipcMain.handle('metrics:get', () => getSystemMetrics())
+  ipcMain.handle('clipboard:read', () => readClipboard())
 
   // Abrir link/anexo de cartão no app padrão do sistema (http(s):// ou file://)
   ipcMain.handle('system:openExternal', async (_e, url: string) => {

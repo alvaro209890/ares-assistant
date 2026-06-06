@@ -14,6 +14,7 @@ import type {
   Recurrence,
   Reminder,
   SessionMeta,
+  SystemMetrics,
   TtsStatus,
   UserLocation,
   WeatherResult
@@ -48,6 +49,7 @@ interface AresStore {
   voices: SpeechSynthesisVoice[]
   piper: TtsStatus | null
   weather: WeatherResult | null
+  metrics: SystemMetrics | null
   recording: boolean
   continuous: boolean
   settingsOpen: boolean
@@ -182,6 +184,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([])
   const [piper, setPiper] = useState<TtsStatus | null>(null)
   const [weather, setWeather] = useState<WeatherResult | null>(null)
+  const [metrics, setMetrics] = useState<SystemMetrics | null>(null)
   const [recording, setRecording] = useState(false)
   const [continuous, setContinuous] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -331,6 +334,26 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   useEffect(() => {
     aresStateRef.current = aresState
   }, [aresState])
+
+  // Telemetria do sistema (HUD estilo JARVIS): consulta CPU/memória a cada 3s.
+  useEffect(() => {
+    if (!ready) return
+    let alive = true
+    const poll = async (): Promise<void> => {
+      try {
+        const m = await window.ares.system.metrics()
+        if (alive) setMetrics(m)
+      } catch {
+        /* telemetria é opcional */
+      }
+    }
+    void poll()
+    const t = setInterval(() => void poll(), 3000)
+    return () => {
+      alive = false
+      clearInterval(t)
+    }
+  }, [ready])
 
   // Acessibilidade: escala de fonte, alto contraste e modo simples.
   useEffect(() => {
@@ -1022,6 +1045,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     voices,
     piper,
     weather,
+    metrics,
     recording,
     continuous,
     settingsOpen,

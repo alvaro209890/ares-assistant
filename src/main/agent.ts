@@ -31,6 +31,7 @@ import {
   loadReminders
 } from './data'
 import { getWeather, getWeatherAt, getNews, webSearch, calcExpression, convertCurrency, convertUnit, readPage, hermesExecute } from './tools'
+import { getSystemMetrics, readClipboard } from './system'
 import { buildBriefing, briefingToSpeech } from './briefing'
 
 const norm = (s: unknown) => String(s ?? '').toLowerCase().trim()
@@ -82,6 +83,8 @@ FERRAMENTAS DE CONSULTA (dê uma fala curta tipo "Deixe-me verificar." e AGUARDE
 - converter.moeda {de, para, valor}   (ex.: de:"USD", para:"BRL", valor:50)
 - converter.unidade {de, para, valor}   (medidas locais: comprimento, massa, volume, área, velocidade, tempo, dados e temperatura — ex.: de:"km", para:"milhas", valor:10; de:"C", para:"F", valor:30)
 - pagina.ler {url}   (lê uma página da web e resume/responde a partir do conteúdo real dela)
+- sistema.status {}   (uso de CPU, memória e tempo ligado do computador — "como está o sistema?", "quanta memória livre?")
+- area.ler {}   (lê o texto da área de transferência para resumir/traduzir/explicar o que o usuário copiou — "resuma o que eu copiei")
 
 Regras: use nomes de colunas/tarefas/listas existentes (ver CONTEXTO). Datas SEMPRE em ISO local sem fuso (ex.: 2026-06-03T09:00), resolvidas pela seção DATAS. memoria.salvar só para fatos duradouros do usuário (preferências, perfil, rotina), nunca para pedidos pontuais. Para rascunho de mensagem/e-mail: escreva o texto em "fala" para o usuário revisar e, se ele pedir para guardar, use nota.salvar.`
 }
@@ -187,6 +190,12 @@ async function runQuery(a: Acao, cfg: AppConfig): Promise<unknown> {
         }
       case 'pagina.ler':
         return { tipo: a.tipo, resultado: await readPage(String(a.url || a.endereco || a.link || '')) }
+      case 'sistema.status':
+        return { tipo: a.tipo, resultado: getSystemMetrics() }
+      case 'area.ler': {
+        const c = readClipboard()
+        return c.vazio ? { tipo: a.tipo, erro: 'A área de transferência está vazia.' } : { tipo: a.tipo, resultado: c }
+      }
       case 'hermes.executar': {
         if (!integrations.hermes?.enabled) return { tipo: a.tipo, erro: 'Ponte com o Hermes desativada nas Configurações.' }
         return { tipo: a.tipo, resultado: await hermesExecute(integrations.hermes.baseUrl, String(a.comando || a.texto || '')) }

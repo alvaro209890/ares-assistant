@@ -17,6 +17,8 @@ export const QUERY_TOOLS = new Set([
   'converter.moeda',
   'converter.unidade',
   'pagina.ler',
+  'sistema.status',
+  'area.ler',
   'hermes.executar'
 ])
 

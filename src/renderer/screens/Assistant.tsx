@@ -11,8 +11,18 @@ const sameDay = (iso: string, ref = new Date()) => {
   return d.getFullYear() === ref.getFullYear() && d.getMonth() === ref.getMonth() && d.getDate() === ref.getDate()
 }
 
+// Tempo ligado do computador em formato curto (ex.: "3d 4h", "5h 12m", "8m").
+function formatUptime(sec: number): string {
+  const d = Math.floor(sec / 86400)
+  const h = Math.floor((sec % 86400) / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  if (d > 0) return `${d}d ${h}h`
+  if (h > 0) return `${h}h ${m}m`
+  return `${m}m`
+}
+
 export default function Assistant(): JSX.Element {
-  const { aresState, conversation, status, weather, events, board, createSession, openBriefing } = useAres()
+  const { aresState, conversation, status, weather, events, board, metrics, createSession, openBriefing } = useAres()
   const todayEvents = useMemo(() => events.filter((e) => sameDay(e.whenISO)).slice(0, 3), [events])
   const reminders = useMemo(
     () =>
@@ -88,9 +98,21 @@ export default function Assistant(): JSX.Element {
         )}
 
         <div className="pointer-events-none absolute bottom-[112px] left-1/2 z-20 flex w-[min(74%,680px)] -translate-x-1/2 items-center justify-between text-[10px] text-cyan-200/45">
-          <span>NEURAL CORE</span>
-          <span>ARES ONLINE</span>
-          <span>LOCAL MEMORY</span>
+          {metrics ? (
+            <>
+              <span className={metrics.cpuPercent >= 85 ? 'text-amber-300/80' : undefined}>CPU {metrics.cpuPercent}%</span>
+              <span className={metrics.memPercent >= 90 ? 'text-amber-300/80' : undefined}>
+                RAM {metrics.memPercent}% · {metrics.memUsedGB}/{metrics.memTotalGB} GB
+              </span>
+              <span>UP {formatUptime(metrics.uptimeSec)}</span>
+            </>
+          ) : (
+            <>
+              <span>NEURAL CORE</span>
+              <span>ARES ONLINE</span>
+              <span>LOCAL MEMORY</span>
+            </>
+          )}
         </div>
 
         <div className="absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-[#04070f] via-[#04070f]/82 to-transparent p-6 pt-16">

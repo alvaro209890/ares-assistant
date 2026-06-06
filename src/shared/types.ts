@@ -338,3 +338,16 @@ export interface ReverseGeocodeResult {
   country?: string
   label: string
 }
+
+// --- Telemetria do sistema (HUD estilo JARVIS) ---
+export interface SystemMetrics {
+  cpuPercent: number // uso de CPU desde a última leitura (0..100)
+  memPercent: number // memória usada (0..100)
+  memUsedGB: number
+  memTotalGB: number
+  uptimeSec: number // tempo ligado do computador
+  loadAvg1: number // carga média de 1 min (Linux/macOS)
+  cores: number
+  hostname: string
+  platform: string
+}

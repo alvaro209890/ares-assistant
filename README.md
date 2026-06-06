@@ -31,6 +31,12 @@ O projeto roda em modo de desenvolvimento. O empacotamento `.deb` está configur
 - **Orbe flutuante (companion)**: uma mini-orbe always-on-top que reflete o estado do Ares; clique para abrir o app, ou use o microfone dela para falar sem trazer a janela principal.
 - **Barge-in (interromper a fala)**: na conversa contínua, comece a falar por cima e o Ares para na hora e te ouve; a tecla `Esc` também interrompe a fala a qualquer momento.
 
+### Novidades da versão 0.3
+
+- **Telemetria do sistema no HUD (estilo JARVIS)**: CPU, memória e tempo ligado ao vivo no palco do assistente, e um painel **"Recursos do Sistema · ao vivo"** na tela Sistema. Veja [Telemetria do Sistema](#telemetria-do-sistema-hud).
+- **`sistema.status` por voz**: "Ares, como está o sistema?", "quanta memória livre?".
+- **Consciência da área de transferência** (`area.ler`): "Ares, resuma o que eu copiei", "traduza o que está na área de transferência".
+
 ### Novidades da versão 0.2
 
 - **Busca global (`Ctrl+K`)**: uma paleta de comandos que procura em tarefas, agenda, lembretes, notas, listas, memória e conversas, navega para a tela certa e encaminha qualquer texto como pergunta ao Ares. Veja [Busca Global](#busca-global-ctrlk).
@@ -90,6 +96,7 @@ Arquivos importantes:
 - `src/main/tools.ts`: clima (com períodos/alerta), busca web, notícias, geocodificação reversa, conversão de unidades (`convertUnit`) e leitura de páginas (`readPage`).
 - `src/main/briefing.ts`: monta o briefing do dia e sua versão falável.
 - `src/main/diagnostics.ts`: status de serviços, localização e arquivos de dados.
+- `src/main/system.ts`: telemetria do sistema (`getSystemMetrics`) e leitura da área de transferência (`readClipboard`).
 - `src/main/overlay.ts`: janela da mini-orbe flutuante (always-on-top) e sincronização de estado.
 - `src/main/desktop.ts`: ícone na bandeja, atalho global e iniciar com o sistema.
 - `src/main/backup.ts`: exportar/importar dados do usuário.
@@ -275,10 +282,29 @@ O botão **☀ BRIEFING** na tela Assistente (ou o comando de voz “Ares, faça
 
 As sugestões podem ser desligadas em Configurações > Proatividade (`ui.proactiveSuggestions`). Por voz, o Ares fala uma versão curta do briefing.
 
+## Telemetria do Sistema (HUD)
+
+No melhor estilo JARVIS, o Ares mostra o estado do próprio computador **ao vivo**:
+
+- no palco do assistente, o rodapé exibe **CPU**, **memória** (% e GB usados/total) e **tempo ligado**, atualizados a cada 3 segundos (fica âmbar quando o uso está alto);
+- na tela **Sistema** há um painel **"Recursos do Sistema · ao vivo"** com barras de CPU e memória, núcleos, carga média de 1 min e host;
+- por voz, a ferramenta `sistema.status` responde "como está o sistema?", "quanta memória está livre?" ou "há quanto tempo o PC está ligado?".
+
+Tudo é coletado localmente pelo módulo `os` do Node no processo principal (`src/main/system.ts` → `getSystemMetrics()`); o percentual de CPU é a média entre duas leituras, então reflete o uso recente em vez de um pico isolado. Nada sai do computador.
+
+## Área de Transferência (resumir o que você copiou)
+
+O Ares pode agir sobre o texto que você acabou de copiar, sem você colar nada:
+
+- "Ares, **resuma o que eu copiei**", "**traduza** o que está na área de transferência", "**explique** isto que copiei";
+- a ferramenta `area.ler` lê o texto da área de transferência (via Electron `clipboard`, em `src/main/system.ts` → `readClipboard()`), limitado em tamanho, e o Ares responde a partir dele;
+- se a área de transferência estiver vazia, ele avisa de forma amigável. O conteúdo nunca é salvo — é usado só para responder ao seu pedido.
+
 ## Sistema / Diagnóstico
 
 A aba **Sistema** (`Alt+5`) mostra o status local do Ares:
 
+- **recursos do sistema ao vivo**: CPU, memória, tempo ligado, núcleos, carga e host;
 - 9 Router: online/indisponível, URL e modelo (faz um ping curto a `/models`);
 - Groq: chave configurada ou não;
 - Piper: pronto e vozes disponíveis;
@@ -539,6 +565,8 @@ Ferramentas de consulta:
 - `converter.moeda` `{de, para, valor}`
 - `converter.unidade` `{de, para, valor}` (comprimento, massa, volume, área, velocidade, tempo, dados e temperatura; local/offline)
 - `pagina.ler` `{url}` (lê uma página web e responde/resume a partir do conteúdo dela)
+- `sistema.status` `{}` (uso de CPU, memória e tempo ligado do computador)
+- `area.ler` `{}` (lê o texto da área de transferência para resumir/traduzir/explicar)
 - `hermes.executar` `{comando}` (só com a ponte do Hermes ativada)
 
 As ferramentas de consulta são executadas pelo processo principal. O resultado volta ao LLM para gerar a resposta final em linguagem natural.
@@ -569,6 +597,8 @@ Com a palavra de ativação ligada, comece pela palavra (ex.: "**Ares**, faça m
 - "quanto é 30% de 250?" / "quantos reais são 50 dólares?"
 - "quantos quilômetros são 10 milhas?" / "30 graus Celsius em Fahrenheit" / "5 GB em MB"
 - "leia esta página e me resuma: https://exemplo.com/artigo"
+- "como está o sistema?" / "quanta memória está livre?" / "há quanto tempo o PC está ligado?"
+- "resuma o que eu copiei" / "traduza o que está na área de transferência"
 - "crie uma tarefa semanal de regar as plantas" / "mova comprar café para concluído"
 - "lembre-se que prefiro respostas curtas" / "anote que trabalho com fotografia"
 - "quais as notícias de hoje?" / "pesquise na web sobre ..."

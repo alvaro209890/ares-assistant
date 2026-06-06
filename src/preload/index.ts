@@ -18,6 +18,7 @@ import type {
   Reminder,
   ReverseGeocodeResult,
   SessionMeta,
+  SystemMetrics,
   TtsStatus,
   UserLocation,
   WeatherResult
@@ -131,6 +132,8 @@ const api = {
   system: {
     platform: process.platform,
     openExternal: (url: string): Promise<boolean> => ipcRenderer.invoke('system:openExternal', url),
+    metrics: (): Promise<SystemMetrics> => ipcRenderer.invoke('metrics:get'),
+    readClipboard: (): Promise<{ texto: string; vazio: boolean }> => ipcRenderer.invoke('clipboard:read'),
     setGlobalShortcut: (enabled: boolean): Promise<AppConfig> => ipcRenderer.invoke('system:setGlobalShortcut', enabled),
     setAutostart: (enabled: boolean): Promise<AppConfig> => ipcRenderer.invoke('system:setAutostart', enabled),
     testBrain: (): Promise<{ ok: boolean; detail: string }> => ipcRenderer.invoke('brain:test'),

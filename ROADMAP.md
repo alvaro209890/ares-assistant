@@ -13,6 +13,11 @@ conhecimento técnico), com o motivo de cada uma.
 > **barge-in** (interromper a fala por voz ou com `Esc`), ✅ **conversão de unidades
 > local** (`converter.unidade`), ✅ **leitura/resumo de páginas web** (`pagina.ler`) e
 > ✅ microfone com cancelamento de eco. Detalhes em [`CHANGELOG.md`](CHANGELOG.md).
+>
+> **Versão 0.3 (entregue):** ✅ **telemetria do sistema no HUD** (CPU/memória/uptime
+> ao vivo + painel na tela Sistema) com ferramenta de voz `sistema.status`, e ✅
+> **consciência da área de transferência** (`area.ler`) para resumir/traduzir/explicar
+> o que o usuário copiou. Detalhes em [`CHANGELOG.md`](CHANGELOG.md).
 
 Legenda de esforço: 🟢 baixo · 🟡 médio · 🔴 alto. ✅ = já implementado.
 
