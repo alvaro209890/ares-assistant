@@ -414,10 +414,10 @@ export interface CodeProjectIndex {
 // --- Controle do computador (desktop actions, estilo JARVIS) ---
 export interface DesktopActionResult {
   ok: boolean
-  action: 'abrir' | 'volume' | 'bloquear' | 'captura' | 'clipboard'
+  action: 'abrir' | 'volume' | 'midia' | 'brilho' | 'bloquear' | 'captura' | 'clipboard'
   detail: string // texto curto e falável do resultado
   target?: string // alvo aberto/arquivo salvo
-  value?: number // ex.: percentual de volume
+  value?: number // ex.: percentual de volume/brilho
 }
 
 export interface TtsStatus {

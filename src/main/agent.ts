@@ -28,11 +28,24 @@ import {
   addReminder,
   removeReminderByText,
   remindersSummary,
-  loadReminders
+  loadReminders,
+  userDataDir
 } from './data'
 import { getWeather, getWeatherAt, getNews, webSearch, calcExpression, convertCurrency, convertUnit, readPage, hermesExecute } from './tools'
 import { getSystemMetrics, readClipboard, writeClipboard } from './system'
-import { controlPromptContext, runLock, runOpen, runScreenshot, runVolume, type VolumeAction } from './control'
+import {
+  controlPromptContext,
+  runBrightness,
+  runLock,
+  runMedia,
+  runOpen,
+  runScreenshot,
+  runVolume,
+  type BrightnessAction,
+  type MediaAction,
+  type VolumeAction
+} from './control'
+import { pushUndo, undoLast } from './history'
 import { buildBriefing, briefingToSpeech } from './briefing'
 import {
   applyCodePatch,
@@ -62,6 +75,25 @@ function normVolumeAction(raw: unknown): VolumeAction {
   if (/(toggle|alterna)/.test(s)) return 'toggle'
   if (/(up|aument|sub|mais|\+|alto)/.test(s)) return 'up'
   if (/(down|dimin|baix|menos|-)/.test(s)) return 'down'
+  return 'set'
+}
+
+/** Mapeia a fala ("pausa", "próxima", "tocar") para uma ação de mídia. */
+function normMediaAction(raw: unknown): MediaAction {
+  const s = norm(raw)
+  if (/(prox|próx|pul|next|avan|frente|adiant)/.test(s)) return 'next'
+  if (/(anter|volt|previous|prev|retroce)/.test(s)) return 'previous'
+  if (/(stop|parar|^pare|interromp)/.test(s)) return 'stop'
+  if (/(continu|retoma|despaus|resume|^play|^toca|^tocar)/.test(s)) return 'play'
+  if (/(paus)/.test(s)) return 'pause'
+  return 'playpause'
+}
+
+/** Mapeia a fala ("clareia", "escurece") para uma ação de brilho. */
+function normBrightnessAction(raw: unknown): BrightnessAction {
+  const s = norm(raw)
+  if (/(up|aument|sub|mais|clar|ilumin)/.test(s)) return 'up'
+  if (/(down|dimin|baix|menos|escur)/.test(s)) return 'down'
   return 'set'
 }
 
@@ -117,6 +149,9 @@ FERRAMENTAS DE CONSULTA (dê uma fala curta tipo "Deixe-me verificar." e AGUARDE
 - sistema.volume {acao(set|up|down|mute|unmute|toggle), nivel?(0-100)}   (controla o volume — "aumenta o volume", "volume em 30", "muda pro mudo")
 - sistema.bloquear {}   (bloqueia a tela do computador — "bloqueie a tela", "trave o pc")
 - sistema.captura {}   (tira uma captura de tela e salva em arquivo — "tire um print da tela")
+- sistema.midia {acao(playpause|play|pause|next|previous|stop)}   (controla a música/vídeo tocando — "pausa", "próxima", "toca")
+- sistema.brilho {acao(set|up|down), nivel?(0-100)}   (ajusta o brilho da tela — "clareia a tela", "brilho em 50", "escurece")
+- desfazer {}   (desfaz a ÚLTIMA alteração de dados — tarefa/lista/nota/lembrete/evento/memória; use quando o usuário disser "desfaz", "cancela isso", "volta atrás")
 - codigo.workspace {path?}   (resume um projeto/workspace local: stack, scripts, árvore, git, linguagens)
 - codigo.buscar {path?, consulta, filtro?}   (busca texto/símbolo no código; use antes de explicar funções ou localizar implementação)
 - codigo.ler {path?, arquivo, inicio?, linhas?}   (lê trecho de arquivo local com números de linha; use para responder com precisão)
@@ -282,6 +317,22 @@ async function runQuery(a: Acao, cfg: AppConfig, sessionId: string): Promise<unk
         return { tipo: a.tipo, resultado: runLock(cfg) }
       case 'sistema.captura':
         return { tipo: a.tipo, resultado: runScreenshot(cfg) }
+      case 'sistema.midia':
+        return { tipo: a.tipo, resultado: runMedia(cfg, normMediaAction(a.acao ?? a.action ?? a.comando)) }
+      case 'sistema.brilho': {
+        const level = Number(a.nivel ?? a.level ?? a.valor ?? a.percentual)
+        const action = normBrightnessAction(a.acao ?? a.action ?? a.direcao)
+        if (action === 'set' && !Number.isFinite(level)) {
+          return { tipo: a.tipo, erro: 'Diga o nível do brilho (0 a 100) ou se é para clarear ou escurecer.' }
+        }
+        return { tipo: a.tipo, resultado: runBrightness(cfg, { action, level }) }
+      }
+      case 'desfazer': {
+        const r = undoLast(userDataDir())
+        return r.ok
+          ? { tipo: a.tipo, resultado: { ok: true, desfeito: r.label || 'a última alteração' } }
+          : { tipo: a.tipo, erro: 'Não há nada para desfazer.' }
+      }
       case 'codigo.workspace':
         return { tipo: a.tipo, resultado: summarizeCodeWorkspace(cfg, String(a.path || a.raiz || a.workspace || '')) }
       case 'codigo.buscar':
@@ -599,6 +650,9 @@ export async function runTurn(
   mutations = memoryFallback(userText, mutations)
   const validated = validateActions(mutations)
   allNotes.push(...validated.notes)
+
+  // Snapshot para "desfazer": antes de alterar qualquer dado, guarda o estado atual.
+  if (validated.valid.length) pushUndo(userDataDir(), userText.slice(0, 80))
 
   const { board, notes, changedBoard } = applyMutations(validated.valid)
   allNotes.push(...notes)

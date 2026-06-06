@@ -23,7 +23,8 @@ O projeto roda em modo de desenvolvimento. O empacotamento `.deb` está configur
 - **Kanban e calendário**: etiquetas nomeadas, links/anexos locais, tarefas e eventos recorrentes, lembrete configurável antes do evento, visões “Hoje”, “Vencidas”, “Próximos 7 dias” e agenda por dia/semana.
 - **Conversa contínua melhor**: sensibilidade do microfone, tempo de silêncio e pausa pós-fala configuráveis (evita que o Ares escute a própria voz).
 - **Modo Programador**: resumo de workspace, busca e leitura local de código, **terminal completo com autorização por voz** e delegação ao Hermes Code para análise profunda, edição, debug, testes e refatoração.
-- **Controle do computador**: abrir apps/sites/arquivos, volume, bloquear a tela, capturas e escrever na área de transferência — por voz, sem shell. Veja [Controle do Computador](docs/CONTROLE.md).
+- **Controle do computador**: abrir apps/sites/arquivos, volume, **mídia (play/pause/próxima)**, **brilho da tela**, bloquear a tela, capturas e escrever na área de transferência — por voz, sem shell. Veja [Controle do Computador](docs/CONTROLE.md).
+- **Desfazer por voz**: "desfaz" reverte a última alteração em tarefas, listas, notas, lembretes, eventos ou memória.
 - **Ponte com o Hermes**: delegação por voz para WhatsApp, Trello, Obsidian, office de agentes e automações externas do Hermes.
 - **Tela Sistema/Diagnóstico**: status do 9 Router, Hermes, Groq, Piper, localização, arquivos de dados locais e versões do app.
 
@@ -33,6 +34,13 @@ O projeto roda em modo de desenvolvimento. O empacotamento `.deb` está configur
 - **Palavra de ativação ("Ares")**: na conversa contínua, opcionalmente só responde quando você começa pela palavra-chave (ex.: "Ares, que horas são?"). Diga só "Ares" para ele confirmar e aguardar o comando.
 - **Orbe flutuante (companion)**: uma mini-orbe always-on-top que reflete o estado do Ares; clique para abrir o app, ou use o microfone dela para falar sem trazer a janela principal.
 - **Barge-in (interromper a fala)**: na conversa contínua, comece a falar por cima e o Ares para na hora e te ouve; a tecla `Esc` também interrompe a fala a qualquer momento.
+
+### Novidades da versão 0.10
+
+- **Controle de mídia por voz**: `sistema.midia` (play/pause/próxima/anterior/parar) via `playerctl` ou MPRIS (`dbus-send`) — "pausa a música", "próxima".
+- **Brilho da tela**: `sistema.brilho` (clarear/escurecer/definir) via `xrandr`, com piso de 10% para nunca apagar a tela.
+- **Desfazer por voz** (`desfazer`): reverte a última alteração de dados (tarefa/lista/nota/lembrete/evento/memória) com snapshot dos arquivos antes de cada turno que muda dados — ótimo contra erros de transcrição. Veja [`src/main/history.ts`](src/main/history.ts).
+- **+10 testes** (52 no total), incluindo `tests/history.test.ts`. Detalhes em [`docs/CONTROLE.md`](docs/CONTROLE.md).
 
 ### Novidades da versão 0.9
 

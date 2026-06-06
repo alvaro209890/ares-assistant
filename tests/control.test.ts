@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { audioBackend, buildVolume, resolveOpenTarget } from '../src/main/control'
+import {
+  audioBackend,
+  buildBrightness,
+  buildMedia,
+  buildVolume,
+  mediaBackend,
+  resolveOpenTarget
+} from '../src/main/control'
 
 const which = (have: string[]) => (t: string) => have.includes(t)
 
@@ -76,5 +83,45 @@ describe('controle do computador — buildVolume', () => {
   it('clampa o nível entre 0 e 100', () => {
     expect(buildVolume('pactl', { action: 'set', level: 250 }).args).toContain('100%')
     expect(buildVolume('pactl', { action: 'set', level: -5 }).args).toContain('0%')
+  })
+})
+
+describe('controle do computador — mídia', () => {
+  it('mediaBackend prioriza playerctl, depois dbus', () => {
+    expect(mediaBackend(which(['playerctl', 'dbus-send']))).toBe('playerctl')
+    expect(mediaBackend(which(['dbus-send']))).toBe('dbus')
+    expect(mediaBackend(which([]))).toBeNull()
+  })
+
+  it('buildMedia: playerctl usa verbos', () => {
+    expect(buildMedia('playerctl', 'playpause')).toEqual({ cmd: 'playerctl', args: ['play-pause'] })
+    expect(buildMedia('playerctl', 'next')).toEqual({ cmd: 'playerctl', args: ['next'] })
+  })
+
+  it('buildMedia: dbus chama o método MPRIS no player', () => {
+    const plan = buildMedia('dbus', 'pause', 'org.mpris.MediaPlayer2.vlc')
+    expect(plan.cmd).toBe('dbus-send')
+    expect(plan.args).toContain('--dest=org.mpris.MediaPlayer2.vlc')
+    expect(plan.args).toContain('org.mpris.MediaPlayer2.Player.Pause')
+  })
+})
+
+describe('controle do computador — brilho', () => {
+  it('set converte 0-100 em fração e clampa em [0.1, 1]', () => {
+    expect(buildBrightness('eDP', { action: 'set', level: 50 }).fraction).toBe(0.5)
+    expect(buildBrightness('eDP', { action: 'set', level: 0 }).fraction).toBe(0.1) // nunca apaga a tela
+    expect(buildBrightness('eDP', { action: 'set', level: 200 }).fraction).toBe(1)
+  })
+
+  it('up/down ajustam a partir do brilho atual', () => {
+    expect(buildBrightness('eDP', { action: 'up', current: 0.5 }).fraction).toBe(0.6)
+    expect(buildBrightness('eDP', { action: 'down', current: 0.5 }).fraction).toBe(0.4)
+    expect(buildBrightness('eDP', { action: 'down', current: 0.15 }).fraction).toBe(0.1) // piso
+  })
+
+  it('monta o comando xrandr para a saída', () => {
+    const plan = buildBrightness('eDP', { action: 'set', level: 70 })
+    expect(plan.cmd).toBe('xrandr')
+    expect(plan.args).toEqual(['--output', 'eDP', '--brightness', '0.70'])
   })
 })

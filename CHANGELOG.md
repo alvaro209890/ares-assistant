@@ -4,6 +4,34 @@ Todas as mudanças relevantes do Ares. O formato segue de perto
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/) e o projeto usa
 versionamento semântico.
 
+## [0.10.0] — 2026-06-06
+
+Foco: completar o controle do computador (**mídia** e **brilho**) e adicionar
+**desfazer por voz** — reduzindo o atrito de erros de transcrição.
+
+### Adicionado
+
+- **`sistema.midia {acao}`** — play/pause/próxima/anterior/parar via `playerctl`
+  ou MPRIS por `dbus-send` (usa o primeiro player ativo; degrada com elegância
+  quando não há player).
+- **`sistema.brilho {acao, nivel?}`** — clarear/escurecer/definir o brilho via
+  `xrandr` (brilho de software no X11), com piso de 10% para não apagar a tela e
+  passos de 10% no up/down.
+- **`desfazer {}`** — reverte a última alteração de dados (tarefa, lista, nota,
+  lembrete, evento ou memória). Antes de cada turno que muda dados, o Ares tira um
+  snapshot dos arquivos JSON (`src/main/history.ts`, pilha das últimas 15) e
+  "desfaz" restaura o último — undo universal, independente da ação. Não inclui
+  conversas nem config.
+- **`normMediaAction`/`normBrightnessAction`** no agente para entender a fala
+  natural ("pausa", "próxima", "clareia", "escurece").
+
+### Testes
+
+- `tests/control.test.ts`: `mediaBackend`/`buildMedia` (playerctl + MPRIS) e
+  `buildBrightness` (fração, clamp, up/down).
+- `tests/history.test.ts`: restauração, remoção de arquivo ausente no snapshot,
+  pilha LIFO e snapshot/restore isolados. Total: 52 testes.
+
 ## [0.9.0] — 2026-06-06
 
 Foco: **controle do computador por voz** (estilo JARVIS) — o Ares deixa de só

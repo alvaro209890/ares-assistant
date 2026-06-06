@@ -256,8 +256,152 @@ export function runScreenshot(cfg: AppConfig): DesktopActionResult {
   return { ok: false, action: 'captura', detail: 'não encontrei ferramenta de captura (gnome-screenshot/grim/scrot)' }
 }
 
+// --- Mídia (play/pause/próxima/anterior) -----------------------------------
+
+export type MediaBackend = 'playerctl' | 'dbus'
+export type MediaAction = 'playpause' | 'play' | 'pause' | 'next' | 'previous' | 'stop'
+
+export function mediaBackend(which: WhichFn = realWhich): MediaBackend | null {
+  if (which('playerctl')) return 'playerctl'
+  if (which('dbus-send')) return 'dbus'
+  return null
+}
+
+const PLAYERCTL_VERB: Record<MediaAction, string> = {
+  playpause: 'play-pause',
+  play: 'play',
+  pause: 'pause',
+  next: 'next',
+  previous: 'previous',
+  stop: 'stop'
+}
+const MPRIS_METHOD: Record<MediaAction, string> = {
+  playpause: 'PlayPause',
+  play: 'Play',
+  pause: 'Pause',
+  next: 'Next',
+  previous: 'Previous',
+  stop: 'Stop'
+}
+
+export interface MediaPlan {
+  cmd: string
+  args: string[]
+}
+
+/** Monta o comando de mídia (sem executar). Para dbus precisa do bus name do player. Pura. */
+export function buildMedia(backend: MediaBackend, action: MediaAction, player = ''): MediaPlan {
+  if (backend === 'playerctl') return { cmd: 'playerctl', args: [PLAYERCTL_VERB[action]] }
+  return {
+    cmd: 'dbus-send',
+    args: [
+      '--type=method_call',
+      `--dest=${player}`,
+      '/org/mpris/MediaPlayer2',
+      `org.mpris.MediaPlayer2.Player.${MPRIS_METHOD[action]}`
+    ]
+  }
+}
+
+/** Lista players MPRIS ativos no barramento (executor). */
+export function mprisPlayers(): string[] {
+  try {
+    const r = spawnSync(
+      'dbus-send',
+      ['--print-reply', '--dest=org.freedesktop.DBus', '/org/freedesktop/DBus', 'org.freedesktop.DBus.ListNames'],
+      { encoding: 'utf8', timeout: 4000 }
+    )
+    const out = String(r.stdout || '')
+    const found = out.match(/org\.mpris\.MediaPlayer2\.[\w.-]+/g) || []
+    return Array.from(new Set(found))
+  } catch {
+    return []
+  }
+}
+
+export function runMedia(cfg: AppConfig, action: MediaAction): DesktopActionResult {
+  ensureEnabled(cfg)
+  const backend = mediaBackend()
+  if (!backend) return { ok: false, action: 'midia', detail: 'não encontrei controle de mídia (playerctl/dbus)' }
+  let plan: MediaPlan
+  if (backend === 'dbus') {
+    const players = mprisPlayers()
+    if (!players.length) return { ok: false, action: 'midia', detail: 'nenhum player de mídia ativo no momento' }
+    plan = buildMedia('dbus', action, players[0])
+  } else {
+    plan = buildMedia('playerctl', action)
+  }
+  const r = spawnSync(plan.cmd, plan.args, { encoding: 'utf8', timeout: 5000 })
+  const ok = r.status === 0
+  const label: Record<MediaAction, string> = {
+    playpause: 'play/pause',
+    play: 'tocando',
+    pause: 'pausado',
+    next: 'próxima faixa',
+    previous: 'faixa anterior',
+    stop: 'parado'
+  }
+  return { ok, action: 'midia', detail: ok ? label[action] : String(r.stderr || r.error?.message || 'falha na mídia') }
+}
+
+// --- Brilho da tela (xrandr, brilho de software no X11) ---------------------
+
+export type BrightnessAction = 'set' | 'up' | 'down'
+const BR_STEP = 0.1
+const clampBrightness = (n: number): number => Math.max(0.1, Math.min(1, Math.round(n * 100) / 100))
+
+export function xrandrOutputs(): string[] {
+  try {
+    const r = spawnSync('xrandr', ['--current'], { encoding: 'utf8', timeout: 4000 })
+    return (String(r.stdout || '').match(/^(\S+) connected/gm) || []).map((l) => l.split(' ')[0])
+  } catch {
+    return []
+  }
+}
+
+export function readBrightness(): number | null {
+  try {
+    const r = spawnSync('xrandr', ['--verbose'], { encoding: 'utf8', timeout: 4000 })
+    const m = String(r.stdout || '').match(/Brightness:\s*([0-9.]+)/i)
+    if (m) return clampBrightness(parseFloat(m[1]))
+  } catch {
+    /* opcional */
+  }
+  return null
+}
+
+export interface BrightnessPlan {
+  cmd: string
+  args: string[]
+  fraction: number
+}
+
+/** Monta o comando de brilho (sem executar). Para up/down usa `current`. Pura. */
+export function buildBrightness(output: string, opts: { action: BrightnessAction; level?: number; current?: number }): BrightnessPlan {
+  const cur = Number.isFinite(opts.current as number) ? (opts.current as number) : 1
+  let frac: number
+  if (opts.action === 'set') frac = clampBrightness((Number(opts.level) || 0) / 100)
+  else if (opts.action === 'up') frac = clampBrightness(cur + BR_STEP)
+  else frac = clampBrightness(cur - BR_STEP)
+  return { cmd: 'xrandr', args: ['--output', output, '--brightness', frac.toFixed(2)], fraction: frac }
+}
+
+export function runBrightness(cfg: AppConfig, opts: { action: BrightnessAction; level?: number }): DesktopActionResult {
+  ensureEnabled(cfg)
+  if (!realWhich('xrandr')) return { ok: false, action: 'brilho', detail: 'controle de brilho indisponível (sem xrandr)' }
+  const output = xrandrOutputs()[0]
+  if (!output) return { ok: false, action: 'brilho', detail: 'não encontrei a saída de vídeo' }
+  const current = opts.action === 'set' ? undefined : readBrightness() ?? 1
+  const plan = buildBrightness(output, { ...opts, current })
+  const r = spawnSync(plan.cmd, plan.args, { encoding: 'utf8', timeout: 5000 })
+  const ok = r.status === 0
+  const pct = Math.round(plan.fraction * 100)
+  return { ok, action: 'brilho', detail: ok ? `brilho em ${pct}%` : String(r.stderr || r.error?.message || 'falha no brilho'), value: pct }
+}
+
 export function controlPromptContext(cfg: AppConfig): string {
   if (controlConfig(cfg).enabled === false) return 'Controle do computador: desativado nas Configurações.'
-  const backend = audioBackend()
-  return `Controle do computador: ativado — abrir apps/sites, volume (${backend || 'sem backend de áudio'}), bloquear tela, captura de tela e escrever na área de transferência.`
+  const audio = audioBackend()
+  const media = mediaBackend()
+  return `Controle do computador: ativado — abrir apps/sites, volume (${audio || 'sem áudio'}), mídia (${media ? 'play/pause/próxima' : 'indisponível'}), brilho da tela, bloquear tela, captura de tela e escrever na área de transferência.`
 }

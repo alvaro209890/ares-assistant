@@ -38,6 +38,10 @@ conhecimento técnico), com o motivo de cada uma.
 > `sistema.volume`, `sistema.bloquear`, `sistema.captura` e `area.escrever`, com detecção de
 > backend e ações seguras sem shell (`src/main/control.ts`). Detalhes em
 > [`docs/CONTROLE.md`](docs/CONTROLE.md).
+>
+> **Versão 0.10 (entregue):** ✅ **mídia** (`sistema.midia`, playerctl/MPRIS), ✅ **brilho**
+> (`sistema.brilho`, xrandr) e ✅ **desfazer por voz** (`desfazer`, snapshot de dados em
+> `src/main/history.ts`). Detalhes em [`docs/CONTROLE.md`](docs/CONTROLE.md).
 
 Legenda de esforço: 🟢 baixo · 🟡 médio · 🔴 alto. ✅ = já implementado.
 

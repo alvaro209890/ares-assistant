@@ -22,6 +22,10 @@ import { MEMORY_CATEGORIES, MEMORY_CATEGORY_LABEL } from '../shared/types'
 function dataPath(file: string): string {
   return join(app.getPath('userData'), file)
 }
+/** Diretório onde ficam os JSON de dados (usado pelo histórico de "desfazer"). */
+export function userDataDir(): string {
+  return app.getPath('userData')
+}
 function readJSON<T>(file: string, fallback: T): T {
   try {
     const p = dataPath(file)
