@@ -67,7 +67,8 @@ function config(patch: Partial<AppConfig['integrations']['code']> = {}): AppConf
         terminalAutoApprove: false,
         terminalSafe: ['ls', 'pwd', 'echo', 'cat', 'git status', 'node --version'],
         ...patch
-      }
+      },
+      control: { enabled: true, screenshotDir: '/tmp' }
     },
     ui: {
       continuousMode: false,

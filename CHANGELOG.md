@@ -4,6 +4,35 @@ Todas as mudanças relevantes do Ares. O formato segue de perto
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/) e o projeto usa
 versionamento semântico.
 
+## [0.9.0] — 2026-06-06
+
+Foco: **controle do computador por voz** (estilo JARVIS) — o Ares deixa de só
+responder e passa a **agir** no desktop, com ações seguras e instantâneas.
+
+### Adicionado
+
+- **`sistema.abrir {alvo}`** — abre app (apelidos: firefox, chrome, vscode,
+  calculadora, arquivos, terminal…), site (domínio sem esquema vira `https://`) ou
+  arquivo/pasta. Bloqueia esquemas perigosos; lança apps de forma destacada.
+- **`sistema.volume {acao, nivel?}`** — `set`/`up`/`down`/`mute`/`unmute`/`toggle`,
+  com detecção de backend `wpctl` → `pactl` → `amixer` e leitura do volume para
+  confirmar a fala. Entende linguagem natural ("aumenta", "volume em 30", "mudo").
+- **`sistema.bloquear {}`** — bloqueia a tela (`loginctl` → screensavers).
+- **`sistema.captura {}`** — captura a tela (`gnome-screenshot` → `grim` →
+  `spectacle` → `scrot`) e salva em `integrations.control.screenshotDir`.
+- **`area.escrever {texto}`** — copia um texto para a área de transferência
+  (complementa `area.ler`).
+- **Configuração** — `integrations.control.{enabled, screenshotDir}`, com toggle em
+  Configurações > Controle do Computador e estado na tela Sistema.
+- **Módulo `src/main/control.ts`** sem dependência de Electron (executores via
+  `spawn`, sem shell) — lógica de construção de comando é pura e testável.
+
+### Testes
+
+- `tests/control.test.ts`: `resolveOpenTarget` (URL/domínio/apelido/ausente/esquema
+  bloqueado/binário), `audioBackend` (precedência) e `buildVolume` (comandos por
+  backend + clamp). Total: 42 testes.
+
 ## [0.8.0] — 2026-06-06
 
 Foco: **fechar a ponte com o Hermes de ponta a ponta neste PC**, com um servidor

@@ -47,6 +47,10 @@ export interface AppConfig {
       terminalAutoApprove: boolean // true = roda comandos "confirm" sem pedir (avançado)
       terminalSafe: string[] // prefixos de comando que rodam direto, sem autorização
     }
+    control: {
+      enabled: boolean // controle do computador por voz (abrir apps, volume, bloquear, captura)
+      screenshotDir: string // pasta onde salvar capturas de tela
+    }
   }
   ui: {
     continuousMode: boolean
@@ -405,6 +409,15 @@ export interface CodeProjectIndex {
   files: Array<{ file: string; language: string; bytes: number; lines: number; exports: string[] }>
   scripts?: Record<string, string>
   git?: CodeWorkspaceSummary['git']
+}
+
+// --- Controle do computador (desktop actions, estilo JARVIS) ---
+export interface DesktopActionResult {
+  ok: boolean
+  action: 'abrir' | 'volume' | 'bloquear' | 'captura' | 'clipboard'
+  detail: string // texto curto e falável do resultado
+  target?: string // alvo aberto/arquivo salvo
+  value?: number // ex.: percentual de volume
 }
 
 export interface TtsStatus {

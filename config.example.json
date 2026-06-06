@@ -104,6 +104,11 @@
         "npm ls",
         "npx tsc --noEmit"
       ]
+    },
+    "control": {
+      "_doc": "Controle do computador por voz. enabled: liga abrir apps/sites, volume, bloquear tela, captura. screenshotDir: pasta das capturas.",
+      "enabled": true,
+      "screenshotDir": "/home/acer/Pictures"
     }
   },
 

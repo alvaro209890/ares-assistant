@@ -23,6 +23,7 @@ O projeto roda em modo de desenvolvimento. O empacotamento `.deb` está configur
 - **Kanban e calendário**: etiquetas nomeadas, links/anexos locais, tarefas e eventos recorrentes, lembrete configurável antes do evento, visões “Hoje”, “Vencidas”, “Próximos 7 dias” e agenda por dia/semana.
 - **Conversa contínua melhor**: sensibilidade do microfone, tempo de silêncio e pausa pós-fala configuráveis (evita que o Ares escute a própria voz).
 - **Modo Programador**: resumo de workspace, busca e leitura local de código, **terminal completo com autorização por voz** e delegação ao Hermes Code para análise profunda, edição, debug, testes e refatoração.
+- **Controle do computador**: abrir apps/sites/arquivos, volume, bloquear a tela, capturas e escrever na área de transferência — por voz, sem shell. Veja [Controle do Computador](docs/CONTROLE.md).
 - **Ponte com o Hermes**: delegação por voz para WhatsApp, Trello, Obsidian, office de agentes e automações externas do Hermes.
 - **Tela Sistema/Diagnóstico**: status do 9 Router, Hermes, Groq, Piper, localização, arquivos de dados locais e versões do app.
 
@@ -32,6 +33,12 @@ O projeto roda em modo de desenvolvimento. O empacotamento `.deb` está configur
 - **Palavra de ativação ("Ares")**: na conversa contínua, opcionalmente só responde quando você começa pela palavra-chave (ex.: "Ares, que horas são?"). Diga só "Ares" para ele confirmar e aguardar o comando.
 - **Orbe flutuante (companion)**: uma mini-orbe always-on-top que reflete o estado do Ares; clique para abrir o app, ou use o microfone dela para falar sem trazer a janela principal.
 - **Barge-in (interromper a fala)**: na conversa contínua, comece a falar por cima e o Ares para na hora e te ouve; a tecla `Esc` também interrompe a fala a qualquer momento.
+
+### Novidades da versão 0.9
+
+- **Controle do computador por voz** (estilo JARVIS): `sistema.abrir` (apps/sites/arquivos), `sistema.volume` (aumentar/diminuir/mutar/definir), `sistema.bloquear` (tela), `sistema.captura` (print) e `area.escrever` (copiar para a área de transferência). Ações **seguras e instantâneas**, sem shell e sem pedir autorização.
+- **Detecção automática de backend**: volume via `wpctl`/`pactl`/`amixer`, captura via `gnome-screenshot`/`grim`/`scrot`, bloqueio via `loginctl`/screensaver — usa o que existir no PC.
+- **Toggle e pasta de capturas** em Configurações > Controle do Computador; estado na tela Sistema. Detalhes em [`docs/CONTROLE.md`](docs/CONTROLE.md). 12 testes novos (42 no total).
 
 ### Novidades da versão 0.8
 
@@ -209,6 +216,8 @@ Campos principais:
 | `integrations.code.terminalEnabled` | ativa o terminal completo (`codigo.terminal`) com autorização |
 | `integrations.code.terminalAutoApprove` | roda comandos que exigiriam autorização sem perguntar (avançado) |
 | `integrations.code.terminalSafe` | prefixos de comando que rodam direto, sem pedir autorização |
+| `integrations.control.enabled` | ativa o controle do computador (abrir apps, volume, bloquear, captura) |
+| `integrations.control.screenshotDir` | pasta onde as capturas de tela são salvas |
 | `ui.continuousMode` | mantém o modo de conversa contínua ativo entre reinícios |
 | `ui.micSensitivity` | 0..1 — quanto maior, mais sensível o microfone na conversa contínua |
 | `ui.silenceMs` | tempo de silêncio (ms) para encerrar a fala no modo contínuo |

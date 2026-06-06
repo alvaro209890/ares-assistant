@@ -100,6 +100,10 @@ const DEFAULT_CONFIG: AppConfig = {
         'npm ls',
         'npx tsc --noEmit'
       ]
+    },
+    control: {
+      enabled: true,
+      screenshotDir: join(homedir(), 'Pictures')
     }
   },
   ui: {

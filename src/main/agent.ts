@@ -31,7 +31,8 @@ import {
   loadReminders
 } from './data'
 import { getWeather, getWeatherAt, getNews, webSearch, calcExpression, convertCurrency, convertUnit, readPage, hermesExecute } from './tools'
-import { getSystemMetrics, readClipboard } from './system'
+import { getSystemMetrics, readClipboard, writeClipboard } from './system'
+import { controlPromptContext, runLock, runOpen, runScreenshot, runVolume, type VolumeAction } from './control'
 import { buildBriefing, briefingToSpeech } from './briefing'
 import {
   applyCodePatch,
@@ -52,6 +53,17 @@ const norm = (s: unknown) => String(s ?? '').toLowerCase().trim()
 const uid = (p: string) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
 const asCategory = (c: unknown): MemoryCategory | undefined =>
   MEMORY_CATEGORIES.includes(c as MemoryCategory) ? (c as MemoryCategory) : undefined
+
+/** Mapeia a fala do usuário ("aumenta", "mudo", "alterna") para uma ação de volume. */
+function normVolumeAction(raw: unknown): VolumeAction {
+  const s = norm(raw)
+  if (/(des ?mut|religa|tira.*mudo|unmute|liga.*som)/.test(s)) return 'unmute'
+  if (/(mut|mudo|silenci|sem som)/.test(s)) return 'mute'
+  if (/(toggle|alterna)/.test(s)) return 'toggle'
+  if (/(up|aument|sub|mais|\+|alto)/.test(s)) return 'up'
+  if (/(down|dimin|baix|menos|-)/.test(s)) return 'down'
+  return 'set'
+}
 
 const PERSONA = `Você é o Ares, assistente de IA pessoal inspirado no JARVIS. Fala português do Brasil de forma educada, elegante, levemente espirituosa e muito competente. Trata o usuário com respeito (pode chamar de "senhor" com sutileza, sem repetir a cada frase). Seja natural e direto, nunca robótico. Use o CONTEXTO (memória, agenda, tarefas, localização) para responder de forma pessoal e útil, sem repetir dados que o usuário não pediu.
 Em assuntos de programação você é um engenheiro de software sênior: fala com precisão técnica mas em linguagem clara e falável, sem ler código longo nem despejar logs inteiros — resume e cita arquivo:linha. ANTES de executar no terminal qualquer comando que altere o sistema, instale dependências, crie/apague arquivos ou mexa no Git (commit/push), você PEDE AUTORIZAÇÃO ao usuário de forma natural ("Senhor, isso vai rodar tal comando — autoriza?") e só age após o aceite. Nunca tenta burlar bloqueios de segurança nem usar sudo.`
@@ -100,6 +112,11 @@ FERRAMENTAS DE CONSULTA (dê uma fala curta tipo "Deixe-me verificar." e AGUARDE
 - pagina.ler {url}   (lê uma página da web e resume/responde a partir do conteúdo real dela)
 - sistema.status {}   (uso de CPU, memória e tempo ligado do computador — "como está o sistema?", "quanta memória livre?")
 - area.ler {}   (lê o texto da área de transferência para resumir/traduzir/explicar o que o usuário copiou — "resuma o que eu copiei")
+- area.escrever {texto}   (copia um texto para a área de transferência — "copie isso", "põe esse texto na área de transferência")
+- sistema.abrir {alvo}   (abre app/site/arquivo no computador — "abra o Firefox", "abra youtube.com", "abra ~/Documentos"; use nomes comuns: firefox, chrome, vscode, calculadora, arquivos, terminal)
+- sistema.volume {acao(set|up|down|mute|unmute|toggle), nivel?(0-100)}   (controla o volume — "aumenta o volume", "volume em 30", "muda pro mudo")
+- sistema.bloquear {}   (bloqueia a tela do computador — "bloqueie a tela", "trave o pc")
+- sistema.captura {}   (tira uma captura de tela e salva em arquivo — "tire um print da tela")
 - codigo.workspace {path?}   (resume um projeto/workspace local: stack, scripts, árvore, git, linguagens)
 - codigo.buscar {path?, consulta, filtro?}   (busca texto/símbolo no código; use antes de explicar funções ou localizar implementação)
 - codigo.ler {path?, arquivo, inicio?, linhas?}   (lê trecho de arquivo local com números de linha; use para responder com precisão)
@@ -164,6 +181,7 @@ function buildSystemPrompt(ctx: {
   location: UserLocation
   hermes: AppConfig['integrations']['hermes']
   codeContext: string
+  controlContext: string
   summary?: string
   voice: boolean
 }): string {
@@ -189,6 +207,7 @@ function buildSystemPrompt(ctx: {
     `## Localização aproximada do usuário\n${loc}`,
     `## Ponte com o Hermes\n${hermes}`,
     `## Programação\n${ctx.codeContext}`,
+    `## Controle do computador\n${ctx.controlContext}`,
     `## Sobre o usuário (memória de longo prazo)\n${memorySummary()}`,
     `## Tarefas atuais\n${boardSummary(ctx.board)}`,
     `## Próximos eventos\n${upcoming || '(nenhum)'}`,
@@ -244,6 +263,25 @@ async function runQuery(a: Acao, cfg: AppConfig, sessionId: string): Promise<unk
         const c = readClipboard()
         return c.vazio ? { tipo: a.tipo, erro: 'A área de transferência está vazia.' } : { tipo: a.tipo, resultado: c }
       }
+      case 'area.escrever':
+        return { tipo: a.tipo, resultado: writeClipboard(String(a.texto || a.text || a.conteudo || a.content || '')) }
+      case 'sistema.abrir':
+        return {
+          tipo: a.tipo,
+          resultado: runOpen(cfg, String(a.alvo || a.target || a.app || a.aplicativo || a.url || a.programa || ''))
+        }
+      case 'sistema.volume': {
+        const level = Number(a.nivel ?? a.level ?? a.valor ?? a.percentual)
+        const action = normVolumeAction(a.acao ?? a.action ?? a.direcao)
+        if (action === 'set' && !Number.isFinite(level)) {
+          return { tipo: a.tipo, erro: 'Diga o nível (0 a 100) ou se é para aumentar, diminuir ou mutar.' }
+        }
+        return { tipo: a.tipo, resultado: runVolume(cfg, { action, level }) }
+      }
+      case 'sistema.bloquear':
+        return { tipo: a.tipo, resultado: runLock(cfg) }
+      case 'sistema.captura':
+        return { tipo: a.tipo, resultado: runScreenshot(cfg) }
       case 'codigo.workspace':
         return { tipo: a.tipo, resultado: summarizeCodeWorkspace(cfg, String(a.path || a.raiz || a.workspace || '')) }
       case 'codigo.buscar':
@@ -523,6 +561,7 @@ export async function runTurn(
     location: cfg.integrations.location,
     hermes: cfg.integrations.hermes,
     codeContext: codePromptContext(cfg),
+    controlContext: controlPromptContext(cfg),
     summary: session?.summary,
     voice
   })

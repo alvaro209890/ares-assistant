@@ -53,3 +53,11 @@ export function readClipboard(): { texto: string; vazio: boolean } {
   const t = (clipboard.readText() || '').trim()
   return { texto: t.slice(0, 4000), vazio: !t }
 }
+
+/** Escreve um texto na área de transferência (ex.: rascunho/código gerado pelo Ares). */
+export function writeClipboard(text: string): { ok: boolean; chars: number } {
+  const t = String(text ?? '')
+  if (!t.trim()) throw new Error('Não há texto para copiar.')
+  clipboard.writeText(t)
+  return { ok: true, chars: t.length }
+}

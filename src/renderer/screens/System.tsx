@@ -128,6 +128,7 @@ export default function System(): JSX.Element {
                         : 'desligado'
                     }
                   />
+                  <Row k="Controle do PC" v={config.integrations.control.enabled ? 'ativado' : 'desligado'} />
                 </>
               ) : (
                 <span className="text-[12px] text-cyan-200/45">Configuração ainda indisponível.</span>

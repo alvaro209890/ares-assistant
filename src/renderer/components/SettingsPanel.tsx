@@ -612,6 +612,34 @@ export default function SettingsPanel(): JSX.Element {
               </p>
             </Section>
 
+            <Section title="CONTROLE DO COMPUTADOR">
+              <Toggle
+                label="Permitir controlar o computador"
+                checked={config.integrations.control.enabled}
+                onChange={(v) =>
+                  saveConfig({ integrations: { ...config.integrations, control: { ...config.integrations.control, enabled: v } } })
+                }
+              />
+              <Field label="Pasta das capturas de tela">
+                <input
+                  className="input"
+                  value={config.integrations.control.screenshotDir}
+                  onChange={(e) =>
+                    saveConfig({
+                      integrations: {
+                        ...config.integrations,
+                        control: { ...config.integrations.control, screenshotDir: e.target.value }
+                      }
+                    })
+                  }
+                />
+              </Field>
+              <p className="text-[11px] text-cyan-200/45">
+                Permite ao Ares abrir aplicativos e sites, ajustar o volume, bloquear a tela e tirar capturas — por voz. São
+                ações seguras e instantâneas (não usam o terminal).
+              </p>
+            </Section>
+
             <Section title="CÉREBRO - 9 ROUTER">
               <Field label="URL base">
                 <input

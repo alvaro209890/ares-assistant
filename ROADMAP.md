@@ -33,6 +33,11 @@ conhecimento técnico), com o motivo de cada uma.
 > **mesmo 9Router `cx/gpt-5.5`** do Ares, resposta estruturada do Hermes Code, unit `systemd
 > --user` para ficar sempre ligado e testes em `tests/bridge.test.ts`. Detalhes em
 > [`docs/PONTE_HERMES.md`](docs/PONTE_HERMES.md).
+>
+> **Versão 0.9 (entregue):** ✅ **controle do computador por voz** — `sistema.abrir`,
+> `sistema.volume`, `sistema.bloquear`, `sistema.captura` e `area.escrever`, com detecção de
+> backend e ações seguras sem shell (`src/main/control.ts`). Detalhes em
+> [`docs/CONTROLE.md`](docs/CONTROLE.md).
 
 Legenda de esforço: 🟢 baixo · 🟡 médio · 🔴 alto. ✅ = já implementado.
 
