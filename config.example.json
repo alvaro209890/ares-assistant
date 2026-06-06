@@ -119,6 +119,7 @@
     "silenceMs": 1350,
     "postSpeechPauseMs": 450,
     "proactiveSuggestions": true,
+    "proactiveAlerts": true,
     "confirmDestructive": true,
     "wakeWord": "ares",
     "wakeWordEnabled": false,

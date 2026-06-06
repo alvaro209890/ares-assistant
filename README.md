@@ -20,6 +20,7 @@ O projeto roda em modo de desenvolvimento. O empacotamento `.deb` está configur
 - **Memória inteligente**: categorias (perfil, preferências, rotina, trabalho, projetos, restrições, interesses), auto-extração de fatos da conversa, fila de revisão antes de salvar, atualização de fatos antigos em vez de duplicar e resumo compacto injetado no prompt.
 - **Clima detalhado**: previsão por período (manhã/tarde/noite), sensação térmica, chuva, vento, umidade, alerta simples e horário/fonte da última atualização.
 - **Briefing do dia**: painel e comando de voz com clima, agenda, tarefas vencidas/próximas, lembretes, notícias e sugestões proativas discretas.
+- **Proatividade de ambiente**: avisa por voz sobre bateria fraca/crítica, evento chegando e tarefas vencidas — priorizado, com cooldown e silêncio noturno. Veja [Proatividade](docs/PROATIVIDADE.md).
 - **Kanban e calendário**: etiquetas nomeadas, links/anexos locais, tarefas e eventos recorrentes, lembrete configurável antes do evento, visões “Hoje”, “Vencidas”, “Próximos 7 dias” e agenda por dia/semana.
 - **Conversa contínua melhor**: sensibilidade do microfone, tempo de silêncio e pausa pós-fala configuráveis (evita que o Ares escute a própria voz).
 - **Modo Programador**: resumo de workspace, busca e leitura local de código, **terminal completo com autorização por voz** e delegação ao Hermes Code para análise profunda, edição, debug, testes e refatoração.
@@ -35,6 +36,12 @@ O projeto roda em modo de desenvolvimento. O empacotamento `.deb` está configur
 - **Palavra de ativação ("Ares")**: na conversa contínua, opcionalmente só responde quando você começa pela palavra-chave (ex.: "Ares, que horas são?"). Diga só "Ares" para ele confirmar e aguardar o comando.
 - **Orbe flutuante (companion)**: uma mini-orbe always-on-top que reflete o estado do Ares; clique para abrir o app, ou use o microfone dela para falar sem trazer a janela principal.
 - **Barge-in (interromper a fala)**: na conversa contínua, comece a falar por cima e o Ares para na hora e te ouve; a tecla `Esc` também interrompe a fala a qualquer momento.
+
+### Novidades da versão 0.12
+
+- **Proatividade de ambiente**: além dos lembretes agendados, o Ares **fala primeiro** sobre o que importa agora — **bateria fraca/crítica** (lida de `/sys`), **evento chegando** em minutos (heads-up para eventos sem lembrete) e **tarefas vencidas**.
+- **Inteligente, não tagarela**: avisos priorizados (bateria crítica fura tudo), com cooldown por aviso, **silêncio das 22h às 7h** e intervalo mínimo de 8 min entre avisos.
+- Toggle **"Avisos proativos"** (Configurações > Proatividade). +14 testes (79 no total). Detalhes em [`docs/PROATIVIDADE.md`](docs/PROATIVIDADE.md).
 
 ### Novidades da versão 0.11
 
@@ -234,6 +241,7 @@ Campos principais:
 | `integrations.code.terminalSafe` | prefixos de comando que rodam direto, sem pedir autorização |
 | `integrations.control.enabled` | ativa o controle do computador (abrir apps, volume, bloquear, captura) |
 | `integrations.control.screenshotDir` | pasta onde as capturas de tela são salvas |
+| `ui.proactiveAlerts` | avisos proativos de ambiente: bateria, evento chegando, tarefas vencidas (ligado) |
 | `ui.confirmDestructive` | pede confirmação falada antes de apagar/limpar/remover dados (ligado) |
 | `ui.continuousMode` | mantém o modo de conversa contínua ativo entre reinícios |
 | `ui.micSensitivity` | 0..1 — quanto maior, mais sensível o microfone na conversa contínua |

@@ -2,23 +2,60 @@ import { Notification, BrowserWindow } from 'electron'
 import { loadBoard, saveBoard } from './tasks'
 import { loadEvents, setEvents, loadReminders, setReminders } from './data'
 import { advanceISO } from './board'
+import { readConfig } from './config'
+import { pickProactiveNudge, readBattery } from './proactive'
 
 // Lembretes locais: varre periodicamente tarefas (reminderAt) e eventos (whenISO).
 // Ao chegar a hora, mostra notificação nativa e avisa o renderer (que fala, se a
-// voz estiver ativa). Marca como "reminded" para não repetir.
+// voz estiver ativa). Marca como "reminded" para não repetir. Além disso, uma
+// camada proativa observa o ambiente (bateria, evento chegando, tarefas vencidas).
 
 let timer: ReturnType<typeof setInterval> | null = null
 let getWindow: (() => BrowserWindow | null) | null = null
 
-function fire(prefix: string, title: string): void {
-  const body = `${prefix}: ${title}`
+// Estado da camada proativa (cooldown por aviso + último aviso global).
+const proactiveLastShown: Record<string, number> = {}
+let proactiveLastAny = 0
+const PROACTIVE_MIN_INTERVAL = 8 * 60_000
+
+/** Mostra uma notificação nativa e avisa o renderer (que fala, se a voz estiver ativa). */
+function emit(body: string): void {
   try {
     if (Notification.isSupported()) new Notification({ title: 'ARES', body, silent: false }).show()
   } catch {
     /* ignora */
   }
   const win = getWindow?.()
-  if (win && !win.isDestroyed()) win.webContents.send('reminder:fired', { prefix, title, body })
+  if (win && !win.isDestroyed()) win.webContents.send('reminder:fired', { prefix: '', title: body, body })
+}
+
+function fire(prefix: string, title: string): void {
+  emit(`${prefix}: ${title}`)
+}
+
+/** Camada proativa: escolhe no máximo um aviso de ambiente e o anuncia. */
+function proactiveTick(now: number, board: ReturnType<typeof loadBoard>, events: ReturnType<typeof loadEvents>): void {
+  if (readConfig().ui.proactiveAlerts === false) return
+  const overdueCount = Object.values(board.cards).filter(
+    (c) => !c.done && c.due && new Date(c.due).getTime() < now
+  ).length
+  const nudge = pickProactiveNudge(
+    {
+      now,
+      battery: readBattery(),
+      events: events.map((e) => ({ id: e.id, title: e.title, whenISO: e.whenISO, remindMinutes: e.remindMinutes })),
+      overdueCount,
+      eventHeadsUpMin: 10
+    },
+    proactiveLastShown,
+    proactiveLastAny,
+    PROACTIVE_MIN_INTERVAL
+  )
+  if (nudge) {
+    emit(nudge.text)
+    proactiveLastShown[nudge.id] = now
+    proactiveLastAny = now
+  }
 }
 
 function tick(): void {
@@ -76,6 +113,9 @@ function tick(): void {
     // Remove timers/despertadores de uma vez só que já dispararam (não recorrentes).
     setReminders(reminders.filter((r) => !(r.fired && r.kind !== 'reminder')))
   }
+
+  // Camada proativa de ambiente (bateria, evento chegando, tarefas vencidas).
+  proactiveTick(now, board, events)
 }
 
 export function startReminders(windowGetter: () => BrowserWindow | null): void {

@@ -46,6 +46,10 @@ conhecimento técnico), com o motivo de cada uma.
 > **Versão 0.11 (entregue):** ✅ **confiança na conversa** — confirmação falada antes de
 > apagar/limpar (portão `src/main/confirm.ts`), desambiguação e correção por voz. Detalhes
 > em [`docs/CONFIANCA.md`](docs/CONFIANCA.md).
+>
+> **Versão 0.12 (entregue):** ✅ **proatividade de ambiente** — bateria, heads-up de evento e
+> tarefas vencidas, priorizado com cooldown/silêncio (`src/main/proactive.ts`). Detalhes em
+> [`docs/PROATIVIDADE.md`](docs/PROATIVIDADE.md).
 
 Legenda de esforço: 🟢 baixo · 🟡 médio · 🔴 alto. ✅ = já implementado.
 

@@ -4,6 +4,33 @@ Todas as mudanças relevantes do Ares. O formato segue de perto
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/) e o projeto usa
 versionamento semântico.
 
+## [0.12.0] — 2026-06-06
+
+Foco: **proatividade** — o Ares fala primeiro no momento certo, como um JARVIS,
+sem precisar ser chamado.
+
+### Adicionado
+
+- **Camada proativa de ambiente** (`src/main/proactive.ts`) integrada ao `tick()`
+  do notify (a cada 30s):
+  - **Bateria** — lida de `/sys/class/power_supply/BAT*`: aviso crítico (≤10%
+    descarregando, fura tudo), fraco (≤20%) e cheio (≥97% carregando).
+  - **Heads-up de evento** — eventos **sem** `remindMinutes` começando em ≤10 min
+    ("Senhor, em 7 minutos: Reunião") — sem duplicar o aviso agendado.
+  - **Tarefas vencidas** — lembrete gentil quando há vencidas.
+- **Priorização anti-tagarelice** — um aviso por ciclo, cooldown por aviso,
+  silêncio das 22h às 7h (só o crítico passa) e intervalo mínimo de 8 min (o
+  crítico fura).
+- **`ui.proactiveAlerts`** (ligado) com toggle em Configurações > Proatividade,
+  separado de `ui.proactiveSuggestions` (sugestões do briefing).
+
+### Testes
+
+- `tests/proactive.test.ts`: leitura de bateria (capacidade/status/ausência),
+  `buildNudges` (todos os gatilhos, ignorando eventos com lead/fora da janela) e
+  `pickProactiveNudge` (prioridade, cooldown, silêncio, intervalo mínimo). Total:
+  79 testes.
+
 ## [0.11.0] — 2026-06-06
 
 Foco: **confiança na conversa** — o maior ganho de usabilidade por voz é não fazer

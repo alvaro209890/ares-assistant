@@ -218,6 +218,15 @@ export default function SettingsPanel(): JSX.Element {
                 Sugestões discretas sobre tarefas vencidas, eventos próximos, chuva e conflitos de agenda.
               </p>
               <Toggle
+                label="Avisos proativos (bateria, eventos)"
+                checked={config.ui.proactiveAlerts}
+                onChange={(v) => saveConfig({ ui: { proactiveAlerts: v } })}
+              />
+              <p className="text-[11px] text-cyan-200/45">
+                O Ares fala primeiro no momento certo: bateria fraca, evento chegando em minutos e tarefas vencidas — com
+                cooldown e silêncio das 22h às 7h.
+              </p>
+              <Toggle
                 label="Confirmar antes de apagar"
                 checked={config.ui.confirmDestructive}
                 onChange={(v) => saveConfig({ ui: { confirmDestructive: v } })}

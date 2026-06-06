@@ -76,6 +76,7 @@ function config(patch: Partial<AppConfig['integrations']['code']> = {}): AppConf
       silenceMs: 1350,
       postSpeechPauseMs: 450,
       proactiveSuggestions: true,
+      proactiveAlerts: true,
       confirmDestructive: true,
       wakeWord: 'ares',
       wakeWordEnabled: false,
