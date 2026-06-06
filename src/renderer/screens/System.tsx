@@ -31,7 +31,7 @@ function Bar({ label, percent }: { label: string; percent: number }): JSX.Elemen
 }
 
 export default function System(): JSX.Element {
-  const { metrics } = useAres()
+  const { metrics, config } = useAres()
   const [diag, setDiag] = useState<DiagnosticsResult | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -99,8 +99,27 @@ export default function System(): JSX.Element {
               />
               <Row k="URL" v={diag.hermes.baseUrl} />
               <Row k="Comando" v={diag.hermes.messagePath} />
+              <Row k="Código" v={diag.hermes.codePath} />
               <Row k="Status" v={diag.hermes.healthPath} />
               <Row k="Timeout" v={`${diag.hermes.timeoutMs} ms`} />
+            </Panel>
+
+            <Panel title="PROGRAMAÇÃO">
+              {config ? (
+                <>
+                  <Status
+                    ok={config.integrations.code.enabled}
+                    label={config.integrations.code.enabled ? 'Ferramentas locais ativas' : 'Desativadas'}
+                    detail="leitura e busca em modo somente leitura"
+                  />
+                  <Row k="Workspace" v={config.integrations.code.workspaceRoot} />
+                  <Row k="Raízes" v={config.integrations.code.allowedRoots.join(', ') || '—'} />
+                  <Row k="Arquivo máx." v={`${config.integrations.code.maxFileKB} KB`} />
+                  <Row k="Contexto Hermes" v={`${config.integrations.code.maxContextChars} chars`} />
+                </>
+              ) : (
+                <span className="text-[12px] text-cyan-200/45">Configuração ainda indisponível.</span>
+              )}
             </Panel>
 
             <Panel title="TRANSCRIÇÃO · GROQ">

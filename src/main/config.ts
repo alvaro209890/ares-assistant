@@ -41,11 +41,20 @@ const DEFAULT_CONFIG: AppConfig = {
       enabled: false,
       baseUrl: 'http://localhost:18789',
       messagePath: '/message',
+      codePath: '/code',
       healthPath: '/health',
       apiKey: '',
       authHeader: 'Authorization',
       timeoutMs: 4000,
       responsePath: ''
+    },
+    code: {
+      enabled: true,
+      workspaceRoot: join(homedir(), 'Documentos'),
+      allowedRoots: [homedir()],
+      maxFileKB: 256,
+      maxSearchResults: 40,
+      maxContextChars: 16000
     }
   },
   ui: {

@@ -19,6 +19,10 @@ export const QUERY_TOOLS = new Set([
   'pagina.ler',
   'sistema.status',
   'area.ler',
+  'codigo.workspace',
+  'codigo.buscar',
+  'codigo.ler',
+  'codigo.hermes',
   'hermes.executar'
 ])
 

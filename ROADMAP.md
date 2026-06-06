@@ -163,6 +163,17 @@ Assim a qualidade do Hermes é preservada porque **reusamos o Hermes**, não o i
 Próximos incrementos possíveis: streaming nativo do Hermes, confirmação visual antes
 de ações externas sensíveis e suporte a múltiplos perfis/endpoints Hermes.
 
+### Programação implementada na versão 0.5
+
+- Ferramentas locais read-only: `codigo.workspace`, `codigo.buscar` e `codigo.ler`.
+- Delegação dedicada ao Hermes Code por `codigo.hermes` e `integrations.hermes.codePath`.
+- Configuração de workspace, raízes permitidas, limites de arquivo/busca/contexto.
+- Tela Sistema exibe diagnóstico de programação.
+- Testes unitários em `tests/code.test.ts`.
+
+Próximos incrementos possíveis: preview visual de diffs vindos do Hermes Code,
+confirmação explícita antes de aplicar patches e histórico de análises por projeto.
+
 ### Alternativas consideradas
 
 - **Skills compartilhadas** (extrair Trello/WhatsApp para um pacote usado pelos dois): mais

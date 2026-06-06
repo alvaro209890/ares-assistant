@@ -17,6 +17,7 @@ A config real fica em `~/.config/ares/config.json`. O template está em
       "enabled": false,
       "baseUrl": "http://localhost:18789",
       "messagePath": "/message",
+      "codePath": "/code",
       "healthPath": "/health",
       "apiKey": "",
       "authHeader": "Authorization",
@@ -32,6 +33,7 @@ Campos:
 - `enabled`: liga/desliga a ponte.
 - `baseUrl`: URL base do Hermes.
 - `messagePath`: rota de comando chamada via `POST`.
+- `codePath`: rota dedicada para tarefas de programação.
 - `healthPath`: rota de status chamada via `GET`.
 - `apiKey`: token opcional.
 - `authHeader`: cabeçalho do token. Com `Authorization`, o Ares envia `Bearer <token>`.
@@ -83,6 +85,11 @@ O prompt do Ares orienta o uso de `hermes.executar` quando o pedido envolve:
 Pedidos locais continuam no Ares: tarefas, calendário, listas, lembretes, memória,
 clima, notícias, web, sistema e área de transferência.
 
+Para programação, o prompt usa `codigo.workspace`, `codigo.buscar`, `codigo.ler` e
+`codigo.hermes`. A rota dedicada é `codePath`; se ela responder `404` ou `405`, o
+Ares faz fallback para `messagePath` com um payload textual iniciado por
+`[ARES_CODE_TASK]`.
+
 ## Segurança
 
 Para ações externas sensíveis, como enviar mensagem, publicar algo ou alterar Trello
@@ -103,6 +110,7 @@ Na tela Sistema, o painel **Ponte · Hermes** mostra:
 - online/indisponível;
 - URL base;
 - rota de comando;
+- rota de código;
 - rota de status;
 - timeout.
 
@@ -126,6 +134,7 @@ A suíte `tests/hermes.test.ts` usa um servidor HTTP local e valida:
 - extração de resposta;
 - envio de comando com token e `sessionId`;
 - rota/cabeçalho/`responsePath` configuráveis;
+- rota dedicada do Hermes Code e fallback para `messagePath`;
 - ping de saúde;
 - ponte desativada sem tocar a rede.
 
@@ -133,7 +142,7 @@ A suíte `tests/hermes.test.ts` usa um servidor HTTP local e valida:
 
 - `desativada nas Configurações`: ligue `integrations.hermes.enabled`.
 - `offline / inacessível`: confirme se o Hermes está rodando e se `baseUrl` está correto.
-- `respondeu HTTP 404`: ajuste `healthPath` ou `messagePath`.
+- `respondeu HTTP 404`: ajuste `healthPath`, `messagePath` ou `codePath`.
 - `Hermes respondeu sem texto útil`: configure `responsePath` para o campo correto.
 - `HTTP 401/403`: confira `apiKey` e `authHeader`.
 - `timeout`: aumente `timeoutMs` ou investigue o tempo de resposta do Hermes.

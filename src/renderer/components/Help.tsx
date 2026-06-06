@@ -27,6 +27,10 @@ const GROUPS: { title: string; examples: string[] }[] = [
   {
     title: 'Memória',
     examples: ['Lembre-se que eu prefiro respostas curtas', 'Anote que eu trabalho com fotografia']
+  },
+  {
+    title: 'Programação',
+    examples: ['Analise o projeto em /home/acer/Documentos/Ares', 'Procure onde fica hermesCodeTask', 'Peça ao Hermes Code para revisar src/main/code.ts']
   }
 ]
 

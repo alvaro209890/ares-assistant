@@ -25,11 +25,20 @@ export interface AppConfig {
       enabled: boolean
       baseUrl: string
       messagePath: string // rota de comando do Hermes
+      codePath: string // rota dedicada para tarefas de programação
       healthPath: string // rota de status/ping do Hermes
       apiKey: string // token opcional da ponte
       authHeader: string // cabeçalho usado quando apiKey existir
       timeoutMs: number
       responsePath: string // caminho opcional da resposta, ex.: data.reply
+    }
+    code: {
+      enabled: boolean // ferramentas locais read-only de programação
+      workspaceRoot: string // workspace padrão para leitura/busca
+      allowedRoots: string[] // raízes permitidas para análise
+      maxFileKB: number
+      maxSearchResults: number
+      maxContextChars: number
     }
   }
   ui: {
@@ -293,6 +302,48 @@ export interface AgentTurnResult {
   changedBoard: boolean
 }
 
+// --- Programação / código ---
+export interface CodeWorkspaceSummary {
+  root: string
+  name: string
+  exists: boolean
+  git?: {
+    branch: string
+    dirty: boolean
+    status: string[]
+  }
+  packageManager?: string
+  scripts?: Record<string, string>
+  languages: Record<string, number>
+  files: string[]
+  ignored: string[]
+  hints: string[]
+}
+
+export interface CodeSearchMatch {
+  file: string
+  line: number
+  text: string
+}
+
+export interface CodeFileSnippet {
+  file: string
+  startLine: number
+  endLine: number
+  totalLines: number
+  truncated: boolean
+  content: string
+}
+
+export interface CodeHermesResult {
+  reply: string
+  endpoint: string
+  status: number
+  latencyMs: number
+  sessionId?: string
+  fallback?: boolean
+}
+
 export interface TtsStatus {
   ready: boolean
   voices: string[]
@@ -329,6 +380,7 @@ export interface HermesStatus extends ServiceStatus {
   enabled: boolean
   baseUrl: string
   messagePath: string
+  codePath: string
   healthPath: string
   timeoutMs: number
 }

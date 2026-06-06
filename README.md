@@ -22,6 +22,7 @@ O projeto roda em modo de desenvolvimento. O empacotamento `.deb` está configur
 - **Briefing do dia**: painel e comando de voz com clima, agenda, tarefas vencidas/próximas, lembretes, notícias e sugestões proativas discretas.
 - **Kanban e calendário**: etiquetas nomeadas, links/anexos locais, tarefas e eventos recorrentes, lembrete configurável antes do evento, visões “Hoje”, “Vencidas”, “Próximos 7 dias” e agenda por dia/semana.
 - **Conversa contínua melhor**: sensibilidade do microfone, tempo de silêncio e pausa pós-fala configuráveis (evita que o Ares escute a própria voz).
+- **Modo Programador**: resumo de workspace, busca e leitura local de código, com delegação ao Hermes Code para análise profunda, edição, debug, testes e refatoração.
 - **Ponte com o Hermes**: delegação por voz para WhatsApp, Trello, Obsidian, office de agentes e automações externas do Hermes.
 - **Tela Sistema/Diagnóstico**: status do 9 Router, Hermes, Groq, Piper, localização, arquivos de dados locais e versões do app.
 
@@ -31,6 +32,13 @@ O projeto roda em modo de desenvolvimento. O empacotamento `.deb` está configur
 - **Palavra de ativação ("Ares")**: na conversa contínua, opcionalmente só responde quando você começa pela palavra-chave (ex.: "Ares, que horas são?"). Diga só "Ares" para ele confirmar e aguardar o comando.
 - **Orbe flutuante (companion)**: uma mini-orbe always-on-top que reflete o estado do Ares; clique para abrir o app, ou use o microfone dela para falar sem trazer a janela principal.
 - **Barge-in (interromper a fala)**: na conversa contínua, comece a falar por cima e o Ares para na hora e te ouve; a tecla `Esc` também interrompe a fala a qualquer momento.
+
+### Novidades da versão 0.5
+
+- **Ferramentas locais de código**: `codigo.workspace`, `codigo.buscar` e `codigo.ler` ajudam o Ares a responder sobre projetos reais com arquivos e linhas.
+- **Hermes Code**: `codigo.hermes` envia tarefa, modo, workspace e snippets ao Hermes pela rota `/code`, com fallback para `/message`.
+- **Configuração de programação**: workspace padrão, raízes permitidas, limites de arquivo/busca/contexto e diagnóstico na tela Sistema.
+- **Mais testes**: suíte unitária cobre programação local e integração Hermes Code.
 
 ### Novidades da versão 0.4
 
@@ -103,6 +111,7 @@ Arquivos importantes:
 - `src/main/index.ts`: janela Electron, permissões, IPC e inicialização.
 - `src/main/agent.ts`: prompt do Ares, datas relativas, validação, execução de ferramentas e auto-extração de memória.
 - `src/main/tools.ts`: clima (com períodos/alerta), busca web, notícias, geocodificação reversa, conversão de unidades (`convertUnit`) e leitura de páginas (`readPage`).
+- `src/main/code.ts`: ferramentas read-only de programação e delegação ao Hermes Code.
 - `src/main/hermes.ts`: cliente da ponte Hermes, ping, autenticação opcional, timeout e extração robusta da resposta.
 - `src/main/briefing.ts`: monta o briefing do dia e sua versão falável.
 - `src/main/diagnostics.ts`: status de serviços, localização e arquivos de dados.
@@ -155,11 +164,18 @@ Campos principais:
 | `integrations.hermes.enabled` | ativa a delegação de comandos ao Hermes |
 | `integrations.hermes.baseUrl` | URL base do Hermes |
 | `integrations.hermes.messagePath` | rota usada para `POST` de comandos, padrão `/message` |
+| `integrations.hermes.codePath` | rota dedicada para tarefas de programação, padrão `/code` |
 | `integrations.hermes.healthPath` | rota usada para status, padrão `/health` |
 | `integrations.hermes.apiKey` | token opcional da ponte |
 | `integrations.hermes.authHeader` | cabeçalho do token, padrão `Authorization` |
 | `integrations.hermes.timeoutMs` | timeout das chamadas ao Hermes |
 | `integrations.hermes.responsePath` | caminho opcional da resposta, ex.: `data.reply` |
+| `integrations.code.enabled` | ativa ferramentas locais read-only de programação |
+| `integrations.code.workspaceRoot` | workspace padrão usado quando o usuário não informa path |
+| `integrations.code.allowedRoots` | raízes permitidas para leitura/busca de código |
+| `integrations.code.maxFileKB` | tamanho máximo de arquivo lido |
+| `integrations.code.maxSearchResults` | limite de resultados por busca |
+| `integrations.code.maxContextChars` | limite de contexto enviado ao Hermes Code |
 | `ui.continuousMode` | mantém o modo de conversa contínua ativo entre reinícios |
 | `ui.micSensitivity` | 0..1 — quanto maior, mais sensível o microfone na conversa contínua |
 | `ui.silenceMs` | tempo de silêncio (ms) para encerrar a fala no modo contínuo |
@@ -446,6 +462,19 @@ Use a ponte para comandos de WhatsApp, Trello, Obsidian, office de agentes (Pedr
 
 Detalhes completos: [`docs/PONTE_HERMES.md`](docs/PONTE_HERMES.md).
 
+## Programação e Hermes Code
+
+O Ares agora tem ferramentas locais read-only para entender projetos antes de responder:
+
+- `codigo.workspace {path?}`: resume stack, scripts, git, linguagens e árvore de arquivos.
+- `codigo.buscar {path?, consulta, filtro?}`: localiza texto, símbolos ou chamadas em arquivos.
+- `codigo.ler {path?, arquivo, inicio?, linhas?}`: lê trechos com números de linha.
+- `codigo.hermes {tarefa, modo, path?, arquivos?}`: delega análise profunda, edição, debug, testes e refatoração ao Hermes Code.
+
+As leituras ficam limitadas a `integrations.code.allowedRoots`, e o Ares não aplica edições locais diretamente por essas ferramentas. Quando o usuário pede alteração de código, o agente monta contexto local e envia ao Hermes pela rota `integrations.hermes.codePath` (`/code` por padrão). Se o Hermes ainda não tiver essa rota, o Ares faz fallback para `messagePath` com um payload textual marcado como `[ARES_CODE_TASK]`.
+
+Detalhes completos: [`docs/PROGRAMACAO.md`](docs/PROGRAMACAO.md).
+
 ## Kanban
 
 Persistência:
@@ -612,6 +641,10 @@ Ferramentas de consulta:
 - `pagina.ler` `{url}` (lê uma página web e responde/resume a partir do conteúdo dela)
 - `sistema.status` `{}` (uso de CPU, memória e tempo ligado do computador)
 - `area.ler` `{}` (lê o texto da área de transferência para resumir/traduzir/explicar)
+- `codigo.workspace` `{path?}` (resume um projeto local)
+- `codigo.buscar` `{path?, consulta, filtro?}` (busca texto/símbolos no código)
+- `codigo.ler` `{path?, arquivo, inicio?, linhas?}` (lê trecho de arquivo)
+- `codigo.hermes` `{tarefa, modo?, path?, arquivos?}` (delega análise/edição/debug/testes/refatoração ao Hermes Code)
 - `hermes.executar` `{comando}` (delega comandos externos ao Hermes; só age com a ponte ativada)
 
 As ferramentas de consulta são executadas pelo processo principal. O resultado volta ao LLM para gerar a resposta final em linguagem natural.
@@ -644,6 +677,10 @@ Com a palavra de ativação ligada, comece pela palavra (ex.: "**Ares**, faça m
 - "leia esta página e me resuma: https://exemplo.com/artigo"
 - "como está o sistema?" / "quanta memória está livre?" / "há quanto tempo o PC está ligado?"
 - "resuma o que eu copiei" / "traduza o que está na área de transferência"
+- "analise o projeto em /home/acer/Documentos/Ares"
+- "procure onde fica a função hermesCodeTask"
+- "leia src/main/agent.ts e explique o roteamento de ferramentas"
+- "peça ao Hermes Code para revisar a ponte de programação"
 - "mande no WhatsApp pelo Hermes que vou atrasar 10 minutos"
 - "peça ao Hermes para criar um card no Trello do projeto Ares"
 - "crie uma tarefa semanal de regar as plantas" / "mova comprar café para concluído"
@@ -658,6 +695,8 @@ Com a palavra de ativação ligada, comece pela palavra (ex.: "**Ares**, faça m
 - Coordenadas só são salvas após permissão de geolocalização; ao LLM vai apenas um resumo curto da localização.
 - A auto-extração de memória é local e respeita `memory.autoExtract`; com `memory.autoApprove` desligado, nada é salvo sem você revisar.
 - Chave Groq e config real ficam fora do Git.
+- Ferramentas locais de programação são somente leitura e respeitam `integrations.code.allowedRoots`.
+- Contexto enviado ao Hermes Code é limitado por `integrations.code.maxContextChars`.
 - `contextIsolation` ligado e `nodeIntegration` desativado no renderer.
 - O renderer acessa Electron apenas por `window.ares` (IPC tipado no preload); chaves nunca são expostas ao renderer.
 
@@ -667,6 +706,7 @@ Os arquivos locais antigos continuam funcionando. Campos novos são preenchidos 
 
 - memória antiga (sem categoria/origem/status) é normalizada para `categoria: outros`, `origem: manual`, `status: active`;
 - configs antigas ganham os novos campos de `ui.*` e `memory.*` via merge profundo com os padrões;
+- configs antigas ganham `integrations.hermes.codePath` e `integrations.code.*` via merge profundo com os padrões;
 - tarefas e eventos sem etiquetas/recorrência/lembrete-antes seguem válidos (campos opcionais).
 
 ## Troubleshooting
@@ -683,6 +723,8 @@ Os arquivos locais antigos continuam funcionando. Campos novos são preenchidos 
 - **O barge-in interrompe sozinho**: aumente o silêncio/baixe a sensibilidade do microfone ou desligue `ui.bargeIn`. Ele só age na conversa contínua; a tecla `Esc` continua interrompendo manualmente.
 - **A busca global não abre**: use `Ctrl+K` (ou `⌘K` no Mac) com o foco na janela do Ares, ou clique em **Buscar** na barra lateral; `Esc` fecha.
 - **Hermes indisponível**: confira Configurações > Ponte com o Hermes, rode **TESTAR PONTE** e veja a tela Sistema. Ajuste `baseUrl`, `messagePath`, `healthPath`, token e `responsePath` conforme o contrato real do Hermes.
+- **Hermes Code não responde**: confira `integrations.hermes.codePath`; se a rota `/code` não existir, o Ares cai para `messagePath`.
+- **Ares não lê um arquivo de código**: confira `integrations.code.enabled`, `workspaceRoot`, `allowedRoots` e `maxFileKB`.
 
 ## Verificação Antes de Publicar
 

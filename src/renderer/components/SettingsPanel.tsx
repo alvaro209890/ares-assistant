@@ -312,6 +312,20 @@ export default function SettingsPanel(): JSX.Element {
                     }
                   />
                 </Field>
+                <Field label="Rota de código">
+                  <input
+                    className="input"
+                    placeholder="/code"
+                    value={config.integrations.hermes.codePath}
+                    onChange={(e) =>
+                      saveConfig({
+                        integrations: { ...config.integrations, hermes: { ...config.integrations.hermes, codePath: e.target.value } }
+                      })
+                    }
+                  />
+                </Field>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
                 <Field label="Rota de status">
                   <input
                     className="input"
@@ -320,32 +334,6 @@ export default function SettingsPanel(): JSX.Element {
                     onChange={(e) =>
                       saveConfig({
                         integrations: { ...config.integrations, hermes: { ...config.integrations.hermes, healthPath: e.target.value } }
-                      })
-                    }
-                  />
-                </Field>
-              </div>
-              <Field label="Token do Hermes">
-                <input
-                  className="input"
-                  type="password"
-                  placeholder="opcional"
-                  value={config.integrations.hermes.apiKey}
-                  onChange={(e) =>
-                    saveConfig({
-                      integrations: { ...config.integrations, hermes: { ...config.integrations.hermes, apiKey: e.target.value } }
-                    })
-                  }
-                />
-              </Field>
-              <div className="grid grid-cols-2 gap-2">
-                <Field label="Cabeçalho auth">
-                  <input
-                    className="input"
-                    value={config.integrations.hermes.authHeader}
-                    onChange={(e) =>
-                      saveConfig({
-                        integrations: { ...config.integrations, hermes: { ...config.integrations.hermes, authHeader: e.target.value } }
                       })
                     }
                   />
@@ -369,6 +357,30 @@ export default function SettingsPanel(): JSX.Element {
                   />
                 </Field>
               </div>
+              <Field label="Token do Hermes">
+                <input
+                  className="input"
+                  type="password"
+                  placeholder="opcional"
+                  value={config.integrations.hermes.apiKey}
+                  onChange={(e) =>
+                    saveConfig({
+                      integrations: { ...config.integrations, hermes: { ...config.integrations.hermes, apiKey: e.target.value } }
+                    })
+                  }
+                />
+              </Field>
+              <Field label="Cabeçalho auth">
+                <input
+                  className="input"
+                  value={config.integrations.hermes.authHeader}
+                  onChange={(e) =>
+                    saveConfig({
+                      integrations: { ...config.integrations, hermes: { ...config.integrations.hermes, authHeader: e.target.value } }
+                    })
+                  }
+                />
+              </Field>
               <Field label="Caminho da resposta">
                 <input
                   className="input"
@@ -396,6 +408,107 @@ export default function SettingsPanel(): JSX.Element {
               </div>
               <p className="text-[11px] text-cyan-200/45">
                 Quando ligada, o Ares delega comandos ao Hermes por voz e envia o id da sessão para preservar contexto.
+              </p>
+            </Section>
+
+            <Section title="PROGRAMAÇÃO">
+              <Toggle
+                label="Ativar ferramentas locais de código"
+                checked={config.integrations.code.enabled}
+                onChange={(v) =>
+                  saveConfig({ integrations: { ...config.integrations, code: { ...config.integrations.code, enabled: v } } })
+                }
+              />
+              <Field label="Workspace padrão">
+                <input
+                  className="input"
+                  value={config.integrations.code.workspaceRoot}
+                  onChange={(e) =>
+                    saveConfig({
+                      integrations: { ...config.integrations, code: { ...config.integrations.code, workspaceRoot: e.target.value } }
+                    })
+                  }
+                />
+              </Field>
+              <Field label="Raízes permitidas">
+                <input
+                  className="input"
+                  value={config.integrations.code.allowedRoots.join(', ')}
+                  onChange={(e) =>
+                    saveConfig({
+                      integrations: {
+                        ...config.integrations,
+                        code: {
+                          ...config.integrations.code,
+                          allowedRoots: e.target.value
+                            .split(',')
+                            .map((x) => x.trim())
+                            .filter(Boolean)
+                        }
+                      }
+                    })
+                  }
+                />
+              </Field>
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Arquivo máx. (KB)">
+                  <input
+                    className="input"
+                    type="number"
+                    min={16}
+                    max={4096}
+                    step={16}
+                    value={config.integrations.code.maxFileKB}
+                    onChange={(e) =>
+                      saveConfig({
+                        integrations: {
+                          ...config.integrations,
+                          code: { ...config.integrations.code, maxFileKB: Number(e.target.value) || 256 }
+                        }
+                      })
+                    }
+                  />
+                </Field>
+                <Field label="Resultados busca">
+                  <input
+                    className="input"
+                    type="number"
+                    min={5}
+                    max={200}
+                    step={5}
+                    value={config.integrations.code.maxSearchResults}
+                    onChange={(e) =>
+                      saveConfig({
+                        integrations: {
+                          ...config.integrations,
+                          code: { ...config.integrations.code, maxSearchResults: Number(e.target.value) || 40 }
+                        }
+                      })
+                    }
+                  />
+                </Field>
+              </div>
+              <Field label="Contexto Hermes (chars)">
+                <input
+                  className="input"
+                  type="number"
+                  min={2000}
+                  max={80000}
+                  step={1000}
+                  value={config.integrations.code.maxContextChars}
+                  onChange={(e) =>
+                    saveConfig({
+                      integrations: {
+                        ...config.integrations,
+                        code: { ...config.integrations.code, maxContextChars: Number(e.target.value) || 16000 }
+                      }
+                    })
+                  }
+                />
+              </Field>
+              <p className="text-[11px] text-cyan-200/45">
+                O Ares lê e busca código localmente em modo somente leitura. Análise profunda, edição e refatoração são
+                enviadas ao Hermes Code com contexto limitado.
               </p>
             </Section>
 

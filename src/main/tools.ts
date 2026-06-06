@@ -1,5 +1,5 @@
 import type { ReverseGeocodeResult, UserLocation, WeatherResult, WeatherPeriod, NewsItem, WebResult } from '../shared/types'
-export { hermesExecute, pingHermes } from './hermes'
+export { hermesExecute, hermesCodeTask, pingHermes } from './hermes'
 
 // Ferramentas de consulta externas (sem chave de API):
 // - Clima: Open-Meteo (geocoding + forecast)

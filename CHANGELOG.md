@@ -4,6 +4,43 @@ Todas as mudanças relevantes do Ares. O formato segue de perto
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/) e o projeto usa
 versionamento semântico.
 
+## [0.5.0] — 2026-06-06
+
+Foco: deixar o Ares muito mais forte para **programação**, com contexto local de
+código e integração dedicada com o Hermes Code.
+
+### Adicionado
+
+- **Modo Programador no agente** — o prompt agora instrui o Ares a procurar,
+  ler e citar arquivos/linhas antes de responder perguntas de código, reduzindo
+  chute sobre implementações.
+- **Ferramentas locais read-only de código**:
+  - `codigo.workspace {path?}` resume stack, scripts, git, linguagens e árvore.
+  - `codigo.buscar {path?, consulta, filtro?}` busca texto/símbolos em arquivos.
+  - `codigo.ler {path?, arquivo, inicio?, linhas?}` lê trechos com números de linha.
+- **Hermes Code** — nova ação `codigo.hermes` envia tarefa, modo, workspace e
+  snippets ao Hermes pela rota configurável `integrations.hermes.codePath`
+  (`/code` por padrão), com fallback automático para `/message` se a rota dedicada
+  não existir.
+- **Configurações de programação** — workspace padrão, raízes permitidas, limite de
+  arquivo, resultados de busca e tamanho de contexto para Hermes.
+- **Diagnóstico de programação** — tela Sistema mostra workspace, raízes, limites e
+  rota Hermes Code.
+
+### Segurança
+
+- As ferramentas locais de código são somente leitura e bloqueiam caminhos fora de
+  `integrations.code.allowedRoots`.
+- Edição, refatoração, correção e análise profunda são delegadas ao Hermes Code com
+  contexto limitado por `maxContextChars`.
+
+### Documentação e Testes
+
+- Novo guia [`docs/PROGRAMACAO.md`](docs/PROGRAMACAO.md).
+- README, ROADMAP, `docs/PONTE_HERMES.md` e `config.example.json` atualizados.
+- `tests/code.test.ts` cobre resumo de workspace, busca, leitura, bloqueio de path e
+  delegação ao Hermes Code. A suíte total agora tem 13 testes.
+
 ## [0.4.0] — 2026-06-05
 
 Foco: fechar a **ponte com o Hermes** para o Ares atuar como controle de voz/

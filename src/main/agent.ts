@@ -33,6 +33,7 @@ import {
 import { getWeather, getWeatherAt, getNews, webSearch, calcExpression, convertCurrency, convertUnit, readPage, hermesExecute } from './tools'
 import { getSystemMetrics, readClipboard } from './system'
 import { buildBriefing, briefingToSpeech } from './briefing'
+import { codePromptContext, delegateCodeToHermes, readCodeFile, searchCode, summarizeCodeWorkspace } from './code'
 
 const norm = (s: unknown) => String(s ?? '').toLowerCase().trim()
 const uid = (p: string) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
@@ -85,7 +86,17 @@ FERRAMENTAS DE CONSULTA (dê uma fala curta tipo "Deixe-me verificar." e AGUARDE
 - pagina.ler {url}   (lê uma página da web e resume/responde a partir do conteúdo real dela)
 - sistema.status {}   (uso de CPU, memória e tempo ligado do computador — "como está o sistema?", "quanta memória livre?")
 - area.ler {}   (lê o texto da área de transferência para resumir/traduzir/explicar o que o usuário copiou — "resuma o que eu copiei")
+- codigo.workspace {path?}   (resume um projeto/workspace local: stack, scripts, árvore, git, linguagens)
+- codigo.buscar {path?, consulta, filtro?}   (busca texto/símbolo no código; use antes de explicar funções ou localizar implementação)
+- codigo.ler {path?, arquivo, inicio?, linhas?}   (lê trecho de arquivo local com números de linha; use para responder com precisão)
+- codigo.hermes {tarefa, modo?(review|edit|debug|tests|refactor|explain), path?, arquivos?}   (envia tarefa de programação ao Hermes Code com contexto local; use para análise profunda, edição, refatoração, correção de bug ou plano de testes)
 - hermes.executar {comando}   (delegue ao Hermes pedidos externos que são dele: WhatsApp, Trello, Obsidian, office de agentes, Pedro/Junim/Maicom ou automações já existentes no Hermes)
+
+MODO PROGRAMADOR:
+- Para perguntas de código, não chute: use codigo.workspace/codigo.buscar/codigo.ler quando houver path, arquivo, símbolo ou repo mencionado.
+- Se o usuário pedir edição/refatoração/debug/testes em projeto real, reúna contexto local e use codigo.hermes; o Hermes deve receber tarefa objetiva, modo e arquivos relevantes.
+- Sem path explícito, use o workspace padrão de programação. Se o pedido depender de um repo específico e o contexto não deixar claro, peça o path.
+- Explique respostas de código com referências de arquivo/linha quando a ferramenta devolver linhas.
 
 Regras: use nomes de colunas/tarefas/listas existentes (ver CONTEXTO). Datas SEMPRE em ISO local sem fuso (ex.: 2026-06-03T09:00), resolvidas pela seção DATAS. memoria.salvar só para fatos duradouros do usuário (preferências, perfil, rotina), nunca para pedidos pontuais. Para rascunho de mensagem/e-mail: escreva o texto em "fala" para o usuário revisar e, se ele pedir para guardar, use nota.salvar. Para ações externas sensíveis via Hermes (enviar mensagem, publicar, alterar Trello/Obsidian), só execute quando destinatário/conteúdo/alvo estiverem claros; se faltar algo, peça confirmação em vez de chamar a ferramenta.`
 }
@@ -123,6 +134,7 @@ function buildSystemPrompt(ctx: {
   events: CalendarEvent[]
   location: UserLocation
   hermes: AppConfig['integrations']['hermes']
+  codeContext: string
   summary?: string
   voice: boolean
 }): string {
@@ -147,6 +159,7 @@ function buildSystemPrompt(ctx: {
     `## DATAS\n${dateAnchors(now)}`,
     `## Localização aproximada do usuário\n${loc}`,
     `## Ponte com o Hermes\n${hermes}`,
+    `## Programação\n${ctx.codeContext}`,
     `## Sobre o usuário (memória de longo prazo)\n${memorySummary()}`,
     `## Tarefas atuais\n${boardSummary(ctx.board)}`,
     `## Próximos eventos\n${upcoming || '(nenhum)'}`,
@@ -201,6 +214,45 @@ async function runQuery(a: Acao, cfg: AppConfig, sessionId: string): Promise<unk
       case 'area.ler': {
         const c = readClipboard()
         return c.vazio ? { tipo: a.tipo, erro: 'A área de transferência está vazia.' } : { tipo: a.tipo, resultado: c }
+      }
+      case 'codigo.workspace':
+        return { tipo: a.tipo, resultado: summarizeCodeWorkspace(cfg, String(a.path || a.raiz || a.workspace || '')) }
+      case 'codigo.buscar':
+        return {
+          tipo: a.tipo,
+          resultado: searchCode(cfg, {
+            root: String(a.path || a.raiz || a.workspace || ''),
+            query: String(a.consulta || a.query || a.simbolo || ''),
+            filter: a.filtro ? String(a.filtro) : a.glob ? String(a.glob) : undefined,
+            maxResults: Number(a.limite || a.max || 0) || undefined
+          })
+        }
+      case 'codigo.ler':
+        return {
+          tipo: a.tipo,
+          resultado: readCodeFile(cfg, {
+            root: String(a.path || a.raiz || a.workspace || ''),
+            file: String(a.arquivo || a.file || ''),
+            startLine: Number(a.inicio || a.start || 0) || undefined,
+            lines: Number(a.linhas || a.lines || 0) || undefined
+          })
+        }
+      case 'codigo.hermes': {
+        const files = Array.isArray(a.arquivos)
+          ? a.arquivos.map((x) => String(x)).filter(Boolean)
+          : Array.isArray(a.files)
+            ? a.files.map((x) => String(x)).filter(Boolean)
+            : []
+        return {
+          tipo: a.tipo,
+          resultado: await delegateCodeToHermes(cfg, sessionId, {
+            task: String(a.tarefa || a.comando || a.texto || ''),
+            mode: String(a.modo || a.mode || 'assist'),
+            root: String(a.path || a.raiz || a.workspace || ''),
+            files,
+            extra: { origem: 'agente-ares' }
+          })
+        }
       }
       case 'hermes.executar': {
         if (!integrations.hermes?.enabled) return { tipo: a.tipo, erro: 'Ponte com o Hermes desativada nas Configurações.' }
@@ -375,6 +427,7 @@ export async function runTurn(
     events: loadEvents(),
     location: cfg.integrations.location,
     hermes: cfg.integrations.hermes,
+    codeContext: codePromptContext(cfg),
     summary: session?.summary,
     voice
   })

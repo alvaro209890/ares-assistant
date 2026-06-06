@@ -10,10 +10,19 @@ export interface HermesExecuteResult {
   sessionId?: string
 }
 
+export interface HermesCodeTaskPayload {
+  task: string
+  mode?: string
+  workspace?: unknown
+  files?: unknown[]
+  extra?: Record<string, unknown>
+}
+
 const DEFAULT_HERMES: HermesConfig = {
   enabled: false,
   baseUrl: 'http://localhost:18789',
   messagePath: '/message',
+  codePath: '/code',
   healthPath: '/health',
   apiKey: '',
   authHeader: 'Authorization',
@@ -152,12 +161,75 @@ export async function hermesExecute(
   return { reply, endpoint, status: res.status, latencyMs: Date.now() - started, sessionId }
 }
 
+function formatCodeFallback(payload: HermesCodeTaskPayload): string {
+  return [
+    '[ARES_CODE_TASK]',
+    `Modo: ${payload.mode || 'assist'}`,
+    `Tarefa: ${payload.task}`,
+    payload.workspace ? `Workspace:\n${JSON.stringify(payload.workspace, null, 2)}` : '',
+    payload.files?.length ? `Arquivos:\n${JSON.stringify(payload.files, null, 2)}` : '',
+    payload.extra ? `Extra:\n${JSON.stringify(payload.extra, null, 2)}` : ''
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+}
+
+export async function hermesCodeTask(
+  configOrBaseUrl: Partial<HermesConfig> | string,
+  payload: HermesCodeTaskPayload,
+  sessionId?: string
+): Promise<HermesExecuteResult & { fallback?: boolean }> {
+  const cfg = normalizeHermes(configOrBaseUrl)
+  const task = String(payload.task || '').trim()
+  if (!task) throw new Error('Diga qual tarefa de programação devo enviar ao Hermes.')
+
+  const endpoint = hermesUrl(cfg.baseUrl, cfg.codePath || '/code')
+  const started = Date.now()
+  let res: Response
+  try {
+    res = await fetchWithTimeout(
+      endpoint,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders(cfg) },
+        body: JSON.stringify({
+          task,
+          mode: payload.mode || 'assist',
+          workspace: payload.workspace,
+          files: payload.files || [],
+          extra: payload.extra || {},
+          source: 'ares',
+          client: 'ares-desktop',
+          capability: 'code',
+          sessionId
+        })
+      },
+      boundedTimeout(cfg.timeoutMs)
+    )
+  } catch (err: any) {
+    const detail = err?.name === 'AbortError' ? 'timeout' : err?.message || err
+    throw new Error(`Não consegui falar com o Hermes Code em ${cfg.baseUrl}. Detalhe: ${detail}`)
+  }
+
+  const raw = await res.text()
+  if ((res.status === 404 || res.status === 405) && (cfg.codePath || '/code') !== cfg.messagePath) {
+    const fallback = await hermesExecute(cfg, formatCodeFallback(payload), sessionId)
+    return { ...fallback, fallback: true }
+  }
+  if (!res.ok) throw new Error(`Hermes Code respondeu HTTP ${res.status}: ${raw.slice(0, 240) || 'sem corpo'}`)
+
+  const reply = extractHermesReply(raw, cfg.responsePath)
+  if (!reply) throw new Error('Hermes Code respondeu sem texto útil.')
+  return { reply, endpoint, status: res.status, latencyMs: Date.now() - started, sessionId }
+}
+
 export async function pingHermes(input: Partial<HermesConfig>): Promise<HermesStatus> {
   const cfg = normalizeHermes(input)
   const base: Omit<HermesStatus, 'ok' | 'detail'> = {
     enabled: !!cfg.enabled,
     baseUrl: cfg.baseUrl,
     messagePath: cfg.messagePath,
+    codePath: cfg.codePath,
     healthPath: cfg.healthPath,
     timeoutMs: boundedTimeout(cfg.timeoutMs)
   }

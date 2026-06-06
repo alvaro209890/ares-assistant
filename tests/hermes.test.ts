@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { AppConfig } from '../src/shared/types'
-import { extractHermesReply, hermesExecute, hermesUrl, pingHermes } from '../src/main/hermes'
+import { extractHermesReply, hermesCodeTask, hermesExecute, hermesUrl, pingHermes } from '../src/main/hermes'
 
 type HermesConfig = AppConfig['integrations']['hermes']
 
@@ -30,6 +30,7 @@ function config(patch: Partial<HermesConfig> = {}): HermesConfig {
     enabled: true,
     baseUrl,
     messagePath: '/message',
+    codePath: '/code',
     healthPath: '/health',
     apiKey: '',
     authHeader: 'Authorization',
@@ -58,6 +59,12 @@ beforeAll(async () => {
 
     if (req.method === 'POST' && req.url === '/nested') {
       res.end(JSON.stringify({ data: { answer: 'resposta no caminho configurado' } }))
+      return
+    }
+
+    if (req.method === 'POST' && req.url === '/code') {
+      const json = JSON.parse(body)
+      res.end(JSON.stringify({ result: { output: `codigo: ${json.task}` } }))
       return
     }
 
@@ -139,6 +146,32 @@ describe('ponte Hermes', () => {
     expect(status.ok).toBe(true)
     expect(status.enabled).toBe(true)
     expect(status.detail).toContain('/health')
+  })
+
+  it('envia tarefa de programação para a rota dedicada do Hermes', async () => {
+    const result = await hermesCodeTask(config(), { task: 'analise estes testes', mode: 'review', files: [{ file: 'x.ts' }] }, 'sess-code')
+
+    expect(result.reply).toBe('codigo: analise estes testes')
+    expect(result.fallback).toBeUndefined()
+    const req = requests.find((item) => item.url === '/code')
+    expect(req?.method).toBe('POST')
+    expect(JSON.parse(req?.body || '{}')).toMatchObject({
+      task: 'analise estes testes',
+      mode: 'review',
+      source: 'ares',
+      client: 'ares-desktop',
+      capability: 'code',
+      sessionId: 'sess-code'
+    })
+  })
+
+  it('cai para messagePath quando a rota codePath não existe', async () => {
+    const result = await hermesCodeTask(config({ codePath: '/missing-code' }), { task: 'corrija o build' }, 'sess-fallback')
+
+    expect(result.fallback).toBe(true)
+    expect(result.reply).toContain('recebido: [ARES_CODE_TASK]')
+    expect(requests.some((item) => item.url === '/missing-code')).toBe(true)
+    expect(requests.some((item) => item.url === '/message')).toBe(true)
   })
 
   it('reporta ponte desativada sem tocar a rede', async () => {
