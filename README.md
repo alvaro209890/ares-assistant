@@ -25,6 +25,7 @@ O projeto roda em modo de desenvolvimento. O empacotamento `.deb` está configur
 - **Modo Programador**: resumo de workspace, busca e leitura local de código, **terminal completo com autorização por voz** e delegação ao Hermes Code para análise profunda, edição, debug, testes e refatoração.
 - **Controle do computador**: abrir apps/sites/arquivos, volume, **mídia (play/pause/próxima)**, **brilho da tela**, bloquear a tela, capturas e escrever na área de transferência — por voz, sem shell. Veja [Controle do Computador](docs/CONTROLE.md).
 - **Desfazer por voz**: "desfaz" reverte a última alteração em tarefas, listas, notas, lembretes, eventos ou memória.
+- **Confiança na conversa**: confirmação falada antes de apagar/limpar, desambiguação ("qual deles?") e correção ("não, eu disse X"). Veja [Confiança na conversa](docs/CONFIANCA.md).
 - **Ponte com o Hermes**: delegação por voz para WhatsApp, Trello, Obsidian, office de agentes e automações externas do Hermes.
 - **Tela Sistema/Diagnóstico**: status do 9 Router, Hermes, Groq, Piper, localização, arquivos de dados locais e versões do app.
 
@@ -34,6 +35,13 @@ O projeto roda em modo de desenvolvimento. O empacotamento `.deb` está configur
 - **Palavra de ativação ("Ares")**: na conversa contínua, opcionalmente só responde quando você começa pela palavra-chave (ex.: "Ares, que horas são?"). Diga só "Ares" para ele confirmar e aguardar o comando.
 - **Orbe flutuante (companion)**: uma mini-orbe always-on-top que reflete o estado do Ares; clique para abrir o app, ou use o microfone dela para falar sem trazer a janela principal.
 - **Barge-in (interromper a fala)**: na conversa contínua, comece a falar por cima e o Ares para na hora e te ouve; a tecla `Esc` também interrompe a fala a qualquer momento.
+
+### Novidades da versão 0.11
+
+- **Confiança na conversa**: ações que **apagam/limpam/removem** (tarefa, coluna, evento, lembrete, memória, limpar lista) agora **pedem confirmação falada** ("Confirma que apago X?") e só executam após o "sim" — com um portão de segurança no servidor que garante isso mesmo se o modelo errar. Pareado com o desfazer, deixa o uso por voz seguro.
+- **Desambiguação**: quando o pedido casa com vários itens, o Ares pergunta "qual deles?" em vez de chutar.
+- **Correção**: "não, eu disse X" → ele reconhece, desfaz se preciso e refaz certo.
+- Toggle **"Confirmar antes de apagar"** (Configurações > Proatividade). +13 testes (65 no total). Detalhes em [`docs/CONFIANCA.md`](docs/CONFIANCA.md).
 
 ### Novidades da versão 0.10
 
@@ -226,6 +234,7 @@ Campos principais:
 | `integrations.code.terminalSafe` | prefixos de comando que rodam direto, sem pedir autorização |
 | `integrations.control.enabled` | ativa o controle do computador (abrir apps, volume, bloquear, captura) |
 | `integrations.control.screenshotDir` | pasta onde as capturas de tela são salvas |
+| `ui.confirmDestructive` | pede confirmação falada antes de apagar/limpar/remover dados (ligado) |
 | `ui.continuousMode` | mantém o modo de conversa contínua ativo entre reinícios |
 | `ui.micSensitivity` | 0..1 — quanto maior, mais sensível o microfone na conversa contínua |
 | `ui.silenceMs` | tempo de silêncio (ms) para encerrar a fala no modo contínuo |

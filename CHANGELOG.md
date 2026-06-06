@@ -4,6 +4,32 @@ Todas as mudanças relevantes do Ares. O formato segue de perto
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/) e o projeto usa
 versionamento semântico.
 
+## [0.11.0] — 2026-06-06
+
+Foco: **confiança na conversa** — o maior ganho de usabilidade por voz é não fazer
+a coisa errada por causa de uma transcrição ruim.
+
+### Adicionado
+
+- **Confirmação de ações destrutivas** — apagar/limpar/remover (tarefa, coluna,
+  evento, lembrete, memória, limpar lista) só executam após o "sim". O LLM
+  pergunta na fala e um **portão no servidor** (`decideConfirmation` em
+  `src/main/confirm.ts`) garante a não-execução mesmo se o modelo falhar. Se o
+  usuário já confirma no mesmo pedido ("sim, pode apagar"), executa na hora.
+  Pendência por sessão (TTL 5 min).
+- **Desambiguação** (prompt) — quando o pedido casa com vários itens do contexto,
+  o Ares pergunta "qual deles?" em vez de chutar.
+- **Correção** (prompt) — "não, eu disse X" → reconhece, usa `desfazer` se a última
+  ação foi errada e refaz com o valor certo.
+- **`ui.confirmDestructive`** (ligado por padrão) com toggle em
+  Configurações > Proatividade. Desligado, apaga direto (o desfazer continua).
+
+### Testes
+
+- `tests/confirm.test.ts`: classificação destrutiva, `describeConfirm`,
+  afirmativo/negativo (sem confundir comando novo com "sim") e todos os ramos de
+  `decideConfirmation` + store por sessão. Total: 65 testes.
+
 ## [0.10.0] — 2026-06-06
 
 Foco: completar o controle do computador (**mídia** e **brilho**) e adicionar

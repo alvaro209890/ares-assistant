@@ -112,6 +112,7 @@ const DEFAULT_CONFIG: AppConfig = {
     silenceMs: 1350,
     postSpeechPauseMs: 450,
     proactiveSuggestions: true,
+    confirmDestructive: true,
     wakeWord: 'ares',
     wakeWordEnabled: false,
     bargeIn: true,

@@ -217,6 +217,15 @@ export default function SettingsPanel(): JSX.Element {
               <p className="text-[11px] text-cyan-200/45">
                 Sugestões discretas sobre tarefas vencidas, eventos próximos, chuva e conflitos de agenda.
               </p>
+              <Toggle
+                label="Confirmar antes de apagar"
+                checked={config.ui.confirmDestructive}
+                onChange={(v) => saveConfig({ ui: { confirmDestructive: v } })}
+              />
+              <p className="text-[11px] text-cyan-200/45">
+                Pede um "sim" antes de remover ou limpar tarefas, listas, eventos, lembretes ou memória — evita exclusões por
+                engano de transcrição. Com o "desfazer", deixa o uso por voz seguro.
+              </p>
             </Section>
 
             <Section title="ORBE FLUTUANTE">

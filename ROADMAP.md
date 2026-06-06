@@ -42,6 +42,10 @@ conhecimento técnico), com o motivo de cada uma.
 > **Versão 0.10 (entregue):** ✅ **mídia** (`sistema.midia`, playerctl/MPRIS), ✅ **brilho**
 > (`sistema.brilho`, xrandr) e ✅ **desfazer por voz** (`desfazer`, snapshot de dados em
 > `src/main/history.ts`). Detalhes em [`docs/CONTROLE.md`](docs/CONTROLE.md).
+>
+> **Versão 0.11 (entregue):** ✅ **confiança na conversa** — confirmação falada antes de
+> apagar/limpar (portão `src/main/confirm.ts`), desambiguação e correção por voz. Detalhes
+> em [`docs/CONFIANCA.md`](docs/CONFIANCA.md).
 
 Legenda de esforço: 🟢 baixo · 🟡 médio · 🔴 alto. ✅ = já implementado.
 

@@ -46,6 +46,7 @@ import {
   type VolumeAction
 } from './control'
 import { pushUndo, undoLast } from './history'
+import { clearPendingConfirm, decideConfirmation, getPendingConfirm, setPendingConfirm } from './confirm'
 import { buildBriefing, briefingToSpeech } from './briefing'
 import {
   applyCodePatch,
@@ -178,6 +179,11 @@ MODO PROGRAMADOR:
 - Para estado do repo, use codigo.git em vez de inventar status/diff.
 - Sem path explícito, use o workspace padrão de programação. Se o pedido depender de um repo específico e o contexto não deixar claro, peça o path.
 - Explique respostas de código com referências de arquivo/linha quando a ferramenta devolver linhas.
+
+CONFIANÇA NA CONVERSA:
+- CONFIRMAÇÃO: para REMOVER/APAGAR/LIMPAR dados (tarefa.remover, coluna.remover, evento.remover, lembrete.remover, memoria.remover, lista.limpar), inclua a ação no JSON E pergunte na fala de forma curta ("Confirma que apago a tarefa X?"). O sistema SEGURA a ação até o usuário confirmar; quando ele disser "sim/pode/confirmo", apenas confirme na fala ("Pronto, removida.") — não precisa repetir a ação. Se disser "não", diga que manteve. Nunca diga que apagou antes da confirmação.
+- DESAMBIGUAÇÃO: se o pedido casar com VÁRIOS itens existentes (você vê tarefas/eventos/listas no CONTEXTO) e não estiver claro qual, pergunte "qual deles?" listando as opções, em vez de chutar.
+- CORREÇÃO: se o usuário corrigir ("não, eu disse X", "não era isso", "errado"), reconheça; se a última ação foi errada, inclua a ação desfazer e refaça com o valor certo.
 
 Regras: use nomes de colunas/tarefas/listas existentes (ver CONTEXTO). Datas SEMPRE em ISO local sem fuso (ex.: 2026-06-03T09:00), resolvidas pela seção DATAS. memoria.salvar só para fatos duradouros do usuário (preferências, perfil, rotina), nunca para pedidos pontuais. Para rascunho de mensagem/e-mail: escreva o texto em "fala" para o usuário revisar e, se ele pedir para guardar, use nota.salvar. Para ações externas sensíveis via Hermes (enviar mensagem, publicar, alterar Trello/Obsidian), só execute quando destinatário/conteúdo/alvo estiverem claros; se faltar algo, peça confirmação em vez de chamar a ferramenta.`
 }
@@ -651,11 +657,35 @@ export async function runTurn(
   const validated = validateActions(mutations)
   allNotes.push(...validated.notes)
 
-  // Snapshot para "desfazer": antes de alterar qualquer dado, guarda o estado atual.
-  if (validated.valid.length) pushUndo(userDataDir(), userText.slice(0, 80))
+  // Portão de confiança: ações destrutivas (apagar/limpar/remover) só executam após
+  // confirmação. O LLM pergunta na fala; aqui garantimos que nada destrutivo roda
+  // sem o "sim" — mesmo se o LLM falhar.
+  let toApply = validated.valid
+  let heldQuestion: string | undefined
+  let outcome: 'none' | 'held' | 'applied' | 'confirmed' | 'cancelled' = 'none'
+  if (cfg.ui.confirmDestructive !== false) {
+    const pend = getPendingConfirm(sessionId)
+    const decision = decideConfirmation({ pending: pend?.actions ?? null, proposed: validated.valid, userText })
+    toApply = decision.apply
+    outcome = decision.outcome
+    heldQuestion = decision.question
+    if (decision.hold && decision.hold.length) setPendingConfirm(sessionId, decision.hold, decision.question || 'Confirma?')
+    else clearPendingConfirm(sessionId)
+  }
 
-  const { board, notes, changedBoard } = applyMutations(validated.valid)
+  // Snapshot para "desfazer": antes de alterar qualquer dado, guarda o estado atual.
+  if (toApply.length) pushUndo(userDataDir(), userText.slice(0, 80))
+
+  const { board, notes, changedBoard } = applyMutations(toApply)
   allNotes.push(...notes)
+
+  // Ajusta a fala exibida conforme a confirmação (a fala falada é a do streaming).
+  if (outcome === 'held') {
+    if (!/\?/.test(fala)) fala = heldQuestion || fala
+    allNotes.push('aguardando confirmação')
+  } else if (outcome === 'cancelled') {
+    allNotes.push('cancelado')
+  }
 
   appendMessages(sessionId, [
     { id: uid('m'), role: 'user', content: userText, ts: Date.now() },
