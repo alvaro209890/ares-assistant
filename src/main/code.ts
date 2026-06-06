@@ -1,7 +1,21 @@
 import { spawnSync } from 'child_process'
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'fs'
+import { createHash } from 'crypto'
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'fs'
+import { homedir } from 'os'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'path'
-import type { AppConfig, CodeFileSnippet, CodeHermesResult, CodeSearchMatch, CodeWorkspaceSummary } from '../shared/types'
+import type {
+  AppConfig,
+  CodeCommandResult,
+  CodeFileSnippet,
+  CodeHermesResult,
+  CodePatchApplyResult,
+  CodePatchPreview,
+  CodeProjectIndex,
+  CodeSearchMatch,
+  CodeTerminalResult,
+  CodeWorkspaceSummary,
+  CommandClassification
+} from '../shared/types'
 import { hermesCodeTask } from './hermes'
 
 const IGNORE_NAMES = new Set([
@@ -121,6 +135,10 @@ function packageInfo(root: string): Pick<CodeWorkspaceSummary, 'packageManager' 
   return { packageManager, scripts }
 }
 
+function languageFor(file: string): string {
+  return LANGUAGE_BY_EXT[extname(file).toLowerCase()] || 'Outros'
+}
+
 function isLikelyText(path: string, maxBytes: number): boolean {
   try {
     const st = statSync(path)
@@ -163,7 +181,7 @@ function walkFiles(root: string, maxDepth: number, maxFiles: number): { files: s
         walk(abs, depth + 1)
       } else if (st.isFile()) {
         files.push(rel)
-        const lang = LANGUAGE_BY_EXT[extname(name).toLowerCase()] || 'Outros'
+        const lang = languageFor(name)
         languages[lang] = (languages[lang] || 0) + 1
       }
     }
@@ -315,4 +333,424 @@ export async function delegateCodeToHermes(
     },
     sessionId
   )
+}
+
+function splitCommand(command: string): string[] {
+  const out: string[] = []
+  let cur = ''
+  let quote: '"' | "'" | '' = ''
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i]
+    if (quote) {
+      if (ch === quote) quote = ''
+      else cur += ch
+      continue
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch
+      continue
+    }
+    if (/\s/.test(ch)) {
+      if (cur) out.push(cur)
+      cur = ''
+      continue
+    }
+    cur += ch
+  }
+  if (cur) out.push(cur)
+  return out
+}
+
+function isCommandAllowed(cfg: AppConfig, command: string): boolean {
+  const c = command.trim().replace(/\s+/g, ' ')
+  if (!c || /[;&|<>`$]/.test(c)) return false
+  return (codeConfig(cfg).allowedCommands || []).some((allowed) => {
+    const a = allowed.trim().replace(/\s+/g, ' ')
+    return c === a || c.startsWith(`${a} --`)
+  })
+}
+
+export function runCodeCommand(cfg: AppConfig, opts: { root?: string; command: string }): CodeCommandResult {
+  const root = resolveCodeWorkspace(cfg, opts.root)
+  const command = String(opts.command || '').trim().replace(/\s+/g, ' ')
+  if (!isCommandAllowed(cfg, command)) throw new Error(`Comando não permitido para programação: ${command}`)
+  const parts = splitCommand(command)
+  if (!parts.length) throw new Error('Comando vazio.')
+
+  const started = Date.now()
+  const res = spawnSync(parts[0], parts.slice(1), {
+    cwd: root,
+    encoding: 'utf8',
+    timeout: Math.max(1000, Math.min(Number(codeConfig(cfg).commandTimeoutMs) || 120000, 10 * 60_000)),
+    maxBuffer: 1024 * 1024 * 4
+  })
+
+  return {
+    root,
+    command,
+    ok: res.status === 0,
+    code: res.status,
+    stdout: String(res.stdout || '').slice(0, 12000),
+    stderr: (res.error ? String(res.error.message || res.error) + '\n' : '') + String(res.stderr || '').slice(0, 12000),
+    durationMs: Date.now() - started
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Terminal completo com autorização.
+// Três camadas: 'blocked' (catastrófico, nunca roda nem com autorização),
+// 'allowed' (allowlist + prefixos seguros, roda direto) e 'confirm' (qualquer
+// outro comando: exige autorização explícita do usuário). O Ares pede o "sim"
+// em voz antes de rodar comandos da camada 'confirm'.
+// ---------------------------------------------------------------------------
+
+// Padrões catastróficos/irreversíveis ou de elevação de privilégio. Bloqueados
+// sempre, mesmo que o usuário "autorize" — para isso o usuário deve usar um
+// terminal de verdade, fora do Ares.
+const BLOCKED_PATTERNS: Array<{ re: RegExp; why: string }> = [
+  { re: /(^|[\s;&|])sudo(\s|$)/, why: 'elevação de privilégio (sudo) não é permitida' },
+  { re: /(^|[\s;&|])su(\s|$)/, why: 'troca de usuário (su) não é permitida' },
+  { re: /(^|[\s;&|])doas(\s|$)/, why: 'elevação de privilégio (doas) não é permitida' },
+  { re: /rm\s+(-\S*\s+)*-\S*[rf]\S*\s+(-\S*\s+)*(\/|~|\$home|\.{1,2}|\*)(\s|\/|$)/, why: 'remoção recursiva de raiz/HOME/diretório atual' },
+  { re: /rm\s+-\S*[rf].*\s\/(\s|$)/, why: 'remoção recursiva da raiz do sistema' },
+  { re: /\bmkfs(\.\w+)?\b/, why: 'formatação de sistema de arquivos' },
+  { re: /\bdd\b[^\n]*\bof=\/dev\//, why: 'escrita direta em dispositivo de bloco' },
+  { re: /[>]\s*\/dev\/(sd|nvme|hd|mmcblk|disk)/, why: 'escrita direta em disco' },
+  { re: /\b(shutdown|reboot|poweroff|halt)\b/, why: 'desligar/reiniciar a máquina' },
+  { re: /\binit\s+[06]\b/, why: 'mudança de runlevel (desligar/reiniciar)' },
+  { re: /:\s*\(\s*\)\s*\{.*\|\s*:.*&\s*\}/, why: 'fork bomb' },
+  { re: /:\(\)\{/, why: 'fork bomb' },
+  { re: /\bchmod\s+-\S*r\S*\s+0*777\s+\//, why: 'permissões recursivas 777 na raiz' },
+  { re: /\bchown\s+-\S*r\S*\s+\S+\s+\/(\s|$)/, why: 'troca de dono recursiva na raiz' },
+  { re: /\b(curl|wget)\b[^\n]*\|\s*(sudo\s+)?(ba|z|fi|da)?sh\b/, why: 'baixar e executar script remoto direto no shell' }
+]
+
+const DEFAULT_TERMINAL_SAFE = [
+  'ls',
+  'pwd',
+  'cat',
+  'head',
+  'tail',
+  'wc',
+  'echo',
+  'which',
+  'env',
+  'date',
+  'whoami',
+  'uname',
+  'grep',
+  'rg',
+  'find',
+  'tree',
+  'git status',
+  'git diff',
+  'git log',
+  'git branch',
+  'git show',
+  'git remote',
+  'node --version',
+  'npm --version',
+  'npm ls',
+  'npx tsc --noEmit'
+]
+
+function normalizeCommand(command: string): string {
+  return String(command || '').trim().replace(/\s+/g, ' ')
+}
+
+function matchesPrefix(command: string, prefix: string): boolean {
+  const c = command.toLowerCase()
+  const p = prefix.trim().toLowerCase()
+  if (!p) return false
+  return c === p || c.startsWith(`${p} `)
+}
+
+function terminalSafePrefixes(cfg: AppConfig): string[] {
+  const list = codeConfig(cfg).terminalSafe
+  return Array.isArray(list) && list.length ? list : DEFAULT_TERMINAL_SAFE
+}
+
+/**
+ * Classifica um comando antes de executá-lo. Não roda nada — apenas decide a
+ * camada de segurança. Usado pelo terminal e testável isoladamente.
+ */
+export function classifyCommand(cfg: AppConfig, command: string): CommandClassification {
+  const c = normalizeCommand(command)
+  if (!c) return { tier: 'blocked', reason: 'comando vazio' }
+  const lower = c.toLowerCase()
+  for (const { re, why } of BLOCKED_PATTERNS) {
+    if (re.test(lower)) return { tier: 'blocked', reason: why }
+  }
+  const allowlist = codeConfig(cfg).allowedCommands || []
+  if (allowlist.some((a) => matchesPrefix(c, a))) return { tier: 'allowed', reason: 'comando na allowlist' }
+  if (terminalSafePrefixes(cfg).some((p) => matchesPrefix(c, p))) return { tier: 'allowed', reason: 'comando seguro (somente leitura/dev)' }
+  return { tier: 'confirm', reason: 'comando fora da allowlist: requer autorização do usuário' }
+}
+
+/**
+ * Executa um comando no terminal do projeto via shell real (bash -lc), com pipes
+ * e operadores como num terminal de verdade. Comandos 'confirm' só rodam quando
+ * `approved` é true (ou `terminalAutoApprove` está ligado); 'blocked' nunca roda.
+ */
+export function runCodeTerminal(
+  cfg: AppConfig,
+  opts: { root?: string; command: string; approved?: boolean }
+): CodeTerminalResult {
+  if (codeConfig(cfg).terminalEnabled === false) throw new Error('Terminal desativado nas Configurações.')
+  const root = resolveCodeWorkspace(cfg, opts.root)
+  const command = normalizeCommand(opts.command)
+  if (!command) throw new Error('Comando vazio.')
+
+  const cls = classifyCommand(cfg, command)
+  const empty = { root, command, tier: cls.tier, ran: false, ok: false, code: null, stdout: '', stderr: '', durationMs: 0, reason: cls.reason }
+
+  if (cls.tier === 'blocked') throw new Error(`Comando bloqueado por segurança: ${cls.reason}`)
+
+  const autoApprove = codeConfig(cfg).terminalAutoApprove === true
+  if (cls.tier === 'confirm' && !opts.approved && !autoApprove) {
+    return { ...empty, requiresApproval: true }
+  }
+
+  const started = Date.now()
+  const res = spawnSync('bash', ['-lc', command], {
+    cwd: root,
+    encoding: 'utf8',
+    timeout: Math.max(1000, Math.min(Number(codeConfig(cfg).commandTimeoutMs) || 120000, 10 * 60_000)),
+    maxBuffer: 1024 * 1024 * 8
+  })
+
+  return {
+    ...empty,
+    requiresApproval: false,
+    ran: true,
+    ok: res.status === 0,
+    code: res.status,
+    stdout: String(res.stdout || '').slice(0, 16000),
+    stderr: (res.error ? String(res.error.message || res.error) + '\n' : '') + String(res.stderr || '').slice(0, 16000),
+    durationMs: Date.now() - started
+  }
+}
+
+function gitResult(cfg: AppConfig, root: string, args: string[]): CodeCommandResult {
+  const command = `git ${args.join(' ')}`
+  const started = Date.now()
+  const res = spawnSync('git', ['-C', root, ...args], {
+    encoding: 'utf8',
+    timeout: Math.max(1000, Math.min(Number(codeConfig(cfg).commandTimeoutMs) || 120000, 10 * 60_000)),
+    maxBuffer: 1024 * 1024 * 4
+  })
+  return {
+    root,
+    command,
+    ok: res.status === 0,
+    code: res.status,
+    stdout: String(res.stdout || '').slice(0, 16000),
+    stderr: (res.error ? String(res.error.message || res.error) + '\n' : '') + String(res.stderr || '').slice(0, 16000),
+    durationMs: Date.now() - started
+  }
+}
+
+export function runCodeGit(
+  cfg: AppConfig,
+  opts: { root?: string; operation: string; file?: string }
+): CodeCommandResult {
+  const root = resolveCodeWorkspace(cfg, opts.root)
+  const op = String(opts.operation || '').trim()
+  const file = opts.file ? relative(root, resolveCodeFile(cfg, root, opts.file)) : ''
+  if (file && (file.startsWith('..') || isAbsolute(file))) throw new Error(`Arquivo fora do workspace: ${opts.file}`)
+  if (op === 'status') return gitResult(cfg, root, ['status', '--short'])
+  if (op === 'diffStat') return gitResult(cfg, root, file ? ['diff', '--stat', '--', file] : ['diff', '--stat'])
+  if (op === 'diff') return gitResult(cfg, root, file ? ['diff', '--', file] : ['diff'])
+  if (op === 'log') return gitResult(cfg, root, ['log', '--oneline', '-10'])
+  throw new Error(`Operação Git não permitida: ${op}`)
+}
+
+function indexPath(root: string): string {
+  const dir = join(homedir(), '.config', 'ares', 'code-indexes')
+  mkdirSync(dir, { recursive: true })
+  const key = createHash('sha1').update(root).digest('hex')
+  return join(dir, `${key}.json`)
+}
+
+function exportedNames(content: string): string[] {
+  const names = new Set<string>()
+  const re = /\bexport\s+(?:async\s+)?(?:function|class|const|let|var|interface|type|enum)\s+([A-Za-z_$][\w$]*)/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(content))) names.add(m[1])
+  return [...names].slice(0, 40)
+}
+
+export function buildCodeIndex(cfg: AppConfig, opts: { root?: string; refresh?: boolean } = {}): CodeProjectIndex {
+  const root = resolveCodeWorkspace(cfg, opts.root)
+  const store = indexPath(root)
+  if (!opts.refresh && existsSync(store)) {
+    try {
+      return JSON.parse(readFileSync(store, 'utf8')) as CodeProjectIndex
+    } catch {
+      /* índice corrompido: reconstrói */
+    }
+  }
+
+  const maxFiles = Math.max(20, Math.min(Number(codeConfig(cfg).indexMaxFiles) || 600, 5000))
+  const maxBytes = Math.max(1, codeConfig(cfg).maxFileKB) * 1024
+  const { files } = walkFiles(root, 10, maxFiles)
+  const pkg = packageInfo(root)
+  const branch = git(root, ['rev-parse', '--abbrev-ref', 'HEAD'])
+  const status = git(root, ['status', '--short'])
+  const indexed: CodeProjectIndex['files'] = []
+
+  for (const file of files) {
+    const abs = resolveCodeFile(cfg, root, file)
+    if (!isLikelyText(abs, maxBytes)) continue
+    const st = statSync(abs)
+    const content = readFileSync(abs, 'utf8')
+    indexed.push({
+      file,
+      language: languageFor(file),
+      bytes: st.size,
+      lines: content.split(/\r?\n/).length,
+      exports: exportedNames(content)
+    })
+  }
+
+  const index: CodeProjectIndex = {
+    root,
+    generatedAt: Date.now(),
+    fileCount: indexed.length,
+    files: indexed,
+    scripts: pkg.scripts,
+    git: branch ? { branch, dirty: !!status, status: status ? status.split('\n').slice(0, 80) : [] } : undefined
+  }
+  writeFileSync(store, JSON.stringify(index, null, 2), 'utf8')
+  return index
+}
+
+type PatchInput = { diff?: unknown; patches?: unknown }
+
+function patchDiff(input: PatchInput): string {
+  const direct = typeof input.diff === 'string' ? input.diff : ''
+  if (direct.trim()) return direct
+  if (!Array.isArray(input.patches)) return ''
+  return input.patches
+    .map((p) => (p && typeof p === 'object' && typeof (p as Record<string, unknown>).diff === 'string' ? (p as Record<string, string>).diff : ''))
+    .filter((x) => x.trim())
+    .join('\n')
+}
+
+function textPatches(input: PatchInput): Array<{ file: string; find?: string; replace?: string; content?: string; all?: boolean }> {
+  if (!Array.isArray(input.patches)) return []
+  return input.patches
+    .map((p) => (p && typeof p === 'object' ? (p as Record<string, unknown>) : null))
+    .filter((p): p is Record<string, unknown> => !!p && typeof p.file === 'string')
+    .map((p) => ({
+      file: String(p.file),
+      find: typeof p.find === 'string' ? p.find : undefined,
+      replace: typeof p.replace === 'string' ? p.replace : undefined,
+      content: typeof p.content === 'string' ? p.content : undefined,
+      all: p.all === true
+    }))
+}
+
+function diffFiles(diff: string): string[] {
+  const files = new Set<string>()
+  for (const line of diff.split(/\r?\n/)) {
+    const m =
+      line.match(/^diff --git a\/(.+?) b\/(.+)$/) ||
+      line.match(/^\+\+\+ b\/(.+)$/) ||
+      line.match(/^--- a\/(.+)$/)
+    if (!m) continue
+    const file = (m[2] || m[1] || '').trim()
+    if (file && file !== '/dev/null') files.add(file)
+  }
+  return [...files]
+}
+
+function validatePatchFiles(cfg: AppConfig, root: string, files: string[]): string[] {
+  const warnings: string[] = []
+  for (const file of files) {
+    if (isAbsolute(file) || file.split(/[\\/]/).includes('..')) {
+      warnings.push(`path recusado: ${file}`)
+      continue
+    }
+    try {
+      resolveCodeFile(cfg, root, file)
+    } catch (e) {
+      warnings.push(e instanceof Error ? e.message : String(e))
+    }
+  }
+  return warnings
+}
+
+export function previewCodePatch(cfg: AppConfig, opts: { root?: string; diff?: unknown; patches?: unknown }): CodePatchPreview {
+  const root = resolveCodeWorkspace(cfg, opts.root)
+  const diff = patchDiff(opts)
+  const textOps = textPatches(opts)
+  const files = diff ? diffFiles(diff) : textOps.map((p) => p.file)
+  const warnings = validatePatchFiles(cfg, root, files)
+  const additions = diff
+    ? diff.split(/\r?\n/).filter((line) => line.startsWith('+') && !line.startsWith('+++')).length
+    : textOps.reduce((n, p) => n + (p.content ? p.content.split(/\r?\n/).length : String(p.replace || '').split(/\r?\n/).length), 0)
+  const deletions = diff
+    ? diff.split(/\r?\n/).filter((line) => line.startsWith('-') && !line.startsWith('---')).length
+    : textOps.reduce((n, p) => n + (p.content ? 0 : String(p.find || '').split(/\r?\n/).length), 0)
+
+  let canApply = warnings.length === 0 && files.length > 0
+  if (diff && canApply) {
+    const check = spawnSync('git', ['-C', root, 'apply', '--check', '--whitespace=nowarn', '-'], {
+      input: diff,
+      encoding: 'utf8',
+      timeout: 10000
+    })
+    if (check.status !== 0) {
+      canApply = false
+      warnings.push(String(check.stderr || check.stdout || 'git apply --check falhou').trim())
+    }
+  }
+  if (!diff && textOps.length) {
+    for (const op of textOps) {
+      const abs = resolveCodeFile(cfg, root, op.file)
+      if (!existsSync(abs)) {
+        canApply = false
+        warnings.push(`arquivo não encontrado: ${op.file}`)
+        continue
+      }
+      const current = readFileSync(abs, 'utf8')
+      if (op.find !== undefined && !current.includes(op.find)) {
+        canApply = false
+        warnings.push(`trecho não encontrado em ${op.file}`)
+      }
+    }
+  }
+  return { root, files, additions, deletions, canApply, warnings }
+}
+
+export function applyCodePatch(cfg: AppConfig, opts: { root?: string; diff?: unknown; patches?: unknown }): CodePatchApplyResult {
+  if (!codeConfig(cfg).allowPatchApply) throw new Error('Aplicação de patches desativada nas Configurações.')
+  const preview = previewCodePatch(cfg, opts)
+  if (!preview.canApply) return { ...preview, applied: false, output: preview.warnings.join('\n') }
+  const diff = patchDiff(opts)
+  if (diff) {
+    const res = spawnSync('git', ['-C', preview.root, 'apply', '--whitespace=nowarn', '-'], {
+      input: diff,
+      encoding: 'utf8',
+      timeout: 10000
+    })
+    return {
+      ...preview,
+      applied: res.status === 0,
+      output: String(res.stderr || res.stdout || (res.status === 0 ? 'patch aplicado' : 'falha ao aplicar patch')).trim()
+    }
+  }
+  for (const op of textPatches(opts)) {
+    const abs = resolveCodeFile(cfg, preview.root, op.file)
+    const current = existsSync(abs) ? readFileSync(abs, 'utf8') : ''
+    const next =
+      op.content !== undefined
+        ? op.content
+        : op.all
+          ? current.split(op.find || '').join(op.replace || '')
+          : current.replace(op.find || '', op.replace || '')
+    writeFileSync(abs, next, 'utf8')
+  }
+  return { ...preview, applied: true, output: 'patch textual aplicado' }
 }

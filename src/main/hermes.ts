@@ -8,6 +8,7 @@ export interface HermesExecuteResult {
   status: number
   latencyMs: number
   sessionId?: string
+  structured?: unknown
 }
 
 export interface HermesCodeTaskPayload {
@@ -119,6 +120,27 @@ export function extractHermesReply(body: string, responsePath = ''): string {
   }
 }
 
+function extractHermesCodeResponse(body: string, responsePath = ''): { reply: string; structured?: unknown } {
+  const text = String(body || '').trim()
+  if (!text) return { reply: '' }
+  try {
+    const json = JSON.parse(text)
+    const hasStructured =
+      json &&
+      typeof json === 'object' &&
+      (Array.isArray(json.patches) ||
+        Array.isArray(json.tests) ||
+        Array.isArray(json.risks) ||
+        Array.isArray(json.commands) ||
+        typeof json.diff === 'string' ||
+        typeof json.summary === 'string')
+    const reply = typeof json.summary === 'string' ? json.summary : extractHermesReply(text, responsePath)
+    return hasStructured ? { reply, structured: json } : { reply }
+  } catch {
+    return { reply: text }
+  }
+}
+
 export async function hermesExecute(
   configOrBaseUrl: Partial<HermesConfig> | string,
   comando: string,
@@ -218,9 +240,9 @@ export async function hermesCodeTask(
   }
   if (!res.ok) throw new Error(`Hermes Code respondeu HTTP ${res.status}: ${raw.slice(0, 240) || 'sem corpo'}`)
 
-  const reply = extractHermesReply(raw, cfg.responsePath)
+  const { reply, structured } = extractHermesCodeResponse(raw, cfg.responsePath)
   if (!reply) throw new Error('Hermes Code respondeu sem texto útil.')
-  return { reply, endpoint, status: res.status, latencyMs: Date.now() - started, sessionId }
+  return { reply, endpoint, status: res.status, latencyMs: Date.now() - started, sessionId, structured }
 }
 
 export async function pingHermes(input: Partial<HermesConfig>): Promise<HermesStatus> {

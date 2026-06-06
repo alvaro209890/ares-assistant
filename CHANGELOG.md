@@ -4,6 +4,74 @@ Todas as mudanças relevantes do Ares. O formato segue de perto
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/) e o projeto usa
 versionamento semântico.
 
+## [0.7.0] — 2026-06-06
+
+Foco: dar ao Ares um **terminal de verdade** integrado ao modo programador, com
+**autorização por voz** e uma persona técnica de engenheiro sênior.
+
+### Adicionado
+
+- **Terminal completo (`codigo.terminal`)** — executa comandos via shell real
+  (`bash -lc`), com pipes, `&&`, `||` e redirecionamento. Não substitui a
+  allowlist: complementa-a para "qualquer outro comando", sempre sob controle de
+  segurança.
+- **Classificação em três camadas (`classifyCommand`)**:
+  - `allowed`: comandos da allowlist ou prefixos seguros (`terminalSafe`) rodam
+    direto;
+  - `confirm`: qualquer outro comando exige autorização explícita do usuário;
+  - `blocked`: padrões catastróficos ou de elevação de privilégio (`sudo`/`su`,
+    `rm -rf` de raiz/HOME, `mkfs`, `dd` em disco, `shutdown`/`reboot`, fork bomb,
+    `curl … | sh`) nunca rodam, nem com autorização.
+- **Fluxo de autorização por voz** — `codigo.terminal` sem `confirmado` devolve
+  `requiresApproval` e guarda o comando como pendência da sessão
+  (`src/main/pending.ts`, com expiração de 10 min). O Ares anuncia o comando e
+  pede o "sim"; `codigo.confirmar` executa a pendência e `codigo.cancelar` a
+  descarta.
+- **Persona de programação** — em código, o Ares age como engenheiro sênior:
+  técnico e claro, resume em vez de despejar logs/código, cita arquivo:linha e
+  **pede autorização** antes de alterar o sistema, instalar dependências ou mexer
+  no Git.
+- **Configuração do terminal** — `terminalEnabled`, `terminalAutoApprove` e
+  `terminalSafe` em `integrations.code`, com controles nas Configurações e estado
+  na tela Sistema.
+
+### Testes
+
+- `tests/code.test.ts`: classificação allowed/confirm/blocked, autorização e
+  execução pós-aprovação, bloqueio de comandos catastróficos mesmo aprovados,
+  desligamento do terminal e store de pendências por sessão (25 testes no total).
+
+## [0.6.0] — 2026-06-06
+
+Foco: fechar o ciclo de programação com **patch preview**, comandos controlados,
+índice persistente e resposta estruturada do Hermes Code.
+
+### Adicionado
+
+- **Contrato estruturado do Hermes Code** — respostas com `summary`, `patches`,
+  `tests`, `risks`, `commands` ou `diff` são preservadas em `structured`, além da
+  fala resumida.
+- **Preview e aplicação segura de patches**:
+  - `codigo.patch.preview` valida paths, conta adições/remoções e roda
+    `git apply --check` quando recebe diff.
+  - `codigo.patch.aplicar` aplica diff/text patch apenas quando
+    `integrations.code.allowPatchApply` está ligado.
+- **Comandos de desenvolvimento controlados** — `codigo.comando` executa só
+  comandos presentes em `integrations.code.allowedCommands`, sem shell e com
+  timeout.
+- **Ferramentas Git locais** — `codigo.git` consulta `status`, `diff`, `diffStat`
+  e `log` sem alterar o repositório.
+- **Índice persistente de projeto** — `codigo.indexar` salva índice em
+  `~/.config/ares/code-indexes/` com arquivos, linguagens, exports, scripts e Git.
+- **Configuração avançada de programação** — allowlist de comandos, timeout,
+  limite do índice e permissão explícita para aplicar patches.
+
+### Testes
+
+- `tests/code.test.ts`: comandos permitidos/bloqueados, Git, índice persistente e
+  preview/aplicação de patch textual.
+- `tests/hermes.test.ts`: preservação de resposta estruturada do Hermes Code.
+
 ## [0.5.0] — 2026-06-06
 
 Foco: deixar o Ares muito mais forte para **programação**, com contexto local de

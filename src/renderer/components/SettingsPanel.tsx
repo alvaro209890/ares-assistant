@@ -488,6 +488,44 @@ export default function SettingsPanel(): JSX.Element {
                   />
                 </Field>
               </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Timeout comandos (ms)">
+                  <input
+                    className="input"
+                    type="number"
+                    min={5000}
+                    max={600000}
+                    step={5000}
+                    value={config.integrations.code.commandTimeoutMs}
+                    onChange={(e) =>
+                      saveConfig({
+                        integrations: {
+                          ...config.integrations,
+                          code: { ...config.integrations.code, commandTimeoutMs: Number(e.target.value) || 120000 }
+                        }
+                      })
+                    }
+                  />
+                </Field>
+                <Field label="Arquivos no índice">
+                  <input
+                    className="input"
+                    type="number"
+                    min={20}
+                    max={5000}
+                    step={20}
+                    value={config.integrations.code.indexMaxFiles}
+                    onChange={(e) =>
+                      saveConfig({
+                        integrations: {
+                          ...config.integrations,
+                          code: { ...config.integrations.code, indexMaxFiles: Number(e.target.value) || 600 }
+                        }
+                      })
+                    }
+                  />
+                </Field>
+              </div>
               <Field label="Contexto Hermes (chars)">
                 <input
                   className="input"
@@ -506,9 +544,71 @@ export default function SettingsPanel(): JSX.Element {
                   }
                 />
               </Field>
+              <Field label="Comandos permitidos">
+                <textarea
+                  className="input min-h-28 resize-y"
+                  value={config.integrations.code.allowedCommands.join('\n')}
+                  onChange={(e) =>
+                    saveConfig({
+                      integrations: {
+                        ...config.integrations,
+                        code: {
+                          ...config.integrations.code,
+                          allowedCommands: e.target.value
+                            .split('\n')
+                            .map((x) => x.trim())
+                            .filter(Boolean)
+                        }
+                      }
+                    })
+                  }
+                />
+              </Field>
+              <Toggle
+                label="Permitir aplicar patches"
+                checked={config.integrations.code.allowPatchApply}
+                onChange={(v) =>
+                  saveConfig({ integrations: { ...config.integrations, code: { ...config.integrations.code, allowPatchApply: v } } })
+                }
+              />
+              <Toggle
+                label="Terminal completo (com autorização)"
+                checked={config.integrations.code.terminalEnabled}
+                onChange={(v) =>
+                  saveConfig({ integrations: { ...config.integrations, code: { ...config.integrations.code, terminalEnabled: v } } })
+                }
+              />
+              <Toggle
+                label="Auto-autorizar comandos (avançado)"
+                checked={config.integrations.code.terminalAutoApprove}
+                onChange={(v) =>
+                  saveConfig({ integrations: { ...config.integrations, code: { ...config.integrations.code, terminalAutoApprove: v } } })
+                }
+              />
+              <Field label="Comandos seguros (rodam sem pedir)">
+                <textarea
+                  className="input min-h-28 resize-y"
+                  value={config.integrations.code.terminalSafe.join('\n')}
+                  onChange={(e) =>
+                    saveConfig({
+                      integrations: {
+                        ...config.integrations,
+                        code: {
+                          ...config.integrations.code,
+                          terminalSafe: e.target.value
+                            .split('\n')
+                            .map((x) => x.trim())
+                            .filter(Boolean)
+                        }
+                      }
+                    })
+                  }
+                />
+              </Field>
               <p className="text-[11px] text-cyan-200/45">
-                O Ares lê e busca código localmente em modo somente leitura. Análise profunda, edição e refatoração são
-                enviadas ao Hermes Code com contexto limitado.
+                O Ares lê e busca código localmente. Comandos da allowlist e os "seguros" rodam direto; qualquer outro comando do
+                terminal exige sua autorização por voz. Comandos catastróficos (sudo, apagar raiz, formatar disco) são sempre
+                bloqueados. Patches só são aplicados quando a permissão estiver ligada.
               </p>
             </Section>
 

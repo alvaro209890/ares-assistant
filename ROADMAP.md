@@ -18,6 +18,15 @@ conhecimento técnico), com o motivo de cada uma.
 > ao vivo + painel na tela Sistema) com ferramenta de voz `sistema.status`, e ✅
 > **consciência da área de transferência** (`area.ler`) para resumir/traduzir/explicar
 > o que o usuário copiou. Detalhes em [`CHANGELOG.md`](CHANGELOG.md).
+>
+> **Versões 0.5–0.6 (entregues):** ✅ **modo programador** (`codigo.workspace`,
+> `codigo.buscar`, `codigo.ler`), ✅ **Hermes Code** (`codigo.hermes` com fallback),
+> ✅ **patch preview/aplicação** e ✅ **comandos de dev com allowlist, Git e índice**.
+>
+> **Versão 0.7 (entregue):** ✅ **terminal completo com autorização por voz**
+> (`codigo.terminal` via shell, classificação allowed/confirm/blocked,
+> `codigo.confirmar`/`codigo.cancelar`) e ✅ **persona de engenheiro sênior** que
+> pede autorização antes de alterar o sistema. Detalhes em [`CHANGELOG.md`](CHANGELOG.md).
 
 Legenda de esforço: 🟢 baixo · 🟡 médio · 🔴 alto. ✅ = já implementado.
 
@@ -173,6 +182,20 @@ de ações externas sensíveis e suporte a múltiplos perfis/endpoints Hermes.
 
 Próximos incrementos possíveis: preview visual de diffs vindos do Hermes Code,
 confirmação explícita antes de aplicar patches e histórico de análises por projeto.
+
+### Programação implementada na versão 0.6
+
+- Contrato estruturado do Hermes Code preserva `summary`, `patches`, `tests`,
+  `risks`, `commands` e `diff`.
+- `codigo.patch.preview` e `codigo.patch.aplicar` implementam fluxo de patch
+  controlado por configuração.
+- `codigo.comando` executa comandos de dev com allowlist e timeout.
+- `codigo.git` consulta status/diff/log local.
+- `codigo.indexar` cria índice persistente por projeto.
+
+Próximos incrementos possíveis: UI visual de diff com botão aplicar/reverter,
+histórico por projeto na interface e aplicação automática de planos multi-step com
+checkpoint Git.
 
 ### Alternativas consideradas
 

@@ -39,6 +39,13 @@ export interface AppConfig {
       maxFileKB: number
       maxSearchResults: number
       maxContextChars: number
+      allowedCommands: string[]
+      commandTimeoutMs: number
+      allowPatchApply: boolean
+      indexMaxFiles: number
+      terminalEnabled: boolean // habilita o terminal completo (shell) com autorização
+      terminalAutoApprove: boolean // true = roda comandos "confirm" sem pedir (avançado)
+      terminalSafe: string[] // prefixos de comando que rodam direto, sem autorização
     }
   }
   ui: {
@@ -342,6 +349,62 @@ export interface CodeHermesResult {
   latencyMs: number
   sessionId?: string
   fallback?: boolean
+  structured?: unknown
+}
+
+export interface CodeCommandResult {
+  root: string
+  command: string
+  ok: boolean
+  code: number | null
+  stdout: string
+  stderr: string
+  durationMs: number
+}
+
+// Camada de segurança do terminal: cada comando é classificado antes de rodar.
+export type CommandTier = 'allowed' | 'confirm' | 'blocked'
+
+export interface CommandClassification {
+  tier: CommandTier
+  reason: string
+}
+
+export interface CodeTerminalResult {
+  root: string
+  command: string
+  tier: CommandTier
+  requiresApproval: boolean // true = não executou; aguardando autorização do usuário
+  ran: boolean
+  ok: boolean
+  code: number | null
+  stdout: string
+  stderr: string
+  durationMs: number
+  reason: string // motivo do bloqueio ou da necessidade de confirmação
+}
+
+export interface CodePatchPreview {
+  root: string
+  files: string[]
+  additions: number
+  deletions: number
+  canApply: boolean
+  warnings: string[]
+}
+
+export interface CodePatchApplyResult extends CodePatchPreview {
+  applied: boolean
+  output: string
+}
+
+export interface CodeProjectIndex {
+  root: string
+  generatedAt: number
+  fileCount: number
+  files: Array<{ file: string; language: string; bytes: number; lines: number; exports: string[] }>
+  scripts?: Record<string, string>
+  git?: CodeWorkspaceSummary['git']
 }
 
 export interface TtsStatus {

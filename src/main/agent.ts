@@ -33,14 +33,28 @@ import {
 import { getWeather, getWeatherAt, getNews, webSearch, calcExpression, convertCurrency, convertUnit, readPage, hermesExecute } from './tools'
 import { getSystemMetrics, readClipboard } from './system'
 import { buildBriefing, briefingToSpeech } from './briefing'
-import { codePromptContext, delegateCodeToHermes, readCodeFile, searchCode, summarizeCodeWorkspace } from './code'
+import {
+  applyCodePatch,
+  buildCodeIndex,
+  codePromptContext,
+  delegateCodeToHermes,
+  previewCodePatch,
+  readCodeFile,
+  runCodeCommand,
+  runCodeGit,
+  runCodeTerminal,
+  searchCode,
+  summarizeCodeWorkspace
+} from './code'
+import { clearPendingCode, getPendingCode, setPendingCode } from './pending'
 
 const norm = (s: unknown) => String(s ?? '').toLowerCase().trim()
 const uid = (p: string) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
 const asCategory = (c: unknown): MemoryCategory | undefined =>
   MEMORY_CATEGORIES.includes(c as MemoryCategory) ? (c as MemoryCategory) : undefined
 
-const PERSONA = `Você é o Ares, assistente de IA pessoal inspirado no JARVIS. Fala português do Brasil de forma educada, elegante, levemente espirituosa e muito competente. Trata o usuário com respeito (pode chamar de "senhor" com sutileza, sem repetir a cada frase). Seja natural e direto, nunca robótico. Use o CONTEXTO (memória, agenda, tarefas, localização) para responder de forma pessoal e útil, sem repetir dados que o usuário não pediu.`
+const PERSONA = `Você é o Ares, assistente de IA pessoal inspirado no JARVIS. Fala português do Brasil de forma educada, elegante, levemente espirituosa e muito competente. Trata o usuário com respeito (pode chamar de "senhor" com sutileza, sem repetir a cada frase). Seja natural e direto, nunca robótico. Use o CONTEXTO (memória, agenda, tarefas, localização) para responder de forma pessoal e útil, sem repetir dados que o usuário não pediu.
+Em assuntos de programação você é um engenheiro de software sênior: fala com precisão técnica mas em linguagem clara e falável, sem ler código longo nem despejar logs inteiros — resume e cita arquivo:linha. ANTES de executar no terminal qualquer comando que altere o sistema, instale dependências, crie/apague arquivos ou mexa no Git (commit/push), você PEDE AUTORIZAÇÃO ao usuário de forma natural ("Senhor, isso vai rodar tal comando — autoriza?") e só age após o aceite. Nunca tenta burlar bloqueios de segurança nem usar sudo.`
 
 const VOICE_HINT =
   'A resposta será OUVIDA em voz alta: seja MUITO conciso (1-2 frases), sem listas, sem markdown, sem URLs longas. Diga o essencial.'
@@ -90,11 +104,26 @@ FERRAMENTAS DE CONSULTA (dê uma fala curta tipo "Deixe-me verificar." e AGUARDE
 - codigo.buscar {path?, consulta, filtro?}   (busca texto/símbolo no código; use antes de explicar funções ou localizar implementação)
 - codigo.ler {path?, arquivo, inicio?, linhas?}   (lê trecho de arquivo local com números de linha; use para responder com precisão)
 - codigo.hermes {tarefa, modo?(review|edit|debug|tests|refactor|explain), path?, arquivos?}   (envia tarefa de programação ao Hermes Code com contexto local; use para análise profunda, edição, refatoração, correção de bug ou plano de testes)
+- codigo.comando {path?, comando}   (executa comando de dev da allowlist, sem shell, com timeout; use para testes/build/typecheck)
+- codigo.terminal {path?, comando, confirmado?}   (TERMINAL completo via shell, com pipes/&&/redirecionamento. Comando seguro/allowlist roda direto; qualquer outro EXIGE autorização: chame SEM "confirmado" para propor — vem requiresApproval — explique e peça o "sim"; comandos catastróficos/sudo são bloqueados)
+- codigo.confirmar {}   (executa a ação que ficou pendente de autorização, DEPOIS que o usuário disser sim/autorizo/pode)
+- codigo.cancelar {}   (descarta a ação pendente quando o usuário recusar)
+- codigo.git {path?, operacao(status|diff|diffStat|log), arquivo?}   (consulta Git local sem alterar repo)
+- codigo.indexar {path?, refresh?(bool)}   (gera/lê índice persistente de arquivos, exports e scripts do projeto)
+- codigo.patch.preview {path?, diff?, patches?}   (valida e resume patch antes de aplicar; use sempre antes de aplicação)
+- codigo.patch.aplicar {path?, diff?, patches?}   (aplica patch apenas se habilitado e já confirmado pelo usuário)
 - hermes.executar {comando}   (delegue ao Hermes pedidos externos que são dele: WhatsApp, Trello, Obsidian, office de agentes, Pedro/Junim/Maicom ou automações já existentes no Hermes)
 
 MODO PROGRAMADOR:
 - Para perguntas de código, não chute: use codigo.workspace/codigo.buscar/codigo.ler quando houver path, arquivo, símbolo ou repo mencionado.
 - Se o usuário pedir edição/refatoração/debug/testes em projeto real, reúna contexto local e use codigo.hermes; o Hermes deve receber tarefa objetiva, modo e arquivos relevantes.
+- Para patches do Hermes Code, primeiro use codigo.patch.preview. Só use codigo.patch.aplicar se o usuário pedir claramente para aplicar e a config permitir.
+- Para validar mudanças, use codigo.comando com scripts permitidos (ex.: npm test, npm run build, npm run typecheck) e reporte stdout/stderr relevantes.
+- TERMINAL: para testes/build padrão prefira codigo.comando; para QUALQUER outro comando (instalar dependência, criar/editar arquivo, git add/commit/push, rodar script próprio) use codigo.terminal.
+- AUTORIZAÇÃO: se codigo.terminal devolver requiresApproval, NÃO repita a chamada nem invente que rodou. Diga em voz natural exatamente o comando que será executado e por quê, e peça confirmação. Quando o usuário autorizar, chame codigo.confirmar; se recusar, chame codigo.cancelar. Só anuncie um resultado depois que "ran" for true.
+- SEGURANÇA: comandos bloqueados (sudo, rm -rf de raiz/HOME, formatar disco etc.) não rodam de jeito nenhum — explique que é por segurança, não tente contornar.
+- Ao rodar comandos, reporte o código de saída e só o essencial do stdout/stderr; não leia saídas longas inteiras em voz.
+- Para estado do repo, use codigo.git em vez de inventar status/diff.
 - Sem path explícito, use o workspace padrão de programação. Se o pedido depender de um repo específico e o contexto não deixar claro, peça o path.
 - Explique respostas de código com referências de arquivo/linha quando a ferramenta devolver linhas.
 
@@ -254,6 +283,72 @@ async function runQuery(a: Acao, cfg: AppConfig, sessionId: string): Promise<unk
           })
         }
       }
+      case 'codigo.comando':
+        return {
+          tipo: a.tipo,
+          resultado: runCodeCommand(cfg, {
+            root: String(a.path || a.raiz || a.workspace || ''),
+            command: String(a.comando || a.command || '')
+          })
+        }
+      case 'codigo.terminal': {
+        const root = String(a.path || a.raiz || a.workspace || '')
+        const approved = a.confirmado === true || a.autorizado === true || a.confirm === true || a.approved === true
+        const result = runCodeTerminal(cfg, { root, command: String(a.comando || a.command || ''), approved })
+        if (result.requiresApproval) {
+          setPendingCode(sessionId, { kind: 'terminal', command: result.command, root, reason: result.reason })
+        } else if (result.ran) {
+          clearPendingCode(sessionId)
+        }
+        return { tipo: a.tipo, resultado: result }
+      }
+      case 'codigo.confirmar': {
+        const pend = getPendingCode(sessionId)
+        if (!pend) return { tipo: a.tipo, erro: 'Não há nenhum comando pendente de autorização.' }
+        const result = runCodeTerminal(cfg, { root: pend.root, command: pend.command, approved: true })
+        if (result.ran) clearPendingCode(sessionId)
+        return { tipo: a.tipo, resultado: result }
+      }
+      case 'codigo.cancelar': {
+        const had = !!getPendingCode(sessionId)
+        clearPendingCode(sessionId)
+        return { tipo: a.tipo, resultado: { cancelado: had, mensagem: had ? 'comando pendente descartado' : 'nada pendente' } }
+      }
+      case 'codigo.git':
+        return {
+          tipo: a.tipo,
+          resultado: runCodeGit(cfg, {
+            root: String(a.path || a.raiz || a.workspace || ''),
+            operation: String(a.operacao || a.operation || 'status'),
+            file: a.arquivo || a.file ? String(a.arquivo || a.file) : undefined
+          })
+        }
+      case 'codigo.indexar':
+        return {
+          tipo: a.tipo,
+          resultado: buildCodeIndex(cfg, {
+            root: String(a.path || a.raiz || a.workspace || ''),
+            refresh: a.refresh === true || a.atualizar === true
+          })
+        }
+      case 'codigo.patch.preview':
+        return {
+          tipo: a.tipo,
+          resultado: previewCodePatch(cfg, {
+            root: String(a.path || a.raiz || a.workspace || ''),
+            diff: a.diff,
+            patches: a.patches
+          })
+        }
+      case 'codigo.patch.aplicar':
+        return {
+          tipo: a.tipo,
+          resultado: applyCodePatch(cfg, {
+            root: String(a.path || a.raiz || a.workspace || ''),
+            diff: a.diff,
+            patches: a.patches
+          })
+        }
       case 'hermes.executar': {
         if (!integrations.hermes?.enabled) return { tipo: a.tipo, erro: 'Ponte com o Hermes desativada nas Configurações.' }
         return { tipo: a.tipo, resultado: await hermesExecute(integrations.hermes, String(a.comando || a.texto || ''), sessionId) }

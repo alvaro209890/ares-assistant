@@ -23,6 +23,14 @@ export const QUERY_TOOLS = new Set([
   'codigo.buscar',
   'codigo.ler',
   'codigo.hermes',
+  'codigo.comando',
+  'codigo.terminal',
+  'codigo.confirmar',
+  'codigo.cancelar',
+  'codigo.git',
+  'codigo.indexar',
+  'codigo.patch.preview',
+  'codigo.patch.aplicar',
   'hermes.executar'
 ])
 

@@ -22,7 +22,7 @@ O projeto roda em modo de desenvolvimento. O empacotamento `.deb` está configur
 - **Briefing do dia**: painel e comando de voz com clima, agenda, tarefas vencidas/próximas, lembretes, notícias e sugestões proativas discretas.
 - **Kanban e calendário**: etiquetas nomeadas, links/anexos locais, tarefas e eventos recorrentes, lembrete configurável antes do evento, visões “Hoje”, “Vencidas”, “Próximos 7 dias” e agenda por dia/semana.
 - **Conversa contínua melhor**: sensibilidade do microfone, tempo de silêncio e pausa pós-fala configuráveis (evita que o Ares escute a própria voz).
-- **Modo Programador**: resumo de workspace, busca e leitura local de código, com delegação ao Hermes Code para análise profunda, edição, debug, testes e refatoração.
+- **Modo Programador**: resumo de workspace, busca e leitura local de código, **terminal completo com autorização por voz** e delegação ao Hermes Code para análise profunda, edição, debug, testes e refatoração.
 - **Ponte com o Hermes**: delegação por voz para WhatsApp, Trello, Obsidian, office de agentes e automações externas do Hermes.
 - **Tela Sistema/Diagnóstico**: status do 9 Router, Hermes, Groq, Piper, localização, arquivos de dados locais e versões do app.
 
@@ -32,6 +32,20 @@ O projeto roda em modo de desenvolvimento. O empacotamento `.deb` está configur
 - **Palavra de ativação ("Ares")**: na conversa contínua, opcionalmente só responde quando você começa pela palavra-chave (ex.: "Ares, que horas são?"). Diga só "Ares" para ele confirmar e aguardar o comando.
 - **Orbe flutuante (companion)**: uma mini-orbe always-on-top que reflete o estado do Ares; clique para abrir o app, ou use o microfone dela para falar sem trazer a janela principal.
 - **Barge-in (interromper a fala)**: na conversa contínua, comece a falar por cima e o Ares para na hora e te ouve; a tecla `Esc` também interrompe a fala a qualquer momento.
+
+### Novidades da versão 0.7
+
+- **Terminal de verdade com autorização por voz**: `codigo.terminal` roda comandos via shell (pipes, `&&`, redirecionamento). Comandos seguros rodam direto; qualquer outro o Ares descreve e pede o "sim" antes de executar (`codigo.confirmar`/`codigo.cancelar`).
+- **Três camadas de segurança**: `classifyCommand` separa comandos em **allowed** (rodam direto), **confirm** (pedem autorização) e **blocked** (catastróficos/`sudo` — nunca rodam, nem aprovados).
+- **Persona de engenheiro sênior**: ao falar de programação, o Ares é técnico e claro, resume em vez de ler logs/código longos, cita arquivo:linha e sempre pede autorização antes de alterar o sistema, instalar dependências ou mexer no Git.
+- **Configurável**: `terminalEnabled`, `terminalAutoApprove` e `terminalSafe` nas Configurações; pendência de autorização por sessão (`src/main/pending.ts`) com expiração.
+
+### Novidades da versão 0.6
+
+- **Patch preview/aplicação controlada**: `codigo.patch.preview` valida patches e `codigo.patch.aplicar` só aplica quando permitido nas Configurações.
+- **Comandos de dev com allowlist**: `codigo.comando` roda apenas comandos permitidos, sem shell e com timeout.
+- **Git e índice de projeto**: `codigo.git` consulta status/diff/log e `codigo.indexar` cria índice persistente do projeto.
+- **Hermes Code estruturado**: respostas com `summary`, `patches`, `tests`, `risks`, `commands` e `diff` são preservadas para fluxo de edição/teste.
 
 ### Novidades da versão 0.5
 
@@ -176,6 +190,13 @@ Campos principais:
 | `integrations.code.maxFileKB` | tamanho máximo de arquivo lido |
 | `integrations.code.maxSearchResults` | limite de resultados por busca |
 | `integrations.code.maxContextChars` | limite de contexto enviado ao Hermes Code |
+| `integrations.code.allowedCommands` | comandos de desenvolvimento que o Ares pode executar |
+| `integrations.code.commandTimeoutMs` | timeout dos comandos allowlistados |
+| `integrations.code.allowPatchApply` | permite aplicação local de patches após preview/confirmação |
+| `integrations.code.indexMaxFiles` | limite de arquivos no índice persistente |
+| `integrations.code.terminalEnabled` | ativa o terminal completo (`codigo.terminal`) com autorização |
+| `integrations.code.terminalAutoApprove` | roda comandos que exigiriam autorização sem perguntar (avançado) |
+| `integrations.code.terminalSafe` | prefixos de comando que rodam direto, sem pedir autorização |
 | `ui.continuousMode` | mantém o modo de conversa contínua ativo entre reinícios |
 | `ui.micSensitivity` | 0..1 — quanto maior, mais sensível o microfone na conversa contínua |
 | `ui.silenceMs` | tempo de silêncio (ms) para encerrar a fala no modo contínuo |
@@ -470,8 +491,27 @@ O Ares agora tem ferramentas locais read-only para entender projetos antes de re
 - `codigo.buscar {path?, consulta, filtro?}`: localiza texto, símbolos ou chamadas em arquivos.
 - `codigo.ler {path?, arquivo, inicio?, linhas?}`: lê trechos com números de linha.
 - `codigo.hermes {tarefa, modo, path?, arquivos?}`: delega análise profunda, edição, debug, testes e refatoração ao Hermes Code.
+- `codigo.comando {path?, comando}`: executa comando de dev permitido pela allowlist (sem shell).
+- `codigo.terminal {path?, comando, confirmado?}`: terminal completo via shell (pipes, `&&`, redirecionamento) com autorização por voz.
+- `codigo.confirmar {}` / `codigo.cancelar {}`: autoriza ou descarta o comando que ficou pendente.
+- `codigo.git {path?, operacao, arquivo?}`: consulta status, diff, diffStat ou log.
+- `codigo.indexar {path?, refresh?}`: gera/lê índice persistente de projeto.
+- `codigo.patch.preview {path?, diff?, patches?}`: valida patch antes da aplicação.
+- `codigo.patch.aplicar {path?, diff?, patches?}`: aplica patch se a configuração permitir.
 
-As leituras ficam limitadas a `integrations.code.allowedRoots`, e o Ares não aplica edições locais diretamente por essas ferramentas. Quando o usuário pede alteração de código, o agente monta contexto local e envia ao Hermes pela rota `integrations.hermes.codePath` (`/code` por padrão). Se o Hermes ainda não tiver essa rota, o Ares faz fallback para `messagePath` com um payload textual marcado como `[ARES_CODE_TASK]`.
+As leituras ficam limitadas a `integrations.code.allowedRoots`. Quando o usuário pede alteração de código, o agente monta contexto local e envia ao Hermes pela rota `integrations.hermes.codePath` (`/code` por padrão). Se o Hermes ainda não tiver essa rota, o Ares faz fallback para `messagePath` com um payload textual marcado como `[ARES_CODE_TASK]`.
+
+### Terminal com autorização
+
+`codigo.terminal` dá ao Ares um terminal de verdade (roda via `bash -lc`), classificando cada comando em três camadas:
+
+- **roda direto**: comandos da allowlist ou prefixos seguros (`terminalSafe`, em geral leitura/inspeção);
+- **pede autorização**: qualquer outro comando — instalar dependência, criar/editar arquivo, `git commit`/`push`, scripts próprios. O Ares descreve o comando em voz e aguarda o "sim" (`codigo.confirmar`) ou a recusa (`codigo.cancelar`);
+- **sempre bloqueado**: `sudo`/`su`, `rm -rf` de raiz/HOME, `mkfs`, `dd` em disco, `shutdown`/`reboot`, fork bomb, `curl … | sh` — não rodam nem com autorização.
+
+Com `terminalAutoApprove` ligado, a camada "pede autorização" roda sem perguntar (a bloqueada continua bloqueada). A pendência de autorização vale por 10 minutos e fica guardada por sessão.
+
+Para edição segura via Hermes, o fluxo recomendado é: Hermes Code devolve patch estruturado, Ares roda `codigo.patch.preview`, usuário confirma, Ares aplica com `codigo.patch.aplicar` se `allowPatchApply` estiver ligado, e valida com `codigo.comando` (`npm test`, `npm run build`, `npm run typecheck` ou outro comando permitido).
 
 Detalhes completos: [`docs/PROGRAMACAO.md`](docs/PROGRAMACAO.md).
 
@@ -645,6 +685,11 @@ Ferramentas de consulta:
 - `codigo.buscar` `{path?, consulta, filtro?}` (busca texto/símbolos no código)
 - `codigo.ler` `{path?, arquivo, inicio?, linhas?}` (lê trecho de arquivo)
 - `codigo.hermes` `{tarefa, modo?, path?, arquivos?}` (delega análise/edição/debug/testes/refatoração ao Hermes Code)
+- `codigo.comando` `{path?, comando}` (executa comando de dev permitido)
+- `codigo.git` `{path?, operacao(status|diff|diffStat|log), arquivo?}` (consulta Git local)
+- `codigo.indexar` `{path?, refresh?}` (gera/lê índice persistente do projeto)
+- `codigo.patch.preview` `{path?, diff?, patches?}` (valida patch)
+- `codigo.patch.aplicar` `{path?, diff?, patches?}` (aplica patch se habilitado)
 - `hermes.executar` `{comando}` (delega comandos externos ao Hermes; só age com a ponte ativada)
 
 As ferramentas de consulta são executadas pelo processo principal. O resultado volta ao LLM para gerar a resposta final em linguagem natural.
@@ -681,6 +726,9 @@ Com a palavra de ativação ligada, comece pela palavra (ex.: "**Ares**, faça m
 - "procure onde fica a função hermesCodeTask"
 - "leia src/main/agent.ts e explique o roteamento de ferramentas"
 - "peça ao Hermes Code para revisar a ponte de programação"
+- "rode npm test neste projeto"
+- "mostre o diff atual"
+- "faça preview do patch que o Hermes sugeriu"
 - "mande no WhatsApp pelo Hermes que vou atrasar 10 minutos"
 - "peça ao Hermes para criar um card no Trello do projeto Ares"
 - "crie uma tarefa semanal de regar as plantas" / "mova comprar café para concluído"
@@ -696,6 +744,8 @@ Com a palavra de ativação ligada, comece pela palavra (ex.: "**Ares**, faça m
 - A auto-extração de memória é local e respeita `memory.autoExtract`; com `memory.autoApprove` desligado, nada é salvo sem você revisar.
 - Chave Groq e config real ficam fora do Git.
 - Ferramentas locais de programação são somente leitura e respeitam `integrations.code.allowedRoots`.
+- Comandos de programação são executados sem shell e precisam estar em `integrations.code.allowedCommands`.
+- Aplicação local de patches exige `integrations.code.allowPatchApply`.
 - Contexto enviado ao Hermes Code é limitado por `integrations.code.maxContextChars`.
 - `contextIsolation` ligado e `nodeIntegration` desativado no renderer.
 - O renderer acessa Electron apenas por `window.ares` (IPC tipado no preload); chaves nunca são expostas ao renderer.
@@ -725,6 +775,8 @@ Os arquivos locais antigos continuam funcionando. Campos novos são preenchidos 
 - **Hermes indisponível**: confira Configurações > Ponte com o Hermes, rode **TESTAR PONTE** e veja a tela Sistema. Ajuste `baseUrl`, `messagePath`, `healthPath`, token e `responsePath` conforme o contrato real do Hermes.
 - **Hermes Code não responde**: confira `integrations.hermes.codePath`; se a rota `/code` não existir, o Ares cai para `messagePath`.
 - **Ares não lê um arquivo de código**: confira `integrations.code.enabled`, `workspaceRoot`, `allowedRoots` e `maxFileKB`.
+- **Comando de dev recusado**: inclua o comando exato em `integrations.code.allowedCommands`.
+- **Patch não aplica**: rode preview, confira paths/`git apply --check` e ligue `integrations.code.allowPatchApply` se quiser permitir aplicação local.
 
 ## Verificação Antes de Publicar
 

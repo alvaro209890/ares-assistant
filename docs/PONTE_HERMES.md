@@ -88,7 +88,10 @@ clima, notícias, web, sistema e área de transferência.
 Para programação, o prompt usa `codigo.workspace`, `codigo.buscar`, `codigo.ler` e
 `codigo.hermes`. A rota dedicada é `codePath`; se ela responder `404` ou `405`, o
 Ares faz fallback para `messagePath` com um payload textual iniciado por
-`[ARES_CODE_TASK]`.
+`[ARES_CODE_TASK]`. A execução local (testes, build, terminal completo via
+`codigo.terminal`, Git) roda na máquina do usuário, fora da ponte; análise
+profunda e edição é que são delegadas ao Hermes Code. Detalhes do terminal e do
+fluxo de autorização em [`PROGRAMACAO.md`](PROGRAMACAO.md).
 
 ## Segurança
 

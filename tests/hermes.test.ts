@@ -64,6 +64,17 @@ beforeAll(async () => {
 
     if (req.method === 'POST' && req.url === '/code') {
       const json = JSON.parse(body)
+      if (String(json.task).includes('estruturado')) {
+        res.end(
+          JSON.stringify({
+            summary: 'patch sugerido',
+            patches: [{ file: 'src/a.ts', diff: 'diff --git a/src/a.ts b/src/a.ts\n' }],
+            tests: ['npm test'],
+            risks: ['baixo']
+          })
+        )
+        return
+      }
       res.end(JSON.stringify({ result: { output: `codigo: ${json.task}` } }))
       return
     }
@@ -162,6 +173,17 @@ describe('ponte Hermes', () => {
       client: 'ares-desktop',
       capability: 'code',
       sessionId: 'sess-code'
+    })
+  })
+
+  it('preserva resposta estruturada do Hermes Code', async () => {
+    const result = await hermesCodeTask(config(), { task: 'retorne estruturado', mode: 'edit' }, 'sess-structured')
+
+    expect(result.reply).toBe('patch sugerido')
+    expect(result.structured).toMatchObject({
+      summary: 'patch sugerido',
+      tests: ['npm test'],
+      risks: ['baixo']
     })
   })
 

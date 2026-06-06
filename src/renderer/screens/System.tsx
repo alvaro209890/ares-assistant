@@ -116,6 +116,18 @@ export default function System(): JSX.Element {
                   <Row k="Raízes" v={config.integrations.code.allowedRoots.join(', ') || '—'} />
                   <Row k="Arquivo máx." v={`${config.integrations.code.maxFileKB} KB`} />
                   <Row k="Contexto Hermes" v={`${config.integrations.code.maxContextChars} chars`} />
+                  <Row k="Comandos" v={String(config.integrations.code.allowedCommands.length)} />
+                  <Row k="Aplicar patches" v={config.integrations.code.allowPatchApply ? 'permitido' : 'bloqueado'} />
+                  <Row
+                    k="Terminal"
+                    v={
+                      config.integrations.code.terminalEnabled
+                        ? config.integrations.code.terminalAutoApprove
+                          ? 'on · auto'
+                          : 'on · pede autorização'
+                        : 'desligado'
+                    }
+                  />
                 </>
               ) : (
                 <span className="text-[12px] text-cyan-200/45">Configuração ainda indisponível.</span>
