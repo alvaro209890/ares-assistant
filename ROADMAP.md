@@ -54,6 +54,11 @@ conhecimento técnico), com o motivo de cada uma.
 > **Versão 0.13 (entregue):** ✅ **velocidade** (ferramentas em paralelo + resumo
 > não-bloqueante) e ✅ **mais proatividade** (carregador estagnado + heads-up de clima de
 > manhã). Detalhes em [`CHANGELOG.md`](CHANGELOG.md).
+>
+> **Versão 0.14 (entregue):** ✅ **o Ares constrói projetos** — `codigo.scaffold` (site/
+> pagina/node), `codigo.criar`, `codigo.diagnostico` e proatividade em código
+> (`src/main/scaffold.ts`). Validado criando um site na Área de Trabalho pelo próprio Ares.
+> Detalhes em [`docs/PROGRAMACAO.md`](docs/PROGRAMACAO.md).
 
 Legenda de esforço: 🟢 baixo · 🟡 médio · 🔴 alto. ✅ = já implementado.
 

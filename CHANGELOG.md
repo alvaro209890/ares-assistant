@@ -4,6 +4,34 @@ Todas as mudanças relevantes do Ares. O formato segue de perto
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/) e o projeto usa
 versionamento semântico.
 
+## [0.14.0] — 2026-06-06
+
+Foco: **programação muito melhor** — o Ares passa a CRIAR projetos e a se comportar
+como um engenheiro proativo, não só ler código.
+
+### Adicionado
+
+- **`codigo.scaffold {nome, tipo_projeto?, path?}`** — cria um projeto novo a
+  partir de template (`src/main/scaffold.ts`): `site` (HTML/CSS/JS responsivo),
+  `pagina` (HTML único) e `node` (ESM + teste `node --test`). Recusa pasta não
+  vazia (a menos que `force`).
+- **`codigo.criar {arquivo, conteudo, ...}`** — escreve/cria um arquivo no
+  workspace.
+- **`codigo.diagnostico {path?}`** — roda as checagens disponíveis e permitidas
+  (typecheck/lint/test via `planDiagnosis`) e resume a saúde do projeto.
+- **Proatividade em código** (prompt) — o Ares valida após mudanças
+  (`codigo.diagnostico`/`codigo.comando`), relata passou/falhou, aponta riscos e
+  sugere o próximo passo; ao criar projeto, já diz como abrir/rodar.
+- Escritas reais protegidas por `allowPatchApply` e por `allowedRoots`.
+
+### Testado de ponta a ponta
+
+- Um **site foi criado na Área de Trabalho pelo próprio Ares** (`scaffoldProject`)
+  e **servido com sucesso** (HTTP 200, título correto, CSS acessível); o terminal
+  do Ares (`runCodeTerminal`) operou na pasta.
+- `tests/scaffold.test.ts` (templates) e novos casos em `tests/code.test.ts`
+  (scaffold/criar/`planDiagnosis`/diagnóstico). Total: 93 testes.
+
 ## [0.13.0] — 2026-06-06
 
 Foco: **velocidade** do loop do agente e **mais proatividade**.

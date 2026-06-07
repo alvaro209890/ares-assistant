@@ -53,13 +53,16 @@ import {
   buildCodeIndex,
   codePromptContext,
   delegateCodeToHermes,
+  diagnoseProject,
   previewCodePatch,
   readCodeFile,
   runCodeCommand,
   runCodeGit,
   runCodeTerminal,
+  scaffoldProject,
   searchCode,
-  summarizeCodeWorkspace
+  summarizeCodeWorkspace,
+  writeCodeFile
 } from './code'
 import { clearPendingCode, getPendingCode, setPendingCode } from './pending'
 
@@ -163,6 +166,9 @@ FERRAMENTAS DE CONSULTA (dê uma fala curta tipo "Deixe-me verificar." e AGUARDE
 - codigo.cancelar {}   (descarta a ação pendente quando o usuário recusar)
 - codigo.git {path?, operacao(status|diff|diffStat|log), arquivo?}   (consulta Git local sem alterar repo)
 - codigo.indexar {path?, refresh?(bool)}   (gera/lê índice persistente de arquivos, exports e scripts do projeto)
+- codigo.scaffold {nome, tipo_projeto?(site|pagina|node), path?}   (CRIA um projeto novo a partir de template — use para "crie um site/página/projeto"; precisa de "Permitir aplicar patches")
+- codigo.criar {path?, arquivo, conteudo, sobrescrever?(bool)}   (cria/escreve um arquivo no projeto; precisa de "Permitir aplicar patches")
+- codigo.diagnostico {path?}   (verifica a saúde do projeto: roda typecheck/lint/test disponíveis e permitidos e resume; use proativamente após mudanças)
 - codigo.patch.preview {path?, diff?, patches?}   (valida e resume patch antes de aplicar; use sempre antes de aplicação)
 - codigo.patch.aplicar {path?, diff?, patches?}   (aplica patch apenas se habilitado e já confirmado pelo usuário)
 - hermes.executar {comando}   (delegue ao Hermes pedidos externos que são dele: WhatsApp, Trello, Obsidian, office de agentes, Pedro/Junim/Maicom ou automações já existentes no Hermes)
@@ -177,6 +183,9 @@ MODO PROGRAMADOR:
 - SEGURANÇA: comandos bloqueados (sudo, rm -rf de raiz/HOME, formatar disco etc.) não rodam de jeito nenhum — explique que é por segurança, não tente contornar.
 - Ao rodar comandos, reporte o código de saída e só o essencial do stdout/stderr; não leia saídas longas inteiras em voz.
 - Para estado do repo, use codigo.git em vez de inventar status/diff.
+- CRIAR PROJETOS: para "crie um site/página/projeto", use codigo.scaffold (escolha tipo_projeto: site, pagina ou node) e, se o usuário indicar onde (ex.: "na área de trabalho"), passe o path. Depois diga em uma frase como abrir/rodar (use os "hints" do resultado).
+- PROATIVIDADE EM CÓDIGO: aja como engenheiro proativo — depois de criar/editar, ofereça e, quando fizer sentido, rode codigo.diagnostico ou codigo.comando para validar e relate o resultado (passou/falhou + o essencial). Aponte riscos e o próximo passo, sem esperar o usuário pedir.
+- Escrita real (codigo.scaffold/codigo.criar) exige "Permitir aplicar patches" ligado; se vier erro de desativado, explique como ligar.
 - Sem path explícito, use o workspace padrão de programação. Se o pedido depender de um repo específico e o contexto não deixar claro, peça o path.
 - Explique respostas de código com referências de arquivo/linha quando a ferramenta devolver linhas.
 
@@ -426,6 +435,28 @@ async function runQuery(a: Acao, cfg: AppConfig, sessionId: string): Promise<unk
             refresh: a.refresh === true || a.atualizar === true
           })
         }
+      case 'codigo.scaffold':
+        return {
+          tipo: a.tipo,
+          resultado: scaffoldProject(cfg, {
+            tipo: String(a.tipo_projeto || a.template || a.modelo || a.kind || 'site'),
+            nome: String(a.nome || a.name || a.projeto || ''),
+            path: String(a.path || a.raiz || a.destino || a.onde || ''),
+            force: a.force === true || a.forcar === true
+          })
+        }
+      case 'codigo.criar':
+        return {
+          tipo: a.tipo,
+          resultado: writeCodeFile(cfg, {
+            root: String(a.path || a.raiz || a.workspace || ''),
+            file: String(a.arquivo || a.file || ''),
+            content: String(a.conteudo ?? a.content ?? a.texto ?? ''),
+            overwrite: a.sobrescrever === true || a.overwrite === true
+          })
+        }
+      case 'codigo.diagnostico':
+        return { tipo: a.tipo, resultado: diagnoseProject(cfg, { root: String(a.path || a.raiz || a.workspace || '') }) }
       case 'codigo.patch.preview':
         return {
           tipo: a.tipo,

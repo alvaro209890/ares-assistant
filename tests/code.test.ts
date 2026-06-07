@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
@@ -11,13 +11,17 @@ import {
   buildCodeIndex,
   classifyCommand,
   delegateCodeToHermes,
+  diagnoseProject,
+  planDiagnosis,
   previewCodePatch,
   readCodeFile,
   runCodeCommand,
   runCodeGit,
   runCodeTerminal,
+  scaffoldProject,
   searchCode,
-  summarizeCodeWorkspace
+  summarizeCodeWorkspace,
+  writeCodeFile
 } from '../src/main/code'
 import { clearPendingCode, getPendingCode, setPendingCode } from '../src/main/pending'
 
@@ -299,5 +303,57 @@ describe('terminal com autorização', () => {
 
     expect(clearPendingCode('sess-term')).toBe(true)
     expect(getPendingCode('sess-term')).toBeUndefined()
+  })
+})
+
+describe('criar / scaffold / diagnóstico', () => {
+  it('faz scaffold de um site quando a escrita está permitida', () => {
+    const res = scaffoldProject(config({ allowPatchApply: true }), { tipo: 'site', nome: 'Meu Site' })
+
+    expect(res.template).toBe('site')
+    expect(res.created).toContain('index.html')
+    expect(existsSync(join(root, 'meu-site', 'index.html'))).toBe(true)
+    expect(readFileSync(join(root, 'meu-site', 'index.html'), 'utf8')).toContain('<title>Meu Site</title>')
+    expect(res.hints.join(' ')).toMatch(/index\.html|http\.server/)
+  })
+
+  it('exige permissão para escrever e recusa pasta não vazia', () => {
+    expect(() => scaffoldProject(config(), { tipo: 'site', nome: 'X' })).toThrow(/Permitir aplicar patches|desativada/)
+    scaffoldProject(config({ allowPatchApply: true }), { tipo: 'pagina', nome: 'Dois' })
+    expect(() => scaffoldProject(config({ allowPatchApply: true }), { tipo: 'pagina', nome: 'Dois' })).toThrow(/já existe/)
+  })
+
+  it('cria um arquivo e recusa sobrescrever sem permissão explícita', () => {
+    const w = writeCodeFile(config({ allowPatchApply: true }), { file: 'novo/ola.txt', content: 'oi' })
+    expect(w.created).toBe(true)
+    expect(readFileSync(join(root, 'novo', 'ola.txt'), 'utf8')).toBe('oi')
+    expect(() => writeCodeFile(config({ allowPatchApply: true }), { file: 'novo/ola.txt', content: 'x' })).toThrow(/já existe/)
+    const over = writeCodeFile(config({ allowPatchApply: true }), { file: 'novo/ola.txt', content: 'novo', overwrite: true })
+    expect(over.overwritten).toBe(true)
+  })
+
+  it('planDiagnosis marca o que está na allowlist', () => {
+    const plan = planDiagnosis(
+      { typecheck: 'tsc', test: 'vitest', lint: 'eslint .' },
+      'npm',
+      ['npm run typecheck', 'npm test']
+    )
+    const byName = Object.fromEntries(plan.map((p) => [p.name, p]))
+    expect(byName.typecheck.allowed).toBe(true)
+    expect(byName.test.command).toBe('npm test')
+    expect(byName.test.allowed).toBe(true)
+    expect(byName.lint.allowed).toBe(false) // não está na allowlist
+  })
+
+  it('diagnostica um projeto sem package.json com elegância', () => {
+    const empty = mkdtempSync(join(tmpdir(), 'ares-diag-'))
+    const cfg = config()
+    cfg.integrations.code.workspaceRoot = empty
+    cfg.integrations.code.allowedRoots = [empty]
+    const diag = diagnoseProject(cfg)
+    expect(diag.checks).toHaveLength(0)
+    expect(diag.ok).toBe(true)
+    expect(diag.hints.join(' ')).toMatch(/package\.json/)
+    rmSync(empty, { recursive: true, force: true })
   })
 })

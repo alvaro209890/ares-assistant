@@ -23,6 +23,12 @@ de edição, refatoração e análise profunda são enviadas ao Hermes.
 - `codigo.cancelar {}`: descarta a ação pendente.
 - `codigo.git {path?, operacao, arquivo?}`: consulta `status`, `diff`, `diffStat`
   ou `log`.
+- `codigo.scaffold {nome, tipo_projeto?(site|pagina|node), path?}`: **cria um
+  projeto novo** a partir de template (precisa de `allowPatchApply`).
+- `codigo.criar {path?, arquivo, conteudo, sobrescrever?}`: cria/escreve um arquivo
+  (precisa de `allowPatchApply`).
+- `codigo.diagnostico {path?}`: roda as checagens disponíveis e permitidas
+  (typecheck/lint/test) e resume a saúde do projeto.
 - `codigo.indexar {path?, refresh?}`: gera/lê índice persistente do projeto.
 - `codigo.patch.preview {path?, diff?, patches?}`: valida patch antes de aplicar.
 - `codigo.patch.aplicar {path?, diff?, patches?}`: aplica patch quando a config
@@ -205,6 +211,38 @@ Campos relacionados em `integrations.code`:
 - `terminalAutoApprove`: roda comandos `confirm` sem pedir (use com cautela).
 - `terminalSafe`: prefixos de comando que rodam sem autorização.
 
+## Criar projetos e diagnóstico
+
+O Ares não só lê código: ele **constrói**. Para "crie um site", ele usa
+`codigo.scaffold`.
+
+Templates (`src/main/scaffold.ts`):
+
+- `site` — site estático com `index.html`, `styles.css`, `script.js` e `README.md`
+  (responsivo, com variáveis CSS e uma interação simples em JS).
+- `pagina` — um único `index.html` com CSS embutido.
+- `node` — `package.json` (ESM), `index.js`, um teste com `node --test`,
+  `.gitignore` e `README.md`.
+
+Exemplo de voz: *"Ares, crie um site chamado Minha Loja na área de transferência."*
+→ `codigo.scaffold {nome:"Minha Loja", tipo_projeto:"site", path:"~/Área de trabalho"}`.
+O resultado traz `created`, `skipped` e `hints` (como abrir/rodar). Ele recusa
+sobrescrever uma pasta não vazia (a menos que `force`).
+
+`codigo.criar` escreve um arquivo avulso; `codigo.diagnostico` roda as checagens
+disponíveis e **permitidas** (typecheck/lint/test, via `planDiagnosis`) e resume
+passou/falhou.
+
+> Escritas reais (`scaffold`/`criar`) exigem `integrations.code.allowPatchApply`
+> ligado (Configurações > "Permitir aplicar patches"), e respeitam `allowedRoots`.
+
+### Proatividade em código
+
+O prompt orienta o Ares a agir como engenheiro proativo: depois de criar/editar,
+ele **valida** (roda `codigo.diagnostico`/`codigo.comando`), relata passou/falhou
+com o essencial, aponta riscos e sugere o próximo passo — sem esperar o usuário
+pedir. Ao criar um projeto, ele já diz como abrir/rodar.
+
 ## Índice Persistente
 
 `codigo.indexar` grava o índice em:
@@ -264,4 +302,9 @@ A suíte `tests/code.test.ts` valida:
 - classificação do terminal (allowed/confirm/blocked);
 - terminal pedindo autorização e rodando após aprovação;
 - bloqueio de comandos catastróficos mesmo aprovados;
-- desligamento do terminal e store de pendências por sessão.
+- desligamento do terminal e store de pendências por sessão;
+- scaffold de site (e recusa de pasta não vazia), criar arquivo (e recusa de
+  sobrescrita), `planDiagnosis` e diagnóstico de projeto sem `package.json`.
+
+A suíte `tests/scaffold.test.ts` valida os templates: `slug`, `normalizeTemplate`
+e o conteúdo gerado de `site`, `pagina` e `node`.

@@ -6,17 +6,22 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 
 import type {
   AppConfig,
   CodeCommandResult,
+  CodeDiagnosis,
+  CodeDiagnosisCheck,
   CodeFileSnippet,
   CodeHermesResult,
   CodePatchApplyResult,
   CodePatchPreview,
   CodeProjectIndex,
+  CodeScaffoldResult,
   CodeSearchMatch,
   CodeTerminalResult,
   CodeWorkspaceSummary,
+  CodeWriteResult,
   CommandClassification
 } from '../shared/types'
 import { hermesCodeTask } from './hermes'
+import { normalizeTemplate, slug, templateFiles } from './scaffold'
 
 const IGNORE_NAMES = new Set([
   '.git',
@@ -753,4 +758,129 @@ export function applyCodePatch(cfg: AppConfig, opts: { root?: string; diff?: unk
     writeFileSync(abs, next, 'utf8')
   }
   return { ...preview, applied: true, output: 'patch textual aplicado' }
+}
+
+// ---------------------------------------------------------------------------
+// Criar/scaffold/diagnóstico — o Ares CONSTRÓI projetos, não só lê.
+// Escritas no disco são protegidas por `allowPatchApply` e por `allowedRoots`.
+// ---------------------------------------------------------------------------
+
+function ensureCanWrite(cfg: AppConfig): void {
+  ensureEnabled(cfg)
+  if (!codeConfig(cfg).allowPatchApply) {
+    throw new Error('Criação/escrita de arquivos desativada. Ligue "Permitir aplicar patches" nas Configurações.')
+  }
+}
+
+function dirIsEmpty(dir: string): boolean {
+  try {
+    return readdirSync(dir).filter((n) => n !== '.git').length === 0
+  } catch {
+    return true
+  }
+}
+
+/** Cria um projeto a partir de um template, dentro das raízes permitidas. */
+export function scaffoldProject(
+  cfg: AppConfig,
+  opts: { tipo?: string; nome: string; path?: string; force?: boolean }
+): CodeScaffoldResult {
+  ensureCanWrite(cfg)
+  const base = resolveCodeWorkspace(cfg, opts.path)
+  const folder = slug(opts.nome)
+  const root = join(base, folder)
+  assertAllowed(cfg, root)
+  if (existsSync(root) && !dirIsEmpty(root) && !opts.force) {
+    throw new Error(`A pasta "${folder}" já existe e não está vazia. Escolha outro nome ou use force.`)
+  }
+  mkdirSync(root, { recursive: true })
+
+  const template = normalizeTemplate(opts.tipo || 'site')
+  const files = templateFiles(template, opts.nome)
+  const created: string[] = []
+  const skipped: string[] = []
+  for (const [file, content] of Object.entries(files)) {
+    const abs = resolveCodeFile(cfg, root, file)
+    if (existsSync(abs) && !opts.force) {
+      skipped.push(file)
+      continue
+    }
+    mkdirSync(dirname(abs), { recursive: true })
+    writeFileSync(abs, content, 'utf8')
+    created.push(file)
+  }
+
+  const hints =
+    template === 'node'
+      ? [`cd ${folder}`, 'rode: node index.js', 'teste: npm test']
+      : [`abra ${folder}/index.html no navegador`, `ou: cd ${folder} && python3 -m http.server 8000`]
+  return { root, template, created, skipped, hints }
+}
+
+/** Escreve (cria/sobrescreve) um arquivo no workspace, dentro das raízes permitidas. */
+export function writeCodeFile(
+  cfg: AppConfig,
+  opts: { root?: string; file: string; content: string; overwrite?: boolean }
+): CodeWriteResult {
+  ensureCanWrite(cfg)
+  const root = resolveCodeWorkspace(cfg, opts.root)
+  const file = String(opts.file || '').trim()
+  if (!file) throw new Error('Diga o caminho do arquivo a criar.')
+  const abs = resolveCodeFile(cfg, root, file)
+  const existed = existsSync(abs)
+  if (existed && !opts.overwrite) {
+    throw new Error(`O arquivo "${file}" já existe. Use overwrite para substituir.`)
+  }
+  mkdirSync(dirname(abs), { recursive: true })
+  const content = String(opts.content ?? '')
+  writeFileSync(abs, content, 'utf8')
+  return { file: relative(root, abs), bytes: Buffer.byteLength(content, 'utf8'), created: !existed, overwritten: existed }
+}
+
+const DIAGNOSE_SCRIPTS = ['typecheck', 'lint', 'test'] as const
+
+/** Decide quais checagens rodar a partir dos scripts do projeto e da allowlist. Pura. */
+export function planDiagnosis(
+  scripts: Record<string, string> | undefined,
+  packageManager: string,
+  allowedCommands: string[]
+): Array<{ name: string; command: string; allowed: boolean }> {
+  const pm = packageManager || 'npm'
+  const allowed = (allowedCommands || []).map((a) => a.trim().replace(/\s+/g, ' '))
+  const isAllowed = (cmd: string): boolean => allowed.some((a) => cmd === a || cmd.startsWith(`${a} `) || cmd.startsWith(`${a} --`))
+  const plan: Array<{ name: string; command: string; allowed: boolean }> = []
+  for (const name of DIAGNOSE_SCRIPTS) {
+    if (!scripts || !scripts[name]) continue
+    const command = name === 'test' ? `${pm} test` : `${pm} run ${name}`
+    plan.push({ name, command, allowed: isAllowed(command) })
+  }
+  return plan
+}
+
+/** Diagnostica a saúde do projeto: roda as checagens disponíveis e permitidas. */
+export function diagnoseProject(cfg: AppConfig, opts: { root?: string } = {}): CodeDiagnosis {
+  const summary = summarizeCodeWorkspace(cfg, opts.root)
+  const root = summary.root
+  const name = summary.name
+  const plan = planDiagnosis(summary.scripts, summary.packageManager || 'npm', codeConfig(cfg).allowedCommands || [])
+  const checks: CodeDiagnosisCheck[] = []
+  const hints: string[] = []
+
+  for (const step of plan) {
+    if (!step.allowed) {
+      checks.push({ name: step.name, command: step.command, ran: false, ok: false, code: null, summary: 'não permitido na allowlist' })
+      hints.push(`adicione "${step.command}" à allowlist para checar ${step.name}`)
+      continue
+    }
+    const res = runCodeCommand(cfg, { root, command: step.command })
+    const tail = (res.ok ? res.stdout : res.stderr || res.stdout).split(/\r?\n/).filter(Boolean).slice(-3).join(' | ')
+    checks.push({ name: step.name, command: step.command, ran: true, ok: res.ok, code: res.code, summary: tail.slice(0, 240) })
+  }
+
+  if (!summary.scripts) hints.push('sem package.json: nada para testar automaticamente')
+  if (summary.git?.dirty) hints.push('há alterações sem commit')
+
+  const ran = checks.filter((c) => c.ran)
+  const ok = ran.length > 0 ? ran.every((c) => c.ok) : true
+  return { root, name, ok, checks, hints }
 }

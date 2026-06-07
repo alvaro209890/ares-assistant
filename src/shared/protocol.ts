@@ -37,6 +37,9 @@ export const QUERY_TOOLS = new Set([
   'codigo.cancelar',
   'codigo.git',
   'codigo.indexar',
+  'codigo.scaffold',
+  'codigo.criar',
+  'codigo.diagnostico',
   'codigo.patch.preview',
   'codigo.patch.aplicar',
   'hermes.executar'

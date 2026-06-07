@@ -23,7 +23,7 @@ O projeto roda em modo de desenvolvimento. O empacotamento `.deb` está configur
 - **Proatividade de ambiente**: avisa por voz sobre bateria fraca/crítica, evento chegando e tarefas vencidas — priorizado, com cooldown e silêncio noturno. Veja [Proatividade](docs/PROATIVIDADE.md).
 - **Kanban e calendário**: etiquetas nomeadas, links/anexos locais, tarefas e eventos recorrentes, lembrete configurável antes do evento, visões “Hoje”, “Vencidas”, “Próximos 7 dias” e agenda por dia/semana.
 - **Conversa contínua melhor**: sensibilidade do microfone, tempo de silêncio e pausa pós-fala configuráveis (evita que o Ares escute a própria voz).
-- **Modo Programador**: resumo de workspace, busca e leitura local de código, **terminal completo com autorização por voz** e delegação ao Hermes Code para análise profunda, edição, debug, testes e refatoração.
+- **Modo Programador**: resumo de workspace, busca e leitura local de código, **criação/scaffold de projetos**, **terminal completo com autorização por voz**, diagnóstico proativo e delegação ao Hermes Code para análise profunda, edição, debug, testes e refatoração.
 - **Controle do computador**: abrir apps/sites/arquivos, volume, **mídia (play/pause/próxima)**, **brilho da tela**, bloquear a tela, capturas e escrever na área de transferência — por voz, sem shell. Veja [Controle do Computador](docs/CONTROLE.md).
 - **Desfazer por voz**: "desfaz" reverte a última alteração em tarefas, listas, notas, lembretes, eventos ou memória.
 - **Confiança na conversa**: confirmação falada antes de apagar/limpar, desambiguação ("qual deles?") e correção ("não, eu disse X"). Veja [Confiança na conversa](docs/CONFIANCA.md).
@@ -36,6 +36,12 @@ O projeto roda em modo de desenvolvimento. O empacotamento `.deb` está configur
 - **Palavra de ativação ("Ares")**: na conversa contínua, opcionalmente só responde quando você começa pela palavra-chave (ex.: "Ares, que horas são?"). Diga só "Ares" para ele confirmar e aguardar o comando.
 - **Orbe flutuante (companion)**: uma mini-orbe always-on-top que reflete o estado do Ares; clique para abrir o app, ou use o microfone dela para falar sem trazer a janela principal.
 - **Barge-in (interromper a fala)**: na conversa contínua, comece a falar por cima e o Ares para na hora e te ouve; a tecla `Esc` também interrompe a fala a qualquer momento.
+
+### Novidades da versão 0.14
+
+- **O Ares constrói projetos**: `codigo.scaffold` cria um projeto novo a partir de template (`site`, `pagina`, `node`) — "crie um site na área de trabalho" funciona de verdade. `codigo.criar` escreve arquivos; ambos respeitam `allowedRoots` e a permissão de escrita.
+- **Diagnóstico proativo**: `codigo.diagnostico` roda as checagens disponíveis e permitidas (typecheck/lint/test) e resume a saúde do projeto. O prompt orienta o Ares a **validar e relatar proativamente** após mudanças.
+- **Testado de ponta a ponta**: um site foi criado na Área de Trabalho **pelo próprio Ares** (`scaffoldProject`) e servido com sucesso (HTTP 200). +11 testes (93 no total). Detalhes em [`docs/PROGRAMACAO.md`](docs/PROGRAMACAO.md).
 
 ### Novidades da versão 0.13
 

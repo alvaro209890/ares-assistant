@@ -413,6 +413,38 @@ export interface CodeProjectIndex {
   git?: CodeWorkspaceSummary['git']
 }
 
+export interface CodeScaffoldResult {
+  root: string
+  template: string
+  created: string[]
+  skipped: string[]
+  hints: string[]
+}
+
+export interface CodeWriteResult {
+  file: string
+  bytes: number
+  created: boolean
+  overwritten: boolean
+}
+
+export interface CodeDiagnosisCheck {
+  name: string
+  command: string
+  ran: boolean
+  ok: boolean
+  code: number | null
+  summary: string
+}
+
+export interface CodeDiagnosis {
+  root: string
+  name: string
+  ok: boolean
+  checks: CodeDiagnosisCheck[]
+  hints: string[]
+}
+
 // --- Controle do computador (desktop actions, estilo JARVIS) ---
 export interface DesktopActionResult {
   ok: boolean
