@@ -40,6 +40,7 @@ export const QUERY_TOOLS = new Set([
   'codigo.scaffold',
   'codigo.criar',
   'codigo.diagnostico',
+  'codigo.projeto',
   'codigo.patch.preview',
   'codigo.patch.aplicar',
   'hermes.executar'

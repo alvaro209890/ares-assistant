@@ -46,6 +46,7 @@ import {
   type VolumeAction
 } from './control'
 import { pushUndo, undoLast } from './history'
+import { runCoderTask } from './coder'
 import { clearPendingConfirm, decideConfirmation, getPendingConfirm, setPendingConfirm } from './confirm'
 import { buildBriefing, briefingToSpeech } from './briefing'
 import {
@@ -169,6 +170,7 @@ FERRAMENTAS DE CONSULTA (dê uma fala curta tipo "Deixe-me verificar." e AGUARDE
 - codigo.scaffold {nome, tipo_projeto?(site|pagina|node), path?}   (CRIA um projeto novo a partir de template — use para "crie um site/página/projeto"; precisa de "Permitir aplicar patches")
 - codigo.criar {path?, arquivo, conteudo, sobrescrever?(bool)}   (cria/escreve um arquivo no projeto; precisa de "Permitir aplicar patches")
 - codigo.diagnostico {path?}   (verifica a saúde do projeto: roda typecheck/lint/test disponíveis e permitidos e resume; use proativamente após mudanças)
+- codigo.projeto {objetivo, path?, passos?}   (CODER AUTÔNOMO: dado um objetivo, ele planeja, escreve os arquivos, roda checagens seguras e itera sozinho até concluir; precisa de "Permitir aplicar patches". Use para "construa/faça um app/site/programa que faça X" quando envolver vários arquivos ou lógica)
 - codigo.patch.preview {path?, diff?, patches?}   (valida e resume patch antes de aplicar; use sempre antes de aplicação)
 - codigo.patch.aplicar {path?, diff?, patches?}   (aplica patch apenas se habilitado e já confirmado pelo usuário)
 - hermes.executar {comando}   (delegue ao Hermes pedidos externos que são dele: WhatsApp, Trello, Obsidian, office de agentes, Pedro/Junim/Maicom ou automações já existentes no Hermes)
@@ -183,7 +185,7 @@ MODO PROGRAMADOR:
 - SEGURANÇA: comandos bloqueados (sudo, rm -rf de raiz/HOME, formatar disco etc.) não rodam de jeito nenhum — explique que é por segurança, não tente contornar.
 - Ao rodar comandos, reporte o código de saída e só o essencial do stdout/stderr; não leia saídas longas inteiras em voz.
 - Para estado do repo, use codigo.git em vez de inventar status/diff.
-- CRIAR PROJETOS: para "crie um site/página/projeto", use codigo.scaffold (escolha tipo_projeto: site, pagina ou node) e, se o usuário indicar onde (ex.: "na área de trabalho"), passe o path. Depois diga em uma frase como abrir/rodar (use os "hints" do resultado).
+- CRIAR PROJETOS: para um modelo simples e conhecido ("crie um site/página em branco"), use codigo.scaffold. Para algo com lógica ou vários arquivos ("faça um app de lista de tarefas", "construa uma calculadora", "um jogo da velha"), use codigo.projeto (CODER AUTÔNOMO), que constrói tudo sozinho. Se o usuário indicar onde (ex.: um caminho), passe o path. Depois diga em uma frase como abrir/rodar.
 - PROATIVIDADE EM CÓDIGO: aja como engenheiro proativo — depois de criar/editar, ofereça e, quando fizer sentido, rode codigo.diagnostico ou codigo.comando para validar e relate o resultado (passou/falhou + o essencial). Aponte riscos e o próximo passo, sem esperar o usuário pedir.
 - Escrita real (codigo.scaffold/codigo.criar) exige "Permitir aplicar patches" ligado; se vier erro de desativado, explique como ligar.
 - Sem path explícito, use o workspace padrão de programação. Se o pedido depender de um repo específico e o contexto não deixar claro, peça o path.
@@ -457,6 +459,15 @@ async function runQuery(a: Acao, cfg: AppConfig, sessionId: string): Promise<unk
         }
       case 'codigo.diagnostico':
         return { tipo: a.tipo, resultado: diagnoseProject(cfg, { root: String(a.path || a.raiz || a.workspace || '') }) }
+      case 'codigo.projeto':
+        return {
+          tipo: a.tipo,
+          resultado: await runCoderTask(cfg, {
+            objetivo: String(a.objetivo || a.tarefa || a.descricao || a.texto || ''),
+            root: String(a.path || a.raiz || a.destino || a.onde || a.nome || ''),
+            passos: Number(a.passos || a.steps || 0) || undefined
+          })
+        }
       case 'codigo.patch.preview':
         return {
           tipo: a.tipo,

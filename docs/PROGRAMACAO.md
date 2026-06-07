@@ -243,6 +243,28 @@ ele **valida** (roda `codigo.diagnostico`/`codigo.comando`), relata passou/falho
 com o essencial, aponta riscos e sugere o próximo passo — sem esperar o usuário
 pedir. Ao criar um projeto, ele já diz como abrir/rodar.
 
+### Coder autônomo (`codigo.projeto`)
+
+Para tarefas com lógica ou vários arquivos ("faça um app de lista de tarefas",
+"construa um jogo da velha"), o Ares usa o **coder autônomo** (`src/main/coder.ts`):
+um pequeno laço de agente que, a partir de um objetivo, **planeja → escreve os
+arquivos → roda checagens seguras → vê o resultado → itera** até concluir (até 8
+passos), tudo com o mesmo cérebro (9Router) e as **mesmas barreiras**:
+
+- escrita só com `allowPatchApply` e dentro de `allowedRoots`;
+- roda **apenas comandos da camada segura** (allowlist/seguros) — instalar
+  dependências ou comandos que pedem autorização são **pulados** (reportados),
+  nunca executados sozinhos; comandos destrutivos são bloqueados;
+- arquivos sempre relativos à raiz do projeto (caminhos para fora são recusados).
+
+O resultado traz o `transcript` (o que foi escrito/rodado em cada passo), um
+`summary` final e `ok`. As peças são testáveis: `parseCoderStep` (puro) e
+`applyCoderStep` (IO) têm testes; o laço com o modelo é validado de ponta a ponta.
+
+> **Validado:** o coder construiu sozinho um **jogo da velha jogável**
+> (HTML/CSS/JS, com placar e reiniciar) na Área de Trabalho, em um único passo, e a
+> página foi servida com HTTP 200.
+
 ## Índice Persistente
 
 `codigo.indexar` grava o índice em:
@@ -308,3 +330,7 @@ A suíte `tests/code.test.ts` valida:
 
 A suíte `tests/scaffold.test.ts` valida os templates: `slug`, `normalizeTemplate`
 e o conteúdo gerado de `site`, `pagina` e `node`.
+
+A suíte `tests/coder.test.ts` valida o coder autônomo: `parseCoderStep` (JSON
+válido/cercado/lixo) e `applyCoderStep` (escreve arquivos, recusa caminhos fora,
+roda só o seguro e respeita `allowPatchApply`).

@@ -4,6 +4,34 @@ Todas as mudanças relevantes do Ares. O formato segue de perto
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/) e o projeto usa
 versionamento semântico.
 
+## [0.15.0] — 2026-06-06
+
+Foco: **autonomia em programação** — o Ares deixa de fazer um passo por vez e passa
+a executar uma tarefa de código inteira sozinho.
+
+### Adicionado
+
+- **Coder autônomo (`codigo.projeto {objetivo, path?, passos?}`)** —
+  `src/main/coder.ts`: um laço de agente que **planeja → escreve arquivos → roda
+  checagens seguras → vê o resultado → itera** (até 8 passos), com o mesmo cérebro
+  (9Router). Peças puras/testáveis: `parseCoderStep` (parse robusto) e
+  `applyCoderStep` (escreve/roda).
+- **Mesmas barreiras de segurança** — escrita só com `allowPatchApply` e dentro de
+  `allowedRoots`; roda **apenas comandos da camada segura** (allowlist/seguros);
+  instalar dependências / comandos que pedem autorização são pulados; destrutivos
+  bloqueados; caminhos para fora da raiz recusados.
+- **Roteamento** — o prompt usa `codigo.scaffold` para modelos simples e
+  `codigo.projeto` para algo com lógica/vários arquivos.
+
+### Testado de ponta a ponta
+
+- O coder autônomo **construiu sozinho um jogo da velha jogável** (HTML/CSS/JS, com
+  placar de vitórias, empates e botões de reiniciar/zerar) na Área de Trabalho, em
+  **um único passo**, e a página foi **servida com HTTP 200**.
+- `tests/coder.test.ts`: `parseCoderStep` (JSON válido/cercado/lixo) e
+  `applyCoderStep` (escreve, recusa caminho fora, roda só o seguro, respeita a
+  permissão). Total: 99 testes.
+
 ## [0.14.0] — 2026-06-06
 
 Foco: **programação muito melhor** — o Ares passa a CRIAR projetos e a se comportar

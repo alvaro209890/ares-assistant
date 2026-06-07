@@ -59,6 +59,10 @@ conhecimento técnico), com o motivo de cada uma.
 > pagina/node), `codigo.criar`, `codigo.diagnostico` e proatividade em código
 > (`src/main/scaffold.ts`). Validado criando um site na Área de Trabalho pelo próprio Ares.
 > Detalhes em [`docs/PROGRAMACAO.md`](docs/PROGRAMACAO.md).
+>
+> **Versão 0.15 (entregue):** ✅ **coder autônomo** (`codigo.projeto`, `src/main/coder.ts`):
+> planeja → escreve → roda → itera sozinho, com as mesmas barreiras. Validado construindo um
+> jogo da velha jogável na Área de Trabalho. Detalhes em [`docs/PROGRAMACAO.md`](docs/PROGRAMACAO.md).
 
 Legenda de esforço: 🟢 baixo · 🟡 médio · 🔴 alto. ✅ = já implementado.
 
