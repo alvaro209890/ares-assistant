@@ -4,6 +4,32 @@ Todas as mudanças relevantes do Ares. O formato segue de perto
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/) e o projeto usa
 versionamento semântico.
 
+## [0.13.0] — 2026-06-06
+
+Foco: **velocidade** do loop do agente e **mais proatividade**.
+
+### Desempenho
+
+- **Ferramentas de consulta em paralelo** — `runQuery` agora roda via `Promise.all`
+  (clima, notícias, web, código são independentes), em vez de sequencial; a ordem
+  dos resultados é preservada.
+- **Resumo de contexto não-bloqueante** — `summarizeIfNeeded` deixou de ser
+  aguardado no fim do turno: a resposta e a liberação para o próximo comando não
+  esperam mais essa otimização de bastidor.
+
+### Adicionado (proatividade)
+
+- **Carregador estagnado** — avisa quando a fonte está conectada mas a bateria não
+  carrega ("Not charging") e está abaixo de 90% (cabo solto / fonte fraca).
+- **Heads-up de clima de manhã** — entre 6h e 10h, se houver alerta ou ≥60% de
+  chance de chuva, o Ares sugere o guarda-chuva. O clima é buscado em segundo plano
+  (cache de até 30 min, reusando localização/cidade padrão).
+
+### Testes
+
+- `tests/proactive.test.ts`: bateria estagnada e clima de manhã (com/sem alerta,
+  dentro/fora da janela). Total: 82 testes.
+
 ## [0.12.0] — 2026-06-06
 
 Foco: **proatividade** — o Ares fala primeiro no momento certo, como um JARVIS,

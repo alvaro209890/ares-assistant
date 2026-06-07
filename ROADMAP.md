@@ -50,6 +50,10 @@ conhecimento técnico), com o motivo de cada uma.
 > **Versão 0.12 (entregue):** ✅ **proatividade de ambiente** — bateria, heads-up de evento e
 > tarefas vencidas, priorizado com cooldown/silêncio (`src/main/proactive.ts`). Detalhes em
 > [`docs/PROATIVIDADE.md`](docs/PROATIVIDADE.md).
+>
+> **Versão 0.13 (entregue):** ✅ **velocidade** (ferramentas em paralelo + resumo
+> não-bloqueante) e ✅ **mais proatividade** (carregador estagnado + heads-up de clima de
+> manhã). Detalhes em [`CHANGELOG.md`](CHANGELOG.md).
 
 Legenda de esforço: 🟢 baixo · 🟡 médio · 🔴 alto. ✅ = já implementado.
 

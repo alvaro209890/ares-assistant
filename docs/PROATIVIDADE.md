@@ -22,6 +22,8 @@ fura).
 | --- | --- | --- | --- |
 | Bateria crítica | ≤ 10% e descarregando | 100 (fura tudo) | 5 min |
 | Bateria fraca | ≤ 20% e descarregando | 60 | 20 min |
+| Carregador estagnado | conectado, "Not charging" e < 90% | 50 | 30 min |
+| Clima de manhã | 6h–10h, com alerta ou ≥ 60% de chance de chuva | 50 | 12 h |
 | Bateria cheia | ≥ 97% e carregando | 30 | 60 min |
 | Evento chegando | evento **sem lembrete** começando em ≤ 10 min | 70 | 6 h |
 | Tarefas vencidas | há tarefas vencidas | 20 | 4 h |
@@ -30,11 +32,16 @@ Exemplos falados:
 
 - "Senhor, a bateria está crítica, em 8%. Conecte o carregador."
 - "A bateria está em 18%. Talvez seja bom conectar o carregador."
+- "O carregador parece conectado, mas a bateria não está carregando, em 55%. Vale checar o cabo."
+- "Senhor, há boa chance de chuva hoje. Vale levar um guarda-chuva."
 - "Senhor, em 7 minutos: Reunião."
 - "Você tem 3 tarefas vencidas."
 
 O heads-up de evento cobre eventos **sem** `remindMinutes` (os com lead já são
 avisados pela camada agendada), evitando aviso duplicado.
+
+O clima é buscado em segundo plano (cache de até 30 min, reusando a localização ou
+a cidade padrão) e o aviso sai só na **janela da manhã**, uma vez por dia.
 
 ## Bateria
 
@@ -54,7 +61,8 @@ briefing.
 `tests/proactive.test.ts` (puro, sem tocar no sistema):
 
 - `readBatteryFrom`/`readBattery`: leitura de capacidade/status e ausência;
-- `buildNudges`: bateria crítica/fraca/cheia, heads-up de evento (e ignorar os com
-  lead/fora da janela), tarefas vencidas;
+- `buildNudges`: bateria crítica/fraca/cheia/estagnada, heads-up de evento (e
+  ignorar os com lead/fora da janela), clima de manhã (alerta ou chuva, só na
+  janela) e tarefas vencidas;
 - `pickProactiveNudge`: prioridade, cooldown, silêncio noturno e intervalo mínimo
   (com o crítico furando as restrições).

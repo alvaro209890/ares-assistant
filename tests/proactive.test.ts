@@ -17,8 +17,9 @@ const battery = (over: Partial<BatteryInfo> = {}): BatteryInfo => ({
 
 const noBattery: BatteryInfo = { present: false, percent: 0, status: '', charging: false, discharging: false, full: false }
 
-// Um horário de DIA fixo (14h) para sair do silêncio noturno nos testes.
+// Horários fixos para controlar silêncio noturno e janela matinal nos testes.
 const DAYTIME = new Date('2026-06-06T14:00:00').getTime()
+const MORNING = new Date('2026-06-06T08:00:00').getTime()
 const NIGHT = new Date('2026-06-06T23:30:00').getTime()
 
 const state = (over: Partial<ProactiveState> = {}): ProactiveState => ({
@@ -94,6 +95,28 @@ describe('proatividade — buildNudges', () => {
   it('avisa tarefas vencidas', () => {
     const n = buildNudges(state({ overdueCount: 3 }))
     expect(n.find((x) => x.id === 'overdue')?.text).toMatch(/3 tarefas vencidas/)
+  })
+
+  it('avisa carregador conectado mas sem carregar (<90%)', () => {
+    const stalled = battery({ percent: 55, status: 'Not charging', discharging: false, charging: false, full: false })
+    expect(buildNudges(state({ battery: stalled })).some((x) => x.id === 'battery-stalled')).toBe(true)
+    // perto do cheio é normal não carregar -> não avisa
+    const quaseCheio = battery({ percent: 95, status: 'Not charging', discharging: false, charging: false, full: false })
+    expect(buildNudges(state({ battery: quaseCheio })).some((x) => x.id === 'battery-stalled')).toBe(false)
+  })
+
+  it('dá heads-up de clima de manhã com alerta ou alta chance de chuva', () => {
+    expect(buildNudges(state({ now: MORNING, weather: { rainProbToday: 80 } })).some((x) => x.id === 'weather-morning')).toBe(true)
+    expect(
+      buildNudges(state({ now: MORNING, weather: { rainProbToday: 10, alert: 'tempestade à tarde' } })).some(
+        (x) => x.id === 'weather-morning'
+      )
+    ).toBe(true)
+  })
+
+  it('não fala de clima fora da manhã nem sem chuva', () => {
+    expect(buildNudges(state({ now: DAYTIME, weather: { rainProbToday: 90 } })).some((x) => x.id === 'weather-morning')).toBe(false)
+    expect(buildNudges(state({ now: MORNING, weather: { rainProbToday: 20 } })).some((x) => x.id === 'weather-morning')).toBe(false)
   })
 })
 

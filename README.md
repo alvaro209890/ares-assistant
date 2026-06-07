@@ -37,6 +37,12 @@ O projeto roda em modo de desenvolvimento. O empacotamento `.deb` está configur
 - **Orbe flutuante (companion)**: uma mini-orbe always-on-top que reflete o estado do Ares; clique para abrir o app, ou use o microfone dela para falar sem trazer a janela principal.
 - **Barge-in (interromper a fala)**: na conversa contínua, comece a falar por cima e o Ares para na hora e te ouve; a tecla `Esc` também interrompe a fala a qualquer momento.
 
+### Novidades da versão 0.13
+
+- **Mais rápido**: as ferramentas de consulta (clima, notícias, web, código) agora rodam **em paralelo** em vez de uma a uma, e o resumo de contexto virou **não-bloqueante** — o Ares libera o próximo comando na hora, sem esperar tarefas de bastidor.
+- **Proatividade melhor**: aviso quando o **carregador está conectado mas a bateria não carrega** (cabo solto) e **heads-up de clima de manhã** ("há boa chance de chuva hoje, vale um guarda-chuva"), buscado em segundo plano com cache.
+- +3 testes (82 no total). Detalhes em [`docs/PROATIVIDADE.md`](docs/PROATIVIDADE.md).
+
 ### Novidades da versão 0.12
 
 - **Proatividade de ambiente**: além dos lembretes agendados, o Ares **fala primeiro** sobre o que importa agora — **bateria fraca/crítica** (lida de `/sys`), **evento chegando** em minutos (heads-up para eventos sem lembrete) e **tarefas vencidas**.

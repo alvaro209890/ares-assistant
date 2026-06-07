@@ -68,17 +68,23 @@ export interface ProactiveEvent {
   remindMinutes?: number
 }
 
+export interface ProactiveWeather {
+  rainProbToday: number // 0..100
+  alert?: string // alerta simples já formatado (chuva forte, calor extremo, etc.)
+}
+
 export interface ProactiveState {
   now: number
   battery: BatteryInfo
   events: ProactiveEvent[]
   overdueCount: number
   eventHeadsUpMin: number
+  weather?: ProactiveWeather | null
 }
 
 export interface ProactiveNudge {
   id: string // id estável para o cooldown
-  kind: 'battery' | 'event' | 'tasks'
+  kind: 'battery' | 'event' | 'tasks' | 'weather'
   text: string // falável
   priority: number // maior = mais importante
   cooldownMs: number
@@ -119,6 +125,16 @@ export function buildNudges(s: ProactiveState): ProactiveNudge[] {
       cooldownMs: 60 * 60_000
     })
   }
+  // Carregador conectado mas a bateria não sobe (cabo solto / fonte fraca).
+  if (b.present && !b.discharging && !b.charging && !b.full && b.percent < 90 && /not charging/i.test(b.status)) {
+    out.push({
+      id: 'battery-stalled',
+      kind: 'battery',
+      text: `O carregador parece conectado, mas a bateria não está carregando, em ${b.percent}%. Vale checar o cabo.`,
+      priority: 50,
+      cooldownMs: 30 * 60_000
+    })
+  }
 
   // Heads-up de eventos SEM lembrete configurado (os com lead já são avisados pelo notify).
   for (const e of s.events) {
@@ -134,6 +150,23 @@ export function buildNudges(s: ProactiveState): ProactiveNudge[] {
         text: `Senhor, ${quando}: ${e.title}.`,
         priority: 70,
         cooldownMs: 6 * 60 * 60_000
+      })
+    }
+  }
+
+  // Heads-up de clima de manhã (6h–10h): se há alerta ou alta chance de chuva.
+  const w = s.weather
+  if (w) {
+    const h = new Date(s.now).getHours()
+    const morning = h >= 6 && h < 10
+    if (morning && (w.alert || (w.rainProbToday ?? 0) >= 60)) {
+      const what = w.alert || 'há boa chance de chuva hoje'
+      out.push({
+        id: 'weather-morning',
+        kind: 'weather',
+        text: `Senhor, ${what}. Vale levar um guarda-chuva.`,
+        priority: 50,
+        cooldownMs: 12 * 60 * 60_000
       })
     }
   }

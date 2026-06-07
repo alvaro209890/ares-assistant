@@ -635,8 +635,9 @@ export async function runTurn(
   const queries = env.acoes.filter((a) => QUERY_TOOLS.has(a.tipo))
 
   if (queries.length) {
-    const results: unknown[] = []
-    for (const q of queries) results.push(await runQuery(q, cfg, sessionId))
+    // Ferramentas de consulta rodam em PARALELO (são, em geral, independentes:
+    // clima, notícias, web, código). Promise.all preserva a ordem dos resultados.
+    const results = await Promise.all(queries.map((q) => runQuery(q, cfg, sessionId)))
     const followup: ChatMessage[] = [
       ...messages,
       { role: 'assistant', content: env.fala || '...' },
@@ -691,7 +692,9 @@ export async function runTurn(
     { id: uid('m'), role: 'user', content: userText, ts: Date.now() },
     { id: uid('m'), role: 'assistant', content: fala, ts: Date.now() }
   ])
-  await summarizeIfNeeded(sessionId)
+  // O resumo de contexto é uma otimização para turnos FUTUROS — não deve atrasar
+  // a resposta atual nem a liberação para o próximo comando. Roda em segundo plano.
+  void summarizeIfNeeded(sessionId)
 
   return {
     fala,

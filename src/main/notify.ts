@@ -3,7 +3,9 @@ import { loadBoard, saveBoard } from './tasks'
 import { loadEvents, setEvents, loadReminders, setReminders } from './data'
 import { advanceISO } from './board'
 import { readConfig } from './config'
-import { pickProactiveNudge, readBattery } from './proactive'
+import { pickProactiveNudge, readBattery, type ProactiveWeather } from './proactive'
+import { getWeather, getWeatherAt } from './tools'
+import type { AppConfig } from '../shared/types'
 
 // Lembretes locais: varre periodicamente tarefas (reminderAt) e eventos (whenISO).
 // Ao chegar a hora, mostra notificação nativa e avisa o renderer (que fala, se a
@@ -17,6 +19,24 @@ let getWindow: (() => BrowserWindow | null) | null = null
 const proactiveLastShown: Record<string, number> = {}
 let proactiveLastAny = 0
 const PROACTIVE_MIN_INTERVAL = 8 * 60_000
+
+// Cache de clima para o heads-up matinal (atualizado no máximo a cada 30 min).
+let weatherCache: ProactiveWeather | null = null
+let weatherAt = 0
+async function refreshWeather(cfg: AppConfig): Promise<void> {
+  if (Date.now() - weatherAt < 30 * 60_000) return
+  weatherAt = Date.now() // marca antes para não disparar várias buscas simultâneas
+  try {
+    const loc = cfg.integrations.location
+    const w =
+      loc.enabled && typeof loc.latitude === 'number'
+        ? await getWeatherAt(loc)
+        : await getWeather(cfg.integrations.weatherCity)
+    weatherCache = { rainProbToday: w.today?.precipProb ?? 0, alert: w.alert }
+  } catch {
+    /* mantém o cache anterior em caso de falha de rede */
+  }
+}
 
 /** Mostra uma notificação nativa e avisa o renderer (que fala, se a voz estiver ativa). */
 function emit(body: string): void {
@@ -35,7 +55,9 @@ function fire(prefix: string, title: string): void {
 
 /** Camada proativa: escolhe no máximo um aviso de ambiente e o anuncia. */
 function proactiveTick(now: number, board: ReturnType<typeof loadBoard>, events: ReturnType<typeof loadEvents>): void {
-  if (readConfig().ui.proactiveAlerts === false) return
+  const cfg = readConfig()
+  if (cfg.ui.proactiveAlerts === false) return
+  void refreshWeather(cfg) // atualiza o clima em segundo plano (throttled)
   const overdueCount = Object.values(board.cards).filter(
     (c) => !c.done && c.due && new Date(c.due).getTime() < now
   ).length
@@ -45,7 +67,8 @@ function proactiveTick(now: number, board: ReturnType<typeof loadBoard>, events:
       battery: readBattery(),
       events: events.map((e) => ({ id: e.id, title: e.title, whenISO: e.whenISO, remindMinutes: e.remindMinutes })),
       overdueCount,
-      eventHeadsUpMin: 10
+      eventHeadsUpMin: 10,
+      weather: weatherCache
     },
     proactiveLastShown,
     proactiveLastAny,
