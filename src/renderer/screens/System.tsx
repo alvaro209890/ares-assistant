@@ -91,31 +91,18 @@ export default function System(): JSX.Element {
               <Row k="Modelo" v={diag.nineRouter.model} />
             </Panel>
 
-            <Panel title="PONTE · HERMES">
-              <Status
-                ok={diag.hermes.ok}
-                label={diag.hermes.enabled ? (diag.hermes.ok ? 'Online' : 'Indisponível') : 'Desativada'}
-                detail={diag.hermes.detail}
-              />
-              <Row k="URL" v={diag.hermes.baseUrl} />
-              <Row k="Comando" v={diag.hermes.messagePath} />
-              <Row k="Código" v={diag.hermes.codePath} />
-              <Row k="Status" v={diag.hermes.healthPath} />
-              <Row k="Timeout" v={`${diag.hermes.timeoutMs} ms`} />
-            </Panel>
-
             <Panel title="PROGRAMAÇÃO">
               {config ? (
                 <>
                   <Status
                     ok={config.integrations.code.enabled}
-                    label={config.integrations.code.enabled ? 'Ferramentas locais ativas' : 'Desativadas'}
-                    detail="leitura e busca em modo somente leitura"
+                    label={config.integrations.code.enabled ? 'Ferramentas nativas ativas' : 'Desativadas'}
+                    detail="leitura, escrita, patches e terminal local"
                   />
                   <Row k="Workspace" v={config.integrations.code.workspaceRoot} />
                   <Row k="Raízes" v={config.integrations.code.allowedRoots.join(', ') || '—'} />
                   <Row k="Arquivo máx." v={`${config.integrations.code.maxFileKB} KB`} />
-                  <Row k="Contexto Hermes" v={`${config.integrations.code.maxContextChars} chars`} />
+                  <Row k="Contexto interno" v={`${config.integrations.code.maxContextChars} chars`} />
                   <Row k="Comandos" v={String(config.integrations.code.allowedCommands.length)} />
                   <Row k="Aplicar patches" v={config.integrations.code.allowPatchApply ? 'permitido' : 'bloqueado'} />
                   <Row

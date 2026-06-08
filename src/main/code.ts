@@ -9,7 +9,6 @@ import type {
   CodeDiagnosis,
   CodeDiagnosisCheck,
   CodeFileSnippet,
-  CodeHermesResult,
   CodePatchApplyResult,
   CodePatchPreview,
   CodeProjectIndex,
@@ -20,7 +19,6 @@ import type {
   CodeWriteResult,
   CommandClassification
 } from '../shared/types'
-import { hermesCodeTask } from './hermes'
 import { normalizeTemplate, slug, templateFiles } from './scaffold'
 
 const IGNORE_NAMES = new Set([
@@ -310,42 +308,11 @@ export function codePromptContext(cfg: AppConfig): string {
   const c = codeConfig(cfg)
   if (!c.enabled) return 'Ferramentas de programação locais: desativadas.'
   return [
-    `Ferramentas de programação locais: ativadas (read-only).`,
+    `Ferramentas de programação locais: ativadas com leitura, escrita, patches, terminal e coder autônomo nativos.`,
     `Workspace padrão: ${c.workspaceRoot}.`,
     `Raízes permitidas: ${(c.allowedRoots || []).join(', ') || '(sem restrição explícita)'}.`,
-    `Limites: arquivo até ${c.maxFileKB} KB, ${c.maxSearchResults} resultados de busca, ${c.maxContextChars} caracteres de contexto para Hermes.`
+    `Limites: arquivo até ${c.maxFileKB} KB, ${c.maxSearchResults} resultados de busca, ${c.maxContextChars} caracteres de contexto interno.`
   ].join('\n')
-}
-
-export async function delegateCodeToHermes(
-  cfg: AppConfig,
-  sessionId: string,
-  opts: { task: string; mode?: string; root?: string; files?: string[]; extra?: Record<string, unknown> }
-): Promise<CodeHermesResult> {
-  if (!cfg.integrations.hermes.enabled) throw new Error('Ponte com o Hermes desativada nas Configurações.')
-  const workspace = summarizeCodeWorkspace(cfg, opts.root)
-  const snippets: CodeFileSnippet[] = []
-  let usedChars = JSON.stringify(workspace).length
-  const maxChars = Math.max(2000, codeConfig(cfg).maxContextChars)
-
-  for (const file of opts.files || []) {
-    if (!file || usedChars >= maxChars) continue
-    const snippet = readCodeFile(cfg, { root: workspace.root, file, lines: 160 })
-    usedChars += snippet.content.length
-    if (usedChars <= maxChars) snippets.push(snippet)
-  }
-
-  return hermesCodeTask(
-    cfg.integrations.hermes,
-    {
-      task: opts.task,
-      mode: opts.mode || 'assist',
-      workspace,
-      files: snippets,
-      extra: opts.extra
-    },
-    sessionId
-  )
 }
 
 function splitCommand(command: string): string[] {
@@ -447,7 +414,12 @@ const DEFAULT_TERMINAL_SAFE = [
   'wc',
   'echo',
   'which',
+  'where',
   'env',
+  'dir',
+  'type',
+  'Get-ChildItem',
+  'Get-Content',
   'date',
   'whoami',
   'uname',
@@ -501,10 +473,21 @@ export function classifyCommand(cfg: AppConfig, command: string): CommandClassif
 }
 
 /**
- * Executa um comando no terminal do projeto via shell real (bash -lc), com pipes
- * e operadores como num terminal de verdade. Comandos 'confirm' só rodam quando
- * `approved` é true (ou `terminalAutoApprove` está ligado); 'blocked' nunca roda.
+ * Executa um comando no terminal do projeto via shell real, com pipes e operadores.
+ * No Windows usa PowerShell; nos demais sistemas usa bash. Comandos 'confirm' só
+ * rodam quando `approved` é true (ou `terminalAutoApprove` está ligado); 'blocked'
+ * nunca roda.
  */
+function platformShell(command: string): { file: string; args: string[] } {
+  if (process.platform === 'win32') {
+    return {
+      file: 'powershell.exe',
+      args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command]
+    }
+  }
+  return { file: 'bash', args: ['-lc', command] }
+}
+
 export function runCodeTerminal(
   cfg: AppConfig,
   opts: { root?: string; command: string; approved?: boolean }
@@ -525,7 +508,8 @@ export function runCodeTerminal(
   }
 
   const started = Date.now()
-  const res = spawnSync('bash', ['-lc', command], {
+  const shell = platformShell(command)
+  const res = spawnSync(shell.file, shell.args, {
     cwd: root,
     encoding: 'utf8',
     timeout: Math.max(1000, Math.min(Number(codeConfig(cfg).commandTimeoutMs) || 120000, 10 * 60_000)),

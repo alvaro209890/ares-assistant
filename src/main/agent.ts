@@ -31,7 +31,7 @@ import {
   loadReminders,
   userDataDir
 } from './data'
-import { getWeather, getWeatherAt, getNews, webSearch, calcExpression, convertCurrency, convertUnit, readPage, hermesExecute } from './tools'
+import { getWeather, getWeatherAt, getNews, webSearch, calcExpression, convertCurrency, convertUnit, readPage } from './tools'
 import { getSystemMetrics, readClipboard, writeClipboard } from './system'
 import {
   controlPromptContext,
@@ -53,7 +53,6 @@ import {
   applyCodePatch,
   buildCodeIndex,
   codePromptContext,
-  delegateCodeToHermes,
   diagnoseProject,
   previewCodePatch,
   readCodeFile,
@@ -160,7 +159,6 @@ FERRAMENTAS DE CONSULTA (dê uma fala curta tipo "Deixe-me verificar." e AGUARDE
 - codigo.workspace {path?}   (resume um projeto/workspace local: stack, scripts, árvore, git, linguagens)
 - codigo.buscar {path?, consulta, filtro?}   (busca texto/símbolo no código; use antes de explicar funções ou localizar implementação)
 - codigo.ler {path?, arquivo, inicio?, linhas?}   (lê trecho de arquivo local com números de linha; use para responder com precisão)
-- codigo.hermes {tarefa, modo?(review|edit|debug|tests|refactor|explain), path?, arquivos?}   (envia tarefa de programação ao Hermes Code com contexto local; use para análise profunda, edição, refatoração, correção de bug ou plano de testes)
 - codigo.comando {path?, comando}   (executa comando de dev da allowlist, sem shell, com timeout; use para testes/build/typecheck)
 - codigo.terminal {path?, comando, confirmado?}   (TERMINAL completo via shell, com pipes/&&/redirecionamento. Comando seguro/allowlist roda direto; qualquer outro EXIGE autorização: chame SEM "confirmado" para propor — vem requiresApproval — explique e peça o "sim"; comandos catastróficos/sudo são bloqueados)
 - codigo.confirmar {}   (executa a ação que ficou pendente de autorização, DEPOIS que o usuário disser sim/autorizo/pode)
@@ -173,12 +171,11 @@ FERRAMENTAS DE CONSULTA (dê uma fala curta tipo "Deixe-me verificar." e AGUARDE
 - codigo.projeto {objetivo, path?, passos?}   (CODER AUTÔNOMO: dado um objetivo, ele planeja, escreve os arquivos, roda checagens seguras e itera sozinho até concluir; precisa de "Permitir aplicar patches". Use para "construa/faça um app/site/programa que faça X" quando envolver vários arquivos ou lógica)
 - codigo.patch.preview {path?, diff?, patches?}   (valida e resume patch antes de aplicar; use sempre antes de aplicação)
 - codigo.patch.aplicar {path?, diff?, patches?}   (aplica patch apenas se habilitado e já confirmado pelo usuário)
-- hermes.executar {comando}   (delegue ao Hermes pedidos externos que são dele: WhatsApp, Trello, Obsidian, office de agentes, Pedro/Junim/Maicom ou automações já existentes no Hermes)
 
 MODO PROGRAMADOR:
 - Para perguntas de código, não chute: use codigo.workspace/codigo.buscar/codigo.ler quando houver path, arquivo, símbolo ou repo mencionado.
-- Se o usuário pedir edição/refatoração/debug/testes em projeto real, reúna contexto local e use codigo.hermes; o Hermes deve receber tarefa objetiva, modo e arquivos relevantes.
-- Para patches do Hermes Code, primeiro use codigo.patch.preview. Só use codigo.patch.aplicar se o usuário pedir claramente para aplicar e a config permitir.
+- Se o usuário pedir edição/refatoração/debug/testes em projeto real, trabalhe com as ferramentas nativas: localize contexto, leia os arquivos, escreva com codigo.criar/codigo.patch.aplicar ou use codigo.projeto para mudanças maiores.
+- Para patches, primeiro use codigo.patch.preview. Só use codigo.patch.aplicar se o usuário pedir claramente para aplicar e a config permitir.
 - Para validar mudanças, use codigo.comando com scripts permitidos (ex.: npm test, npm run build, npm run typecheck) e reporte stdout/stderr relevantes.
 - TERMINAL: para testes/build padrão prefira codigo.comando; para QUALQUER outro comando (instalar dependência, criar/editar arquivo, git add/commit/push, rodar script próprio) use codigo.terminal.
 - AUTORIZAÇÃO: se codigo.terminal devolver requiresApproval, NÃO repita a chamada nem invente que rodou. Diga em voz natural exatamente o comando que será executado e por quê, e peça confirmação. Quando o usuário autorizar, chame codigo.confirmar; se recusar, chame codigo.cancelar. Só anuncie um resultado depois que "ran" for true.
@@ -196,7 +193,7 @@ CONFIANÇA NA CONVERSA:
 - DESAMBIGUAÇÃO: se o pedido casar com VÁRIOS itens existentes (você vê tarefas/eventos/listas no CONTEXTO) e não estiver claro qual, pergunte "qual deles?" listando as opções, em vez de chutar.
 - CORREÇÃO: se o usuário corrigir ("não, eu disse X", "não era isso", "errado"), reconheça; se a última ação foi errada, inclua a ação desfazer e refaça com o valor certo.
 
-Regras: use nomes de colunas/tarefas/listas existentes (ver CONTEXTO). Datas SEMPRE em ISO local sem fuso (ex.: 2026-06-03T09:00), resolvidas pela seção DATAS. memoria.salvar só para fatos duradouros do usuário (preferências, perfil, rotina), nunca para pedidos pontuais. Para rascunho de mensagem/e-mail: escreva o texto em "fala" para o usuário revisar e, se ele pedir para guardar, use nota.salvar. Para ações externas sensíveis via Hermes (enviar mensagem, publicar, alterar Trello/Obsidian), só execute quando destinatário/conteúdo/alvo estiverem claros; se faltar algo, peça confirmação em vez de chamar a ferramenta.`
+Regras: use nomes de colunas/tarefas/listas existentes (ver CONTEXTO). Datas SEMPRE em ISO local sem fuso (ex.: 2026-06-03T09:00), resolvidas pela seção DATAS. memoria.salvar só para fatos duradouros do usuário (preferências, perfil, rotina), nunca para pedidos pontuais. Para rascunho de mensagem/e-mail: escreva o texto em "fala" para o usuário revisar e, se ele pedir para guardar, use nota.salvar. Para ações externas sensíveis (enviar mensagem, publicar, alterar serviços externos), só oriente o usuário ou peça confirmação; não finja integrações que não existem.`
 }
 
 // Âncoras de datas relativas, pré-calculadas, para o LLM resolver "hoje", "amanhã",
@@ -231,7 +228,6 @@ function buildSystemPrompt(ctx: {
   board: Board
   events: CalendarEvent[]
   location: UserLocation
-  hermes: AppConfig['integrations']['hermes']
   codeContext: string
   controlContext: string
   summary?: string
@@ -249,9 +245,6 @@ function buildSystemPrompt(ctx: {
       : ctx.location.city || ctx.location.label
         ? `${ctx.location.label || [ctx.location.city, ctx.location.region].filter(Boolean).join(', ')} (manual)`
       : '(não disponível; use a cidade padrão quando necessário)'
-  const hermes = ctx.hermes.enabled
-    ? `Ativada em ${ctx.hermes.baseUrl}${ctx.hermes.messagePath || '/message'}. Use hermes.executar para comandos de WhatsApp, Trello, Obsidian, office de agentes e automações do Hermes.`
-    : 'Desativada nas Configurações. Se o usuário pedir algo que depende do Hermes, explique que a ponte precisa ser ativada.'
   return [
     PERSONA,
     ctx.voice ? VOICE_HINT : TEXT_HINT,
@@ -259,7 +252,6 @@ function buildSystemPrompt(ctx: {
     `# CONTEXTO`,
     `## DATAS\n${dateAnchors(now)}`,
     `## Localização aproximada do usuário\n${loc}`,
-    `## Ponte com o Hermes\n${hermes}`,
     `## Programação\n${ctx.codeContext}`,
     `## Controle do computador\n${ctx.controlContext}`,
     `## Sobre o usuário (memória de longo prazo)\n${memorySummary()}`,
@@ -374,23 +366,6 @@ async function runQuery(a: Acao, cfg: AppConfig, sessionId: string): Promise<unk
             lines: Number(a.linhas || a.lines || 0) || undefined
           })
         }
-      case 'codigo.hermes': {
-        const files = Array.isArray(a.arquivos)
-          ? a.arquivos.map((x) => String(x)).filter(Boolean)
-          : Array.isArray(a.files)
-            ? a.files.map((x) => String(x)).filter(Boolean)
-            : []
-        return {
-          tipo: a.tipo,
-          resultado: await delegateCodeToHermes(cfg, sessionId, {
-            task: String(a.tarefa || a.comando || a.texto || ''),
-            mode: String(a.modo || a.mode || 'assist'),
-            root: String(a.path || a.raiz || a.workspace || ''),
-            files,
-            extra: { origem: 'agente-ares' }
-          })
-        }
-      }
       case 'codigo.comando':
         return {
           tipo: a.tipo,
@@ -488,10 +463,6 @@ async function runQuery(a: Acao, cfg: AppConfig, sessionId: string): Promise<unk
             patches: a.patches
           })
         }
-      case 'hermes.executar': {
-        if (!integrations.hermes?.enabled) return { tipo: a.tipo, erro: 'Ponte com o Hermes desativada nas Configurações.' }
-        return { tipo: a.tipo, resultado: await hermesExecute(integrations.hermes, String(a.comando || a.texto || ''), sessionId) }
-      }
       case 'briefing.consultar': {
         const b = await buildBriefing(cfg)
         return {
@@ -660,7 +631,6 @@ export async function runTurn(
     board: loadBoard(),
     events: loadEvents(),
     location: cfg.integrations.location,
-    hermes: cfg.integrations.hermes,
     codeContext: codePromptContext(cfg),
     controlContext: controlPromptContext(cfg),
     summary: session?.summary,

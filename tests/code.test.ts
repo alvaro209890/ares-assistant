@@ -1,5 +1,3 @@
-import { createServer, type Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -10,7 +8,6 @@ import {
   applyCodePatch,
   buildCodeIndex,
   classifyCommand,
-  delegateCodeToHermes,
   diagnoseProject,
   planDiagnosis,
   previewCodePatch,
@@ -26,9 +23,6 @@ import {
 import { clearPendingCode, getPendingCode, setPendingCode } from '../src/main/pending'
 
 let root = ''
-let server: Server
-let hermesUrl = ''
-const codeRequests: unknown[] = []
 
 function writeProjectFile(file: string, content: string): void {
   const abs = join(root, file)
@@ -45,17 +39,6 @@ function config(patch: Partial<AppConfig['integrations']['code']> = {}): AppConf
       weatherCity: 'São Paulo',
       newsTopic: '',
       location: { enabled: false },
-      hermes: {
-        enabled: true,
-        baseUrl: hermesUrl,
-        messagePath: '/message',
-        codePath: '/code',
-        healthPath: '/health',
-        apiKey: '',
-        authHeader: 'Authorization',
-        timeoutMs: 3000,
-        responsePath: ''
-      },
       code: {
         enabled: true,
         workspaceRoot: root,
@@ -65,7 +48,7 @@ function config(patch: Partial<AppConfig['integrations']['code']> = {}): AppConf
         maxContextChars: 12000,
         allowedCommands: ['node --version', 'git status --short'],
         commandTimeoutMs: 30000,
-        allowPatchApply: false,
+        allowPatchApply: true,
         indexMaxFiles: 200,
         terminalEnabled: true,
         terminalAutoApprove: false,
@@ -99,7 +82,7 @@ function config(patch: Partial<AppConfig['integrations']['code']> = {}): AppConf
   }
 }
 
-beforeAll(async () => {
+beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'ares-code-test-'))
   writeProjectFile(
     'package.json',
@@ -109,38 +92,10 @@ beforeAll(async () => {
   writeProjectFile('src/feature.ts', 'import { greet } from "./main"\nexport const message = greet("Ares")\n')
   writeProjectFile('node_modules/pkg/index.js', 'ignored content')
   spawnSync('git', ['init'], { cwd: root })
-
-  server = createServer(async (req, res) => {
-    const chunks: Buffer[] = []
-    req.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
-    req.on('end', () => {
-      if (req.method === 'POST' && req.url === '/code') {
-        const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
-        codeRequests.push(body)
-        res.setHeader('Content-Type', 'application/json')
-        res.end(JSON.stringify({ reply: `analisado: ${body.task}` }))
-        return
-      }
-      res.statusCode = 404
-      res.end('not found')
-    })
-  })
-  await new Promise<void>((resolve) => {
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address() as AddressInfo
-      hermesUrl = `http://127.0.0.1:${address.port}`
-      resolve()
-    })
-  })
 })
 
-afterAll(async () => {
+afterAll(() => {
   rmSync(root, { recursive: true, force: true })
-  await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())))
-})
-
-beforeEach(() => {
-  codeRequests.length = 0
 })
 
 describe('ferramentas locais de programação', () => {
@@ -178,26 +133,6 @@ describe('ferramentas locais de programação', () => {
     expect(() => readCodeFile(config(), { file: '../fora.ts' })).toThrow(/fora do workspace|fora das raízes/)
   })
 
-  it('delega tarefa de programação ao Hermes com workspace e snippets', async () => {
-    const result = await delegateCodeToHermes(config(), 'sess-dev', {
-      task: 'analise a função greet',
-      mode: 'review',
-      files: ['src/main.ts']
-    })
-
-    expect(result.reply).toBe('analisado: analise a função greet')
-    expect(codeRequests).toHaveLength(1)
-    expect(codeRequests[0]).toMatchObject({
-      task: 'analise a função greet',
-      mode: 'review',
-      source: 'ares',
-      client: 'ares-desktop',
-      capability: 'code',
-      sessionId: 'sess-dev'
-    })
-    expect(JSON.stringify(codeRequests[0])).toContain('src/main.ts')
-  })
-
   it('executa apenas comandos permitidos por allowlist', () => {
     const ok = runCodeCommand(config(), { command: 'node --version' })
 
@@ -227,9 +162,9 @@ describe('ferramentas locais de programação', () => {
 
     expect(preview.canApply).toBe(true)
     expect(preview.files).toContain('src/main.ts')
-    expect(() => applyCodePatch(config(), patch)).toThrow(/desativada/)
+    expect(() => applyCodePatch(config({ allowPatchApply: false }), patch)).toThrow(/desativada/)
 
-    const applied = applyCodePatch(config({ allowPatchApply: true }), patch)
+    const applied = applyCodePatch(config(), patch)
     expect(applied.applied).toBe(true)
     expect(readCodeFile(config(), { file: 'src/main.ts' }).content).toContain('olá')
   })
@@ -308,7 +243,7 @@ describe('terminal com autorização', () => {
 
 describe('criar / scaffold / diagnóstico', () => {
   it('faz scaffold de um site quando a escrita está permitida', () => {
-    const res = scaffoldProject(config({ allowPatchApply: true }), { tipo: 'site', nome: 'Meu Site' })
+    const res = scaffoldProject(config(), { tipo: 'site', nome: 'Meu Site' })
 
     expect(res.template).toBe('site')
     expect(res.created).toContain('index.html')
@@ -318,17 +253,17 @@ describe('criar / scaffold / diagnóstico', () => {
   })
 
   it('exige permissão para escrever e recusa pasta não vazia', () => {
-    expect(() => scaffoldProject(config(), { tipo: 'site', nome: 'X' })).toThrow(/Permitir aplicar patches|desativada/)
-    scaffoldProject(config({ allowPatchApply: true }), { tipo: 'pagina', nome: 'Dois' })
-    expect(() => scaffoldProject(config({ allowPatchApply: true }), { tipo: 'pagina', nome: 'Dois' })).toThrow(/já existe/)
+    expect(() => scaffoldProject(config({ allowPatchApply: false }), { tipo: 'site', nome: 'X' })).toThrow(/Permitir aplicar patches|desativada/)
+    scaffoldProject(config(), { tipo: 'pagina', nome: 'Dois' })
+    expect(() => scaffoldProject(config(), { tipo: 'pagina', nome: 'Dois' })).toThrow(/já existe/)
   })
 
   it('cria um arquivo e recusa sobrescrever sem permissão explícita', () => {
-    const w = writeCodeFile(config({ allowPatchApply: true }), { file: 'novo/ola.txt', content: 'oi' })
+    const w = writeCodeFile(config(), { file: 'novo/ola.txt', content: 'oi' })
     expect(w.created).toBe(true)
     expect(readFileSync(join(root, 'novo', 'ola.txt'), 'utf8')).toBe('oi')
-    expect(() => writeCodeFile(config({ allowPatchApply: true }), { file: 'novo/ola.txt', content: 'x' })).toThrow(/já existe/)
-    const over = writeCodeFile(config({ allowPatchApply: true }), { file: 'novo/ola.txt', content: 'novo', overwrite: true })
+    expect(() => writeCodeFile(config(), { file: 'novo/ola.txt', content: 'x' })).toThrow(/já existe/)
+    const over = writeCodeFile(config(), { file: 'novo/ola.txt', content: 'novo', overwrite: true })
     expect(over.overwritten).toBe(true)
   })
 

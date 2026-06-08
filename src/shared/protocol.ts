@@ -30,7 +30,6 @@ export const QUERY_TOOLS = new Set([
   'codigo.workspace',
   'codigo.buscar',
   'codigo.ler',
-  'codigo.hermes',
   'codigo.comando',
   'codigo.terminal',
   'codigo.confirmar',
@@ -42,8 +41,7 @@ export const QUERY_TOOLS = new Set([
   'codigo.diagnostico',
   'codigo.projeto',
   'codigo.patch.preview',
-  'codigo.patch.aplicar',
-  'hermes.executar'
+  'codigo.patch.aplicar'
 ])
 
 // Ações de mutação conhecidas e os campos obrigatórios de cada uma. Usado para

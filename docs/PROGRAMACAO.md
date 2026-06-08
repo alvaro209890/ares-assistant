@@ -1,336 +1,107 @@
-# Programação no Ares
+# Programacao Nativa no Ares
 
-O Modo Programador dá ao Ares contexto real de projetos locais e uma ponte dedicada
-para o Hermes Code. Ares faz leitura e busca local em modo somente leitura; tarefas
-de edição, refatoração e análise profunda são enviadas ao Hermes.
+O modo programador do Ares e nativo. Ele trabalha diretamente no workspace permitido, sem delegar edicao, revisao, refatoracao ou teste para outro agente.
 
-## Ferramentas do Agente
+## Ferramentas
 
-- `codigo.workspace {path?}`: resume workspace, stack, scripts, git, linguagens,
-  arquivos relevantes e diretórios ignorados.
-- `codigo.buscar {path?, consulta, filtro?}`: busca texto ou símbolo no código.
-  `filtro` aceita valores simples como `*.ts`, `src/` ou `components`.
-- `codigo.ler {path?, arquivo, inicio?, linhas?}`: lê trecho de arquivo com números
-  de linha.
-- `codigo.hermes {tarefa, modo?, path?, arquivos?}`: delega ao Hermes Code com
-  workspace e snippets.
-- `codigo.comando {path?, comando}`: executa comando de desenvolvimento presente
-  na allowlist, sem shell.
-- `codigo.terminal {path?, comando, confirmado?}`: terminal completo via shell
-  (`bash -lc`), com pipes, `&&` e redirecionamento. Comandos seguros/allowlist
-  rodam direto; os demais exigem autorização; catastróficos são bloqueados.
-- `codigo.confirmar {}`: executa a ação que ficou pendente de autorização.
-- `codigo.cancelar {}`: descarta a ação pendente.
-- `codigo.git {path?, operacao, arquivo?}`: consulta `status`, `diff`, `diffStat`
-  ou `log`.
-- `codigo.scaffold {nome, tipo_projeto?(site|pagina|node), path?}`: **cria um
-  projeto novo** a partir de template (precisa de `allowPatchApply`).
-- `codigo.criar {path?, arquivo, conteudo, sobrescrever?}`: cria/escreve um arquivo
-  (precisa de `allowPatchApply`).
-- `codigo.diagnostico {path?}`: roda as checagens disponíveis e permitidas
-  (typecheck/lint/test) e resume a saúde do projeto.
-- `codigo.indexar {path?, refresh?}`: gera/lê índice persistente do projeto.
+- `codigo.workspace {path?}`: resume projeto, stack, scripts, linguagens e estado Git.
+- `codigo.buscar {path?, consulta, filtro?}`: busca texto ou simbolos.
+- `codigo.ler {path?, arquivo, inicio?, linhas?}`: le trechos com numeros de linha.
+- `codigo.criar {path?, arquivo, conteudo, sobrescrever?}`: cria ou escreve arquivo.
 - `codigo.patch.preview {path?, diff?, patches?}`: valida patch antes de aplicar.
-- `codigo.patch.aplicar {path?, diff?, patches?}`: aplica patch quando a config
-  permitir.
+- `codigo.patch.aplicar {path?, diff?, patches?}`: aplica diff Git ou patches textuais.
+- `codigo.scaffold {nome, tipo_projeto?, path?}`: cria projeto simples usando templates locais.
+- `codigo.projeto {objetivo, path?, passos?}`: planeja, altera arquivos e valida uma tarefa maior.
+- `codigo.comando {path?, comando}`: executa comando de desenvolvimento permitido, sem shell.
+- `codigo.terminal {path?, comando, confirmado?}`: executa shell real com classificacao de risco.
+- `codigo.confirmar {}`: executa comando pendente apos o usuario autorizar.
+- `codigo.cancelar {}`: descarta comando pendente.
+- `codigo.git {path?, operacao, arquivo?}`: consulta status, diff, diffStat ou log.
+- `codigo.indexar {path?, refresh?}`: gera indice persistente de arquivos e exports.
+- `codigo.diagnostico {path?}`: roda checagens detectadas e permitidas.
 
-Modos sugeridos para `codigo.hermes`:
+## Escrita de Codigo
 
-- `review`: revisão de código.
-- `edit`: edição/refatoração.
-- `debug`: investigação de bug.
-- `tests`: criação ou ajuste de testes.
-- `refactor`: reorganização técnica.
-- `explain`: explicação aprofundada.
+A escrita real usa `integrations.code.allowPatchApply`. Quando ativo, o Ares pode:
 
-## Configuração
+- criar arquivos;
+- aplicar patches textuais;
+- aplicar diffs Git;
+- gerar scaffolds;
+- usar o executor autonomo para tarefas de varios arquivos.
+
+O preview de patch continua recomendado antes de aplicar mudancas grandes. O agente deve explicar quais arquivos serao alterados e validar o projeto depois da escrita sempre que houver comando permitido.
+
+## Terminal
+
+O terminal nativo tem tres camadas:
+
+- `allowed`: comandos permitidos por allowlist ou prefixos seguros;
+- `confirm`: comandos que exigem autorizacao explicita do usuario;
+- `blocked`: comandos destrutivos ou de elevacao que nunca rodam.
+
+No Windows, `codigo.terminal` usa PowerShell. Nos demais sistemas, usa Bash. Exemplos bloqueados incluem elevacao de privilegio, formatacao de disco, reinicio da maquina e remocoes recursivas perigosas.
+
+## Diagnostico
+
+`codigo.diagnostico` examina `package.json` e tenta rodar scripts comuns quando eles estao permitidos:
+
+- typecheck;
+- lint;
+- test;
+- build.
+
+Se um script existir mas nao estiver na allowlist, ele aparece como nao executado. Isso evita que o Ares rode comandos inesperados sem configuracao explicita.
+
+## Configuracao Recomendada
 
 ```json
 {
   "integrations": {
-    "hermes": {
-      "codePath": "/code"
-    },
     "code": {
       "enabled": true,
-      "workspaceRoot": "/home/acer/Documentos",
-      "allowedRoots": ["/home/acer"],
+      "workspaceRoot": "~/Documentos",
+      "allowedRoots": ["~"],
       "maxFileKB": 256,
       "maxSearchResults": 40,
       "maxContextChars": 16000,
-      "allowedCommands": ["npm test", "npm run typecheck", "npm run build"],
+      "allowedCommands": [
+        "npm test",
+        "npm run test",
+        "npm run typecheck",
+        "npm run build",
+        "npm run verify",
+        "npx tsc --noEmit",
+        "git status --short",
+        "git diff --stat",
+        "git diff"
+      ],
       "commandTimeoutMs": 120000,
-      "allowPatchApply": false,
+      "allowPatchApply": true,
       "indexMaxFiles": 600,
       "terminalEnabled": true,
-      "terminalAutoApprove": false,
-      "terminalSafe": ["ls", "cat", "grep", "git status", "git diff", "node --version"]
+      "terminalAutoApprove": false
     }
   }
 }
 ```
 
-Campos:
+## Exemplos de Uso
 
-- `workspaceRoot`: workspace usado quando o usuário não informa path.
-- `allowedRoots`: barreira de segurança para leitura/busca local.
-- `maxFileKB`: tamanho máximo de arquivo lido.
-- `maxSearchResults`: limite por busca.
-- `maxContextChars`: limite aproximado do pacote enviado ao Hermes Code.
-- `allowedCommands`: lista exata de comandos que podem ser executados.
-- `commandTimeoutMs`: timeout de comandos.
-- `allowPatchApply`: precisa estar `true` para aplicar patches localmente.
-- `indexMaxFiles`: limite de arquivos no índice persistente.
-- `terminalEnabled`: liga o terminal completo (`codigo.terminal`).
-- `terminalAutoApprove`: roda comandos `confirm` sem pedir autorização.
-- `terminalSafe`: prefixos de comando que rodam sem autorização.
-- `hermes.codePath`: rota dedicada do Hermes para tarefas de programação.
+- "Analise o projeto em `/home/acer/Documentos/Ares`."
+- "Procure onde fica `runCodeTerminal`."
+- "Leia `src/main/code.ts` a partir da linha 420."
+- "Crie um arquivo `docs/NOTAS.md` com o resumo da arquitetura."
+- "Faça preview desse patch."
+- "Aplique o patch e rode `npm run verify`."
+- "Diagnostique este projeto."
+- "Crie uma pagina simples chamada Portfolio em `~/Documentos`."
 
-## Contrato Hermes Code
+## Boas Praticas do Agente
 
-Por padrão:
-
-```http
-POST {baseUrl}{codePath}
-Content-Type: application/json
-Authorization: Bearer <apiKey opcional>
-```
-
-Payload:
-
-```json
-{
-  "task": "corrija o bug no roteamento",
-  "mode": "debug",
-  "workspace": {
-    "root": "/home/acer/Documentos/Ares",
-    "files": ["src/main/agent.ts"]
-  },
-  "files": [
-    {
-      "file": "src/main/agent.ts",
-      "startLine": 1,
-      "endLine": 120,
-      "content": "1: import ..."
-    }
-  ],
-  "extra": {},
-  "source": "ares",
-  "client": "ares-desktop",
-  "capability": "code",
-  "sessionId": "id-da-conversa"
-}
-```
-
-Se o Hermes responder `404` ou `405` na rota `codePath`, o Ares faz fallback para
-`messagePath` com um texto iniciado por `[ARES_CODE_TASK]`.
-
-Resposta estruturada recomendada:
-
-```json
-{
-  "summary": "corrige o roteamento de ferramentas de código",
-  "patches": [{ "file": "src/main/agent.ts", "diff": "diff --git ..." }],
-  "tests": ["npm test"],
-  "risks": ["baixo risco; altera apenas prompt e roteamento"],
-  "commands": ["npm test"],
-  "needsConfirmation": true
-}
-```
-
-O Ares preserva esse objeto em `structured`, faz preview dos patches com
-`codigo.patch.preview` e só aplica com `codigo.patch.aplicar` quando o usuário
-confirmar e `allowPatchApply` estiver ativo.
-
-## Patches
-
-Formatos aceitos:
-
-```json
-{ "diff": "diff --git a/src/a.ts b/src/a.ts\n..." }
-```
-
-ou:
-
-```json
-{
-  "patches": [
-    { "file": "src/a.ts", "find": "antes", "replace": "depois" }
-  ]
-}
-```
-
-Para diffs, o Ares roda `git apply --check` no preview. Para patches textuais, ele
-confere se o trecho existe antes de aplicar.
-
-## Comandos e Git
-
-`codigo.comando` não usa shell e rejeita caracteres como `;`, `&`, `|`, `<`, `>` e
-`$`. O comando precisa bater com a allowlist.
-
-`codigo.git` aceita apenas:
-
-- `status`;
-- `diff`;
-- `diffStat`;
-- `log`.
-
-## Terminal com autorização
-
-`codigo.terminal` é o terminal completo do Ares: roda via shell real (`bash -lc`),
-então aceita pipes, `&&`, `||` e redirecionamento — um terminal de verdade. Para
-manter a segurança, cada comando passa por `classifyCommand`, que o coloca em uma
-de três camadas:
-
-- **`allowed`** — está na allowlist (`allowedCommands`) ou começa com um prefixo
-  seguro (`terminalSafe`, em geral comandos de leitura/inspeção). Roda direto.
-- **`confirm`** — qualquer outro comando (instalar dependência, criar/editar
-  arquivo, `git add/commit/push`, scripts próprios). Exige autorização explícita.
-- **`blocked`** — padrões catastróficos ou de elevação de privilégio. **Nunca**
-  rodam, nem com autorização: `sudo`/`su`/`doas`, `rm -rf` de raiz/HOME/`*`,
-  `mkfs`, `dd of=/dev/...`, escrita em disco, `shutdown`/`reboot`, fork bomb,
-  `chmod -R 777 /`, `curl ... | sh`.
-
-### Fluxo de autorização por voz
-
-1. O Ares chama `codigo.terminal` **sem** `confirmado`.
-2. Se o comando for `confirm`, a ferramenta devolve `requiresApproval: true` sem
-   executar, e guarda o comando exato como pendência da sessão
-   (`src/main/pending.ts`).
-3. O Ares diz em voz natural o que será executado e por quê, e pede o "sim"
-   ("Senhor, isso vai rodar `npm install left-pad`. Autoriza?").
-4. Ao autorizar, o Ares chama `codigo.confirmar`, que executa **exatamente** o
-   comando pendente. Ao recusar, chama `codigo.cancelar`.
-
-Com `terminalAutoApprove: true` (avançado), a camada `confirm` roda sem perguntar
-— a camada `blocked` continua bloqueada. A pendência expira em 10 minutos.
-
-Campos relacionados em `integrations.code`:
-
-- `terminalEnabled`: liga/desliga o terminal completo.
-- `terminalAutoApprove`: roda comandos `confirm` sem pedir (use com cautela).
-- `terminalSafe`: prefixos de comando que rodam sem autorização.
-
-## Criar projetos e diagnóstico
-
-O Ares não só lê código: ele **constrói**. Para "crie um site", ele usa
-`codigo.scaffold`.
-
-Templates (`src/main/scaffold.ts`):
-
-- `site` — site estático com `index.html`, `styles.css`, `script.js` e `README.md`
-  (responsivo, com variáveis CSS e uma interação simples em JS).
-- `pagina` — um único `index.html` com CSS embutido.
-- `node` — `package.json` (ESM), `index.js`, um teste com `node --test`,
-  `.gitignore` e `README.md`.
-
-Exemplo de voz: *"Ares, crie um site chamado Minha Loja na área de transferência."*
-→ `codigo.scaffold {nome:"Minha Loja", tipo_projeto:"site", path:"~/Área de trabalho"}`.
-O resultado traz `created`, `skipped` e `hints` (como abrir/rodar). Ele recusa
-sobrescrever uma pasta não vazia (a menos que `force`).
-
-`codigo.criar` escreve um arquivo avulso; `codigo.diagnostico` roda as checagens
-disponíveis e **permitidas** (typecheck/lint/test, via `planDiagnosis`) e resume
-passou/falhou.
-
-> Escritas reais (`scaffold`/`criar`) exigem `integrations.code.allowPatchApply`
-> ligado (Configurações > "Permitir aplicar patches"), e respeitam `allowedRoots`.
-
-### Proatividade em código
-
-O prompt orienta o Ares a agir como engenheiro proativo: depois de criar/editar,
-ele **valida** (roda `codigo.diagnostico`/`codigo.comando`), relata passou/falhou
-com o essencial, aponta riscos e sugere o próximo passo — sem esperar o usuário
-pedir. Ao criar um projeto, ele já diz como abrir/rodar.
-
-### Coder autônomo (`codigo.projeto`)
-
-Para tarefas com lógica ou vários arquivos ("faça um app de lista de tarefas",
-"construa um jogo da velha"), o Ares usa o **coder autônomo** (`src/main/coder.ts`):
-um pequeno laço de agente que, a partir de um objetivo, **planeja → escreve os
-arquivos → roda checagens seguras → vê o resultado → itera** até concluir (até 8
-passos), tudo com o mesmo cérebro (9Router) e as **mesmas barreiras**:
-
-- escrita só com `allowPatchApply` e dentro de `allowedRoots`;
-- roda **apenas comandos da camada segura** (allowlist/seguros) — instalar
-  dependências ou comandos que pedem autorização são **pulados** (reportados),
-  nunca executados sozinhos; comandos destrutivos são bloqueados;
-- arquivos sempre relativos à raiz do projeto (caminhos para fora são recusados).
-
-O resultado traz o `transcript` (o que foi escrito/rodado em cada passo), um
-`summary` final e `ok`. As peças são testáveis: `parseCoderStep` (puro) e
-`applyCoderStep` (IO) têm testes; o laço com o modelo é validado de ponta a ponta.
-
-> **Validado:** o coder construiu sozinho um **jogo da velha jogável**
-> (HTML/CSS/JS, com placar e reiniciar) na Área de Trabalho, em um único passo, e a
-> página foi servida com HTTP 200.
-
-## Índice Persistente
-
-`codigo.indexar` grava o índice em:
-
-```text
-~/.config/ares/code-indexes/
-```
-
-O índice inclui arquivos, linguagem, bytes, linhas, exports, scripts e status Git.
-
-## Segurança
-
-- As ferramentas de leitura/busca não escrevem arquivos.
-- `codigo.comando` roda **sem shell** e só aceita comandos da allowlist.
-- `codigo.terminal` roda **com shell**, mas em três camadas: comandos seguros/da
-  allowlist rodam direto, os demais exigem autorização explícita do usuário e os
-  catastróficos são bloqueados sempre (inclusive `sudo`).
-- Exceção controlada de escrita: `codigo.patch.aplicar` só escreve quando
-  `allowPatchApply=true` e o patch passou no preview.
-- Caminhos fora de `allowedRoots` são bloqueados (leitura, busca e workspace).
-- Arquivos binários ou acima de `maxFileKB` são recusados.
-- O contexto enviado ao Hermes é limitado por `maxContextChars`.
-
-## Exemplos de Voz
-
-- "Ares, analise o projeto em `/home/acer/Documentos/Ares`."
-- "Procure onde fica `hermesCodeTask`."
-- "Leia `src/main/agent.ts` a partir da linha 80."
-- "Peça ao Hermes Code para revisar `src/main/code.ts` e sugerir testes."
-- "Peça ao Hermes Code para refatorar o fluxo de diagnóstico."
-- "Rode `npm test`."
-- "Instale a dependência `dayjs`." (o Ares pede autorização antes de rodar)
-- "Crie a pasta `src/utils` e um arquivo index.ts." (pede autorização)
-- "Faça commit com a mensagem 'ajusta terminal' e dê push." (pede autorização)
-- "Pode rodar." / "Autorizo." (confirma o comando pendente)
-- "Deixa pra lá." (cancela o comando pendente)
-- "Mostre o diff atual."
-- "Faça preview deste patch antes de aplicar."
-
-## Testes
-
-```bash
-npm test
-```
-
-A suíte `tests/code.test.ts` valida:
-
-- resumo de workspace;
-- busca com filtro;
-- leitura com linhas;
-- bloqueio de path fora da raiz permitida;
-- delegação estruturada ao Hermes Code;
-- comandos allowlistados;
-- Git local;
-- índice persistente;
-- preview/aplicação de patch textual;
-- classificação do terminal (allowed/confirm/blocked);
-- terminal pedindo autorização e rodando após aprovação;
-- bloqueio de comandos catastróficos mesmo aprovados;
-- desligamento do terminal e store de pendências por sessão;
-- scaffold de site (e recusa de pasta não vazia), criar arquivo (e recusa de
-  sobrescrita), `planDiagnosis` e diagnóstico de projeto sem `package.json`.
-
-A suíte `tests/scaffold.test.ts` valida os templates: `slug`, `normalizeTemplate`
-e o conteúdo gerado de `site`, `pagina` e `node`.
-
-A suíte `tests/coder.test.ts` valida o coder autônomo: `parseCoderStep` (JSON
-válido/cercado/lixo) e `applyCoderStep` (escreve arquivos, recusa caminhos fora,
-roda só o seguro e respeita `allowPatchApply`).
+- Localizar antes de editar.
+- Ler arquivos com linhas antes de explicar detalhes.
+- Preferir patches pequenos e reversiveis.
+- Rodar diagnostico ou comando de teste apos mudancas.
+- Pedir autorizacao antes de comandos que alterem ambiente, dependencias ou Git.
+- Usar `codigo.git` para status e diff em vez de assumir o estado do repositorio.

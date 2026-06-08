@@ -44,7 +44,7 @@ const DEFAULT_PICTURES = firstExistingDir(
 
 export type { AppConfig }
 
-const CONFIG_RESET_VERSION = '0.18.0'
+const CONFIG_RESET_VERSION = '0.19.0'
 
 const DEFAULT_CONFIG: AppConfig = {
   nineRouter: {
@@ -71,17 +71,6 @@ const DEFAULT_CONFIG: AppConfig = {
     newsTopic: '',
     // O app pede permissao no onboarding. Ate la, usa a cidade padrao.
     location: { enabled: false },
-    hermes: {
-      enabled: false,
-      baseUrl: 'http://localhost:18789',
-      messagePath: '/message',
-      codePath: '/code',
-      healthPath: '/health',
-      apiKey: '',
-      authHeader: 'Authorization',
-      timeoutMs: 4000,
-      responsePath: ''
-    },
     code: {
       enabled: true,
       workspaceRoot: DEFAULT_DOCS,
@@ -102,7 +91,7 @@ const DEFAULT_CONFIG: AppConfig = {
         'git diff'
       ],
       commandTimeoutMs: 120000,
-      allowPatchApply: false,
+      allowPatchApply: true,
       indexMaxFiles: 600,
       terminalEnabled: true,
       terminalAutoApprove: false,
@@ -115,7 +104,12 @@ const DEFAULT_CONFIG: AppConfig = {
         'wc',
         'echo',
         'which',
+        'where',
         'env',
+        'dir',
+        'type',
+        'Get-ChildItem',
+        'Get-Content',
         'date',
         'whoami',
         'uname',
@@ -195,7 +189,8 @@ function writeResetMarker(): void {
 /** Mescla profundamente "patch" sobre "base" (apenas objetos simples). */
 function deepMerge<T>(base: T, patch: DeepPartial<T>): T {
   const out: any = Array.isArray(base) ? [...(base as any)] : { ...base }
-  for (const key of Object.keys(patch || {})) {
+  for (const key of Object.keys(base || {})) {
+    if (!Object.prototype.hasOwnProperty.call(patch || {}, key)) continue
     const pv: any = (patch as any)[key]
     const bv: any = (base as any)[key]
     if (pv && typeof pv === 'object' && !Array.isArray(pv) && bv && typeof bv === 'object') {

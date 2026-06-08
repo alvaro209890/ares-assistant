@@ -21,19 +21,8 @@ export interface AppConfig {
     weatherCity: string // cidade padrão (widget de clima)
     newsTopic: string // tema padrão de notícias ("" = manchetes gerais)
     location: UserLocation // localização aproximada local, com permissão do usuário
-    hermes: {
-      enabled: boolean
-      baseUrl: string
-      messagePath: string // rota de comando do Hermes
-      codePath: string // rota dedicada para tarefas de programação
-      healthPath: string // rota de status/ping do Hermes
-      apiKey: string // token opcional da ponte
-      authHeader: string // cabeçalho usado quando apiKey existir
-      timeoutMs: number
-      responsePath: string // caminho opcional da resposta, ex.: data.reply
-    }
     code: {
-      enabled: boolean // ferramentas locais read-only de programação
+      enabled: boolean // ferramentas locais de programação
       workspaceRoot: string // workspace padrão para leitura/busca
       allowedRoots: string[] // raízes permitidas para análise
       maxFileKB: number
@@ -348,16 +337,6 @@ export interface CodeFileSnippet {
   content: string
 }
 
-export interface CodeHermesResult {
-  reply: string
-  endpoint: string
-  status: number
-  latencyMs: number
-  sessionId?: string
-  fallback?: boolean
-  structured?: unknown
-}
-
 export interface CodeCommandResult {
   root: string
   command: string
@@ -486,14 +465,6 @@ export interface ServiceStatus {
   ok: boolean
   detail: string
 }
-export interface HermesStatus extends ServiceStatus {
-  enabled: boolean
-  baseUrl: string
-  messagePath: string
-  codePath: string
-  healthPath: string
-  timeoutMs: number
-}
 export interface DataFileInfo {
   name: string
   path: string
@@ -504,7 +475,6 @@ export interface DiagnosticsResult {
   app: { name: string; version: string; platform: string; electron: string; node: string; chrome: string }
   userDataPath: string
   nineRouter: ServiceStatus & { baseUrl: string; model: string }
-  hermes: HermesStatus
   groq: ServiceStatus & { configured: boolean }
   piper: { ready: boolean; voices: string[] }
   location: UserLocation

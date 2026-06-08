@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useAres } from '../lib/store'
 import { ptVoices } from '../lib/tts'
@@ -20,11 +19,9 @@ export default function SettingsPanel(): JSX.Element {
     exportData,
     importData,
     setGlobalShortcut,
-    setAutostart,
-    testHermes
+    setAutostart
   } = useAres()
   const pt = ptVoices(voices)
-  const [hermesTest, setHermesTest] = useState<string>('')
 
   const saveManualLocation = (nextCity: string, nextRegion: string): void => {
     if (!config) return
@@ -319,137 +316,6 @@ export default function SettingsPanel(): JSX.Element {
               <p className="text-[11px] text-cyan-200/45">Backup de tarefas, agenda, memória, listas, notas e lembretes (não inclui chaves).</p>
             </Section>
 
-            <Section title="PONTE COM O HERMES (avançado)">
-              <Toggle
-                label="Ativar ponte com o Hermes"
-                checked={config.integrations.hermes.enabled}
-                onChange={(v) =>
-                  saveConfig({ integrations: { ...config.integrations, hermes: { ...config.integrations.hermes, enabled: v } } })
-                }
-              />
-              <Field label="Endpoint do Hermes">
-                <input
-                  className="input"
-                  value={config.integrations.hermes.baseUrl}
-                  onChange={(e) =>
-                    saveConfig({
-                      integrations: { ...config.integrations, hermes: { ...config.integrations.hermes, baseUrl: e.target.value } }
-                    })
-                  }
-                />
-              </Field>
-              <div className="grid grid-cols-2 gap-2">
-                <Field label="Rota de comando">
-                  <input
-                    className="input"
-                    placeholder="/message"
-                    value={config.integrations.hermes.messagePath}
-                    onChange={(e) =>
-                      saveConfig({
-                        integrations: { ...config.integrations, hermes: { ...config.integrations.hermes, messagePath: e.target.value } }
-                      })
-                    }
-                  />
-                </Field>
-                <Field label="Rota de código">
-                  <input
-                    className="input"
-                    placeholder="/code"
-                    value={config.integrations.hermes.codePath}
-                    onChange={(e) =>
-                      saveConfig({
-                        integrations: { ...config.integrations, hermes: { ...config.integrations.hermes, codePath: e.target.value } }
-                      })
-                    }
-                  />
-                </Field>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <Field label="Rota de status">
-                  <input
-                    className="input"
-                    placeholder="/health"
-                    value={config.integrations.hermes.healthPath}
-                    onChange={(e) =>
-                      saveConfig({
-                        integrations: { ...config.integrations, hermes: { ...config.integrations.hermes, healthPath: e.target.value } }
-                      })
-                    }
-                  />
-                </Field>
-                <Field label="Timeout (ms)">
-                  <input
-                    className="input"
-                    type="number"
-                    min={1000}
-                    max={60000}
-                    step={500}
-                    value={config.integrations.hermes.timeoutMs}
-                    onChange={(e) =>
-                      saveConfig({
-                        integrations: {
-                          ...config.integrations,
-                          hermes: { ...config.integrations.hermes, timeoutMs: Number(e.target.value) || 4000 }
-                        }
-                      })
-                    }
-                  />
-                </Field>
-              </div>
-              <Field label="Token do Hermes">
-                <input
-                  className="input"
-                  type="password"
-                  placeholder="opcional"
-                  value={config.integrations.hermes.apiKey}
-                  onChange={(e) =>
-                    saveConfig({
-                      integrations: { ...config.integrations, hermes: { ...config.integrations.hermes, apiKey: e.target.value } }
-                    })
-                  }
-                />
-              </Field>
-              <Field label="Cabeçalho auth">
-                <input
-                  className="input"
-                  value={config.integrations.hermes.authHeader}
-                  onChange={(e) =>
-                    saveConfig({
-                      integrations: { ...config.integrations, hermes: { ...config.integrations.hermes, authHeader: e.target.value } }
-                    })
-                  }
-                />
-              </Field>
-              <Field label="Caminho da resposta">
-                <input
-                  className="input"
-                  placeholder="ex.: data.reply (opcional)"
-                  value={config.integrations.hermes.responsePath}
-                  onChange={(e) =>
-                    saveConfig({
-                      integrations: { ...config.integrations, hermes: { ...config.integrations.hermes, responsePath: e.target.value } }
-                    })
-                  }
-                />
-              </Field>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={async () => {
-                    setHermesTest('testando…')
-                    const r = await testHermes()
-                    setHermesTest(r.ok ? '✓ ' + r.detail : '✕ ' + r.detail)
-                  }}
-                  className="btn-ghost"
-                >
-                  TESTAR PONTE
-                </button>
-                {hermesTest && <span className="text-[11px] text-cyan-200/60">{hermesTest}</span>}
-              </div>
-              <p className="text-[11px] text-cyan-200/45">
-                Quando ligada, o Ares delega comandos ao Hermes por voz e envia o id da sessão para preservar contexto.
-              </p>
-            </Section>
-
             <Section title="PROGRAMAÇÃO">
               <Toggle
                 label="Ativar ferramentas locais de código"
@@ -565,7 +431,7 @@ export default function SettingsPanel(): JSX.Element {
                   />
                 </Field>
               </div>
-              <Field label="Contexto Hermes (chars)">
+              <Field label="Contexto interno (chars)">
                 <input
                   className="input"
                   type="number"

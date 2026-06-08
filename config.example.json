@@ -27,7 +27,7 @@
   },
 
   "integrations": {
-    "_doc": "Integrações sem chave: clima Open-Meteo, geolocalização local via Chromium + Nominatim, busca DuckDuckGo HTML, notícias Google News RSS. Cidade e UF são obrigatórias no 1º uso; coordenadas por geolocalização são opcionais. hermes: ponte opcional para delegar comandos externos e tarefas de programação ao Hermes. code: ferramentas locais read-only de programação.",
+    "_doc": "Integrações sem chave: clima Open-Meteo, geolocalização local via Chromium + Nominatim, busca DuckDuckGo HTML, notícias Google News RSS. Cidade e UF são obrigatórias no 1º uso; coordenadas por geolocalização são opcionais. code: ferramentas nativas de programação com leitura, escrita, patches, terminal e diagnóstico.",
     "weatherCity": "São Paulo",
     "newsTopic": "",
     "location": {
@@ -40,17 +40,6 @@
       "country": "",
       "label": "",
       "updatedAt": null
-    },
-    "hermes": {
-      "enabled": false,
-      "baseUrl": "http://localhost:18789",
-      "messagePath": "/message",
-      "codePath": "/code",
-      "healthPath": "/health",
-      "apiKey": "",
-      "authHeader": "Authorization",
-      "timeoutMs": 4000,
-      "responsePath": ""
     },
     "code": {
       "enabled": true,
@@ -73,7 +62,7 @@
         "git diff"
       ],
       "commandTimeoutMs": 120000,
-      "allowPatchApply": false,
+      "allowPatchApply": true,
       "indexMaxFiles": 600,
       "terminalEnabled": true,
       "terminalAutoApprove": false,
@@ -86,7 +75,12 @@
         "wc",
         "echo",
         "which",
+        "where",
         "env",
+        "dir",
+        "type",
+        "Get-ChildItem",
+        "Get-Content",
         "date",
         "whoami",
         "uname",

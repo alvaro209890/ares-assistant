@@ -10,7 +10,6 @@ import type {
   ChatSession,
   Checklist,
   DiagnosticsResult,
-  HermesStatus,
   MemoryCategory,
   MemoryFact,
   NewsItem,
@@ -138,7 +137,6 @@ const api = {
     setGlobalShortcut: (enabled: boolean): Promise<AppConfig> => ipcRenderer.invoke('system:setGlobalShortcut', enabled),
     setAutostart: (enabled: boolean): Promise<AppConfig> => ipcRenderer.invoke('system:setAutostart', enabled),
     testBrain: (): Promise<{ ok: boolean; detail: string }> => ipcRenderer.invoke('brain:test'),
-    testHermes: (): Promise<HermesStatus> => ipcRenderer.invoke('hermes:test'),
     // Bandeja "Briefing do dia" pede para abrir o briefing na janela principal.
     onBriefing: (cb: () => void): (() => void) => {
       const listener = (): void => cb()

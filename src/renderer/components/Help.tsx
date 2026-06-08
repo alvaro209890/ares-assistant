@@ -30,7 +30,11 @@ const GROUPS: { title: string; examples: string[] }[] = [
   },
   {
     title: 'Programação',
-    examples: ['Analise o projeto em /home/acer/Documentos/Ares', 'Procure onde fica hermesCodeTask', 'Peça ao Hermes Code para revisar src/main/code.ts']
+    examples: [
+      'Analise o projeto em /home/acer/Documentos/Ares',
+      'Procure onde fica runCodeTerminal',
+      'Revise src/main/code.ts e sugira melhorias'
+    ]
   }
 ]
 

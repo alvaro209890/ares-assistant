@@ -10,7 +10,6 @@ import { initOverlay, toggleOverlay, setOverlayState, focusMain, requestListen }
 import { setupTray, destroyTray, registerGlobalShortcut, setAutostart } from './desktop'
 import { exportData, importData } from './backup'
 import { getSystemMetrics, readClipboard } from './system'
-import { pingHermes } from './hermes'
 import { openRouterOAuth } from './oauth'
 import { getProvider } from '../shared/providers'
 import { startReminders } from './notify'
@@ -293,10 +292,6 @@ function registerIpc(): void {
       clearTimeout(timer)
       return { ok: false, detail: e?.name === 'AbortError' ? 'sem resposta (timeout)' : 'offline / inacessível' }
     }
-  })
-
-  ipcMain.handle('hermes:test', async () => {
-    return pingHermes(readConfig().integrations.hermes)
   })
 
   // Login OAuth de provedor (hoje: OpenRouter). Em caso de sucesso, grava a chave
