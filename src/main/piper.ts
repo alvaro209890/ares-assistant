@@ -1,34 +1,47 @@
 import { app } from 'electron'
 import { spawn } from 'child_process'
 import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync, rmSync, chmodSync } from 'fs'
-import { join } from 'path'
+import { join, dirname } from 'path'
 import { tmpdir } from 'os'
 
 // Voz neural local via Piper (https://github.com/rhasspy/piper).
-// Binário + vozes ficam em userData/piper. No Linux é o motor padrão (muito mais
-// natural que o espeak). Em outros SOs, o app usa a Web Speech do Chromium.
+// Binário + vozes ficam em userData/piper. É o motor padrão no Linux E no Windows
+// (muito mais natural/humano que o espeak no Linux ou as vozes SAPI do Windows).
+// Em macOS (ou se o download falhar), o app usa a Web Speech do Chromium.
 
 const PIPER_VERSION = '2023.11.14-2'
-const BIN_URL = `https://github.com/rhasspy/piper/releases/download/${PIPER_VERSION}/piper_linux_x86_64.tar.gz`
+const BIN_BASE = `https://github.com/rhasspy/piper/releases/download/${PIPER_VERSION}`
+// Asset por plataforma. Ambos extraem para uma pasta "piper/" com o binário + libs.
+const BIN_ASSET: Partial<Record<NodeJS.Platform, string>> = {
+  linux: 'piper_linux_x86_64.tar.gz',
+  win32: 'piper_windows_amd64.zip'
+}
 const VOICE_BASE = 'https://huggingface.co/rhasspy/piper-voices/resolve/main/pt/pt_BR'
+// faber-medium: voz masculina pt-BR, grave e clara — perfil "JARVIS" profissional.
 const DEFAULT_VOICE = {
   name: 'pt_BR-faber-medium',
   onnx: `${VOICE_BASE}/faber/medium/pt_BR-faber-medium.onnx`,
   json: `${VOICE_BASE}/faber/medium/pt_BR-faber-medium.onnx.json`
 }
 
+/** Plataformas em que o Piper neural é suportado (tem binário pré-compilado). */
+function piperSupported(): boolean {
+  return process.platform === 'linux' || process.platform === 'win32'
+}
+
 function piperDir(): string {
   return join(app.getPath('userData'), 'piper')
 }
 function binPath(): string {
-  return join(piperDir(), 'piper', 'piper')
+  const exe = process.platform === 'win32' ? 'piper.exe' : 'piper'
+  return join(piperDir(), 'piper', exe)
 }
 function voicesDir(): string {
   return join(piperDir(), 'voices')
 }
 
 export function isPiperReady(): boolean {
-  return process.platform === 'linux' && existsSync(binPath()) && listPiperVoices().length > 0
+  return piperSupported() && existsSync(binPath()) && listPiperVoices().length > 0
 }
 
 export function listPiperVoices(): string[] {
@@ -60,11 +73,30 @@ export function synthesize(text: string, opts: { voice?: string; rate?: number }
     const lengthScale = (1 / rate).toFixed(3)
 
     const out = join(tmpdir(), `ares-tts-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.wav`)
+    const binDir = dirname(bin)
+    // No Linux as libs do Piper ficam ao lado do binário (LD_LIBRARY_PATH).
+    // No Windows, as DLLs (onnxruntime etc.) e o espeak-ng-data são resolvidos a
+    // partir do diretório de trabalho — por isso rodamos com cwd = pasta do piper.
     const env = {
       ...process.env,
-      LD_LIBRARY_PATH: `${join(piperDir(), 'piper')}:${process.env.LD_LIBRARY_PATH || ''}`
+      LD_LIBRARY_PATH: `${binDir}:${process.env.LD_LIBRARY_PATH || ''}`,
+      PATH: `${binDir}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH || ''}`
     }
-    const child = spawn(bin, ['--model', model, '--length_scale', lengthScale, '--output_file', out], { env })
+    const child = spawn(
+      bin,
+      [
+        '--model',
+        model,
+        '--length_scale',
+        lengthScale,
+        // Pausa natural entre frases (cadência mais humana, estilo JARVIS).
+        '--sentence_silence',
+        '0.28',
+        '--output_file',
+        out
+      ],
+      { env, cwd: binDir }
+    )
     let err = ''
     child.stderr.on('data', (d) => (err += d.toString()))
     child.on('error', (e) => reject(e))
@@ -91,24 +123,42 @@ async function download(url: string, dest: string): Promise<void> {
   writeFileSync(dest, buf)
 }
 
+/** Extrai o pacote do Piper (tar.gz no Linux, zip no Windows) em piperDir. */
+function extractArchive(archive: string): Promise<void> {
+  return new Promise<void>((res, rej) => {
+    const p =
+      process.platform === 'win32'
+        ? spawn('powershell', [
+            '-NoProfile',
+            '-NonInteractive',
+            '-Command',
+            `Expand-Archive -LiteralPath '${archive}' -DestinationPath '${piperDir()}' -Force`
+          ])
+        : spawn('tar', ['-xzf', archive, '-C', piperDir()])
+    let err = ''
+    p.stderr?.on('data', (d) => (err += d.toString()))
+    p.on('close', (c) => (c === 0 ? res() : rej(new Error(`extração falhou: ${err.slice(-200)}`))))
+    p.on('error', rej)
+  })
+}
+
 /**
- * Garante o Piper instalado (só Linux). Baixa binário + voz padrão se faltarem.
- * Roda em background no start; até ficar pronto, a fala usa a Web Speech.
+ * Garante o Piper instalado (Linux e Windows). Baixa binário + voz padrão se
+ * faltarem. Roda em background no start; até ficar pronto, a fala usa a Web Speech.
  */
 export async function ensurePiper(): Promise<boolean> {
-  if (process.platform !== 'linux') return false
+  if (!piperSupported()) return false
   if (isPiperReady()) return true
+  const asset = BIN_ASSET[process.platform]
+  if (!asset) return false
   try {
     mkdirSync(voicesDir(), { recursive: true })
     if (!existsSync(binPath())) {
-      const tar = join(tmpdir(), 'piper_bin.tar.gz')
-      await download(BIN_URL, tar)
-      await new Promise<void>((res, rej) => {
-        const p = spawn('tar', ['-xzf', tar, '-C', piperDir()])
-        p.on('close', (c) => (c === 0 ? res() : rej(new Error('tar falhou'))))
-        p.on('error', rej)
-      })
-      rmSync(tar, { force: true })
+      const ext = asset.endsWith('.zip') ? 'zip' : 'tar.gz'
+      const archive = join(tmpdir(), `piper_bin.${ext}`)
+      await download(`${BIN_BASE}/${asset}`, archive)
+      await extractArchive(archive)
+      rmSync(archive, { force: true })
       try {
         chmodSync(binPath(), 0o755)
       } catch {

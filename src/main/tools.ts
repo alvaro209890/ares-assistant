@@ -9,10 +9,30 @@ import type { ReverseGeocodeResult, UserLocation, WeatherResult, WeatherPeriod, 
 const UA =
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
 
+// Busca texto com timeout e 1 retry. Em redes lentas/instáveis (comum no Windows
+// logo após o boot, antes do Wi-Fi subir) um fetch sem timeout fica pendurado e o
+// clima aparecia "OFFLINE" para sempre; com timeout + retry ele se recupera sozinho.
 async function fetchText(url: string, init?: RequestInit): Promise<string> {
-  const res = await fetch(url, { ...init, headers: { 'User-Agent': UA, ...(init?.headers || {}) } })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  return res.text()
+  let lastErr: unknown
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 12000)
+    try {
+      const res = await fetch(url, {
+        ...init,
+        signal: ctrl.signal,
+        headers: { 'User-Agent': UA, ...(init?.headers || {}) }
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      return await res.text()
+    } catch (e) {
+      lastErr = e
+    } finally {
+      clearTimeout(timer)
+    }
+    if (attempt === 0) await new Promise((r) => setTimeout(r, 600))
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
 }
 
 // ---------------- Clima (Open-Meteo) ----------------

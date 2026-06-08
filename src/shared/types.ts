@@ -10,7 +10,7 @@ export interface AppConfig {
   grog: { baseUrl: string; apiKey: string; sttModel: string }
   tts: {
     enabled: boolean // false = Ares no mudo
-    engine: 'auto' | 'piper' | 'web' // auto: Piper no Linux, Web Speech no Windows
+    engine: 'auto' | 'piper' | 'web' // auto: Piper no Linux/Windows, Web Speech de fallback
     piperVoice: string // ex.: "pt_BR-faber-medium"
     webVoiceURI: string // voz do sistema (Web Speech)
     rate: number // 0.5..1.6

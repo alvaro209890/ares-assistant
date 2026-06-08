@@ -5,12 +5,12 @@ Ares e um assistente desktop em Electron, React e TypeScript, feito para uso loc
 ## Destaques
 
 - **Primeira execucao obrigatoria**: o onboarding pede chave Groq, estado, cidade e provedor/modelo antes de liberar o uso normal.
-- **Voz no Windows**: usa Web Speech do Chromium com ajuste de velocidade, tom, fila de fala e selecao de voz do sistema.
-- **Voz no Linux**: usa Piper local quando disponivel, com fallback web.
+- **Voz neural (Linux e Windows)**: usa o Piper local — voz masculina pt-BR grave e humana, estilo JARVIS. O binario e baixado em background no primeiro uso; ate ficar pronto (e no macOS) usa a Web Speech do Chromium como fallback, priorizando vozes Natural/Neural/Online.
+- **Responde por voz tambem ao texto**: mensagens digitadas no chat sao faladas quando o TTS esta ligado, nao so os comandos de microfone.
 - **Modelos DeepSeek**: somente `deepseek-v4-flash` e `deepseek-v4-pro` ficam disponiveis.
 - **Modo Programador nativo**: busca codigo, le arquivos com linhas, cria arquivos, aplica patches, gera scaffold, roda diagnostico e usa terminal local com autorizacao.
 - **Edicao por voz no codigo**: entende caminhos ditados como "src barra main ponto ts" e evita ler codigo, diffs ou logs em voz alta.
-- **Windows pronto para upgrade**: o instalador NSIS remove a configuracao local antiga antes de instalar, forçando novo onboarding em PCs ja existentes.
+- **Atualizar por cima preserva os dados**: instalar uma versao nova sobre a antiga (Windows) mantem config, chaves, cidade, localizacao, tarefas, memoria e sessoes.
 - **Dados locais**: tarefas, memoria, agenda, listas, notas e lembretes ficam no `userData` do Electron.
 
 ## Instalar
@@ -23,7 +23,7 @@ O instalador e gerado pelo workflow **Build Installers** no GitHub Actions e tam
 dist/windows-installer/ARES-<versao>-Setup-x64.exe
 ```
 
-Ao instalar em um PC que ja tinha Ares, o instalador apaga `config.json` do perfil do usuario para zerar chaves, localizacao, modelo e preferencias antigas. Os demais dados do usuario nao sao apagados pelo script de reset.
+Ao instalar em um PC que ja tinha Ares, o instalador **atualiza no mesmo diretorio e preserva todos os dados** em `%APPDATA%\ares` (config, chaves, cidade, localizacao, tarefas, memoria, sessoes e a voz neural ja baixada). Campos novos de configuracao entram automaticamente pelo merge com os padroes — nao e preciso refazer o onboarding.
 
 ### Linux
 
@@ -67,8 +67,9 @@ Campos importantes:
 | `grog.apiKey` | chave Groq obrigatoria para transcricao de voz |
 | `nineRouter.baseUrl` | endpoint OpenAI-compatible do cerebro |
 | `nineRouter.model` | modelo de texto selecionado |
-| `tts.engine` | `auto`, `piper` ou `web` |
-| `tts.webVoiceURI` | voz do sistema usada no Windows |
+| `tts.engine` | `auto` (Piper no Linux/Windows, Web Speech de fallback), `piper` ou `web` |
+| `tts.piperVoice` | voz neural do Piper (padrao `pt_BR-faber-medium`) |
+| `tts.webVoiceURI` | voz do sistema usada no fallback Web Speech |
 | `integrations.location.city` | cidade definida no onboarding |
 | `integrations.location.region` | UF definida no onboarding |
 | `integrations.code.workspaceRoot` | workspace padrao do modo programador |
@@ -108,10 +109,11 @@ Quando a entrada vem do microfone, o agente adiciona uma interpretacao auxiliar 
 - `src/main/code.ts`: motor nativo de programacao, patches, terminal, scaffold e diagnostico.
 - `src/main/coder.ts`: executor autonomo para tarefas de codigo em varias etapas.
 - `src/main/voiceCode.ts`: interpretacao e sanitizacao de respostas de programacao por voz.
-- `src/main/config.ts`: defaults, migracao e reset de primeira execucao.
+- `src/main/piper.ts`: voz neural Piper multiplataforma (download do binario + sintese em Linux e Windows).
+- `src/main/config.ts`: defaults e merge nao-destrutivo da configuracao (preserva dados em upgrades).
 - `src/renderer`: interface React.
 - `src/preload`: API IPC tipada exposta ao renderer.
-- `build/installer.nsh`: customizacoes NSIS, incluindo reset de configuracao em upgrades Windows.
+- `build/installer.nsh`: customizacoes NSIS (upgrade no mesmo diretorio, preservando os dados do usuario).
 - `.github/workflows/build-installers.yml`: gera instaladores Linux e Windows.
 
 ## Verificacao

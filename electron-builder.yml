@@ -33,4 +33,7 @@ nsis:
   createDesktopShortcut: always
   createStartMenuShortcut: true
   shortcutName: ARES
+  # Instalar por cima atualiza no mesmo diretório e preserva os dados do usuário
+  # em %APPDATA%\ares (config, tarefas, memória, sessões, voz Piper).
+  deleteAppDataOnUninstall: false
   include: build/installer.nsh

@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
 import { homedir } from 'os'
 import type { AppConfig, DeepPartial } from '../shared/types'
@@ -44,7 +44,7 @@ const DEFAULT_PICTURES = firstExistingDir(
 
 export type { AppConfig }
 
-const CONFIG_RESET_VERSION = '0.19.1'
+const CONFIG_RESET_VERSION = '0.20.0'
 
 const DEFAULT_CONFIG: AppConfig = {
   nineRouter: {
@@ -59,7 +59,7 @@ const DEFAULT_CONFIG: AppConfig = {
   },
   tts: {
     enabled: true,
-    engine: 'auto', // Piper (neural) no Linux; Web Speech no Windows
+    engine: 'auto', // Piper (neural) no Linux e Windows; Web Speech como fallback
     piperVoice: 'pt_BR-faber-medium',
     webVoiceURI: '',
     rate: 0.92,
@@ -243,25 +243,25 @@ function persist(cfg: AppConfig): void {
   writeFileSync(path, JSON.stringify(cfg, null, 2), 'utf8')
 }
 
-/** Cria a config no 1º uso e auto-preenche a chave Groq se estiver vazia. */
+/**
+ * Cria a config no 1º uso e auto-preenche a chave Groq se estiver vazia.
+ *
+ * Atualizar o app por cima NUNCA apaga a config: campos novos de versões mais
+ * recentes entram pelo deepMerge em readConfig(), e os dados do usuário (nome,
+ * chaves, cidade, localização) são preservados. O marcador de versão serve só
+ * para registrar a última versão vista — não dispara mais reset destrutivo.
+ */
 export function ensureConfig(): AppConfig {
   const path = configPath()
-  let fresh = !existsSync(path)
-  if (!fresh && readResetMarker() !== CONFIG_RESET_VERSION) {
-    try {
-      rmSync(path, { force: true })
-      fresh = true
-    } catch {
-      fresh = false
-    }
-  }
+  const fresh = !existsSync(path)
   const cfg = readConfig()
   if (!cfg.grog.apiKey) {
     const detected = detectGroqKey()
     if (detected) cfg.grog.apiKey = detected
   }
-  if (fresh || !readConfig().grog.apiKey) persist(cfg)
-  if (fresh || readResetMarker() === CONFIG_RESET_VERSION || !existsSync(path)) writeResetMarker()
+  // Reescreve a config (preenchendo campos novos do merge) sem descartar dados.
+  persist(cfg)
+  if (fresh || readResetMarker() !== CONFIG_RESET_VERSION) writeResetMarker()
   return cfg
 }
 

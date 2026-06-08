@@ -222,12 +222,15 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   const refreshWidgets = useCallback(async () => {
     const cfg = configRef.current
     if (!cfg) return
+    const loc = cfg.integrations.location
+    const hasLocation = loc.enabled && typeof loc.latitude === 'number' && typeof loc.longitude === 'number'
+    const byCity = () => window.ares.weather.get(cfg.integrations.weatherCity)
     try {
-      const loc = cfg.integrations.location
-      const hasLocation = loc.enabled && typeof loc.latitude === 'number' && typeof loc.longitude === 'number'
-      setWeather(hasLocation ? await window.ares.weather.getCurrent(loc) : await window.ares.weather.get(cfg.integrations.weatherCity))
-    } catch {
+      // Tenta pela localização precisa; se falhar, cai para a cidade configurada.
+      setWeather(hasLocation ? await window.ares.weather.getCurrent(loc).catch(byCity) : await byCity())
+    } catch (e) {
       setWeather(null)
+      setStatus(`Clima indisponível: ${errMsg(e)}`)
     }
   }, [])
 
@@ -427,8 +430,11 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
       ])
       setAresState('thinking')
 
-      // Pede respostas mais curtas quando a entrada veio por voz e a fala está ativa.
-      const voice = viaVoice && !!configRef.current?.tts.enabled
+      // Fala a resposta sempre que o TTS estiver ligado — inclusive para mensagens
+      // digitadas (o Ares responde por voz também ao texto do chat).
+      const speak = !!configRef.current?.tts.enabled
+      // A entrada por voz pede respostas mais curtas (VOICE_HINT no cérebro).
+      const voice = viaVoice
       // Estado de streaming: texto exibido e buffer de sentenças (por fase).
       let phase = 1
       let display = ''
@@ -437,7 +443,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
       const opts = voiceOpts()
 
       const flush = (final: boolean): void => {
-        if (!voice) {
+        if (!speak) {
           sentenceBuf = ''
           return
         }
@@ -463,7 +469,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
         display += chunk
         const current = display
         setConversation((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: current } : m)))
-        if (voice) {
+        if (speak) {
           sentenceBuf += chunk
           flush(false)
         }
@@ -493,7 +499,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
             .then((mem) => setMemory(mem))
             .catch(() => {})
         }
-        if (voice) await waitForSpeechWithBargeIn()
+        if (speak) await waitForSpeechWithBargeIn()
         setAresState('idle')
         busyRef.current = false
       } catch (e) {

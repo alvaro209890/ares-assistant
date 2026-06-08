@@ -1,6 +1,7 @@
 // Síntese de voz do Ares.
-// No Linux, usa Piper local (neural) quando disponível. Web Speech/Chromium fica
-// como fallback e também atende outros sistemas.
+// No Linux e no Windows usa Piper local (neural) quando disponível — voz grave e
+// humana, estilo JARVIS. Web Speech/Chromium fica como fallback (enquanto o Piper
+// ainda baixa, ou no macOS).
 
 let currentAudio: HTMLAudioElement | null = null
 
@@ -33,12 +34,17 @@ function voiceScore(v: SpeechSynthesisVoice): number {
   let score = 0
   if (lang === 'pt-br') score += 100
   else if (lang.startsWith('pt')) score += 60
-  if (name.includes('natural')) score += 70
-  if (name.includes('neural')) score += 60
-  if (name.includes('online')) score += 35
+  if (name.includes('natural')) score += 80
+  if (name.includes('neural')) score += 70
+  if (name.includes('online')) score += 40
   if (name.includes('microsoft')) score += 25
-  if (name.includes('maria') || name.includes('francisca') || name.includes('antonio')) score += 20
-  if (name.includes('desktop')) score -= 10
+  if (name.includes('google')) score += 30
+  // Perfil JARVIS: preferir vozes masculinas e graves quando houver opção.
+  if (name.includes('antonio') || name.includes('daniel') || name.includes('felipe') || name.includes('fabio'))
+    score += 30
+  if (name.includes('maria') || name.includes('francisca') || name.includes('thalita') || name.includes('heloisa'))
+    score += 15
+  if (name.includes('desktop')) score -= 30 // vozes SAPI "desktop" são as mais robóticas
   return score
 }
 
@@ -117,9 +123,10 @@ export async function speak(text: string, opts: SpeakOptions = {}): Promise<void
     return
   }
   cancelSpeech()
+  const platform = window.ares.system.platform
   const wantsPiper =
     opts.engine === 'piper' ||
-    (opts.engine !== 'web' && window.ares.system.platform === 'linux')
+    (opts.engine !== 'web' && (platform === 'linux' || platform === 'win32'))
   if (wantsPiper) {
     const ok = await piperSpeak(clean, opts)
     if (ok || opts.engine === 'piper') {
