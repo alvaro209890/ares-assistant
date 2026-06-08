@@ -782,13 +782,6 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     }
   }, [refreshWidgets, showToast])
 
-  useEffect(() => {
-    const loc = config?.integrations.location
-    if (!ready || !loc?.enabled || typeof loc.latitude === 'number') return
-    const timer = setTimeout(() => void locateUser(), 1200)
-    return () => clearTimeout(timer)
-  }, [ready, config?.integrations.location, locateUser])
-
   const testVoice = useCallback(
     async (text = 'Olá, senhor. Aqui é o Ares, com voz neural pronta para ajudar.') => {
       await speakText(text)

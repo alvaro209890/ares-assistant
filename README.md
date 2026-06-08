@@ -2,7 +2,7 @@
 
 Ares é um app desktop local em Electron + React/Vite/TypeScript. Ele combina uma interface HUD futurista, orbe 3D reativa, voz neural local, conversa por texto/voz, Kanban, calendário, memória persistente inteligente, briefing do dia, diagnóstico do sistema e integrações externas sem login.
 
-O projeto roda em modo de desenvolvimento. O empacotamento `.deb` está configurado para o futuro, mas não deve ser executado nesta etapa.
+O projeto roda em modo de desenvolvimento e já possui empacotamento configurado para Linux (`.deb`/AppImage) e Windows (instalador NSIS `.exe`).
 
 ## Visão Geral
 
@@ -16,6 +16,9 @@ O projeto roda em modo de desenvolvimento. O empacotamento `.deb` está configur
 
 ### O que há de novo
 
+- **Instaladores Linux e Windows**: scripts `dist:linux`, `dist:deb`, `dist:win` e `dist:all`, com Electron Builder gerando `.deb`/AppImage no Linux e NSIS no Windows. O workflow `Build Installers` publica os artefatos em runners nativos do GitHub.
+- **Localização com consentimento explícito**: no 1º uso, o Ares pergunta antes de detectar a localização. Depois, a pessoa pode trocar em Configurações > Localização.
+- **Defaults multiplataforma**: pastas padrão de documentos e capturas respeitam Windows (`Documents`/`Pictures`) e Linux pt-BR (`Documentos`/`Imagens`) quando existirem.
 - **Agente mais esperto**: prompt com resolução de datas relativas (hoje, amanhã, semana que vem, daqui a 2 horas), respostas mais curtas quando a voz está ativa, validação forte das ações JSON e melhor decisão entre agir e só responder.
 - **Memória inteligente**: categorias (perfil, preferências, rotina, trabalho, projetos, restrições, interesses), auto-extração de fatos da conversa, fila de revisão antes de salvar, atualização de fatos antigos em vez de duplicar e resumo compacto injetado no prompt.
 - **Clima detalhado**: previsão por período (manhã/tarde/noite), sensação térmica, chuva, vento, umidade, alerta simples e horário/fonte da última atualização.
@@ -166,9 +169,9 @@ npm run build
 npm run verify
 npm run dev
 npm run bridge     # servidor local da ponte (Hermes/Code via 9Router)
+npm run dist:linux # gera .deb + AppImage em dist/
+npm run dist:win   # gera instalador NSIS .exe em dist/ (requer toolchain Windows/Wine quando rodado no Linux)
 ```
-
-Não rode `npm run dist:deb` agora. Esse comando existe apenas para empacotamento futuro.
 
 ## Estrutura do Projeto
 
@@ -233,7 +236,7 @@ Campos principais:
 | `tts.webVoiceURI` | voz Chromium/Web Speech |
 | `tts.rate`, `tts.pitch`, `tts.volume` | ajustes de fala |
 | `integrations.weatherCity` | cidade padrão quando a localização não está disponível |
-| `integrations.location.enabled` | ativa uso de localização aproximada |
+| `integrations.location.enabled` | ativa uso de localização aproximada após consentimento do usuário |
 | `integrations.location.latitude/longitude` | coordenadas salvas localmente após permissão |
 | `integrations.hermes.enabled` | ativa a delegação de comandos ao Hermes |
 | `integrations.hermes.baseUrl` | URL base do Hermes |
@@ -364,6 +367,7 @@ O Ares pode usar a localização aproximada do computador para melhorar clima e 
 
 Como funciona:
 
+- no primeiro uso, o onboarding pergunta se a pessoa quer permitir a detecção;
 - o renderer pede permissão via `navigator.geolocation`;
 - o Electron permite `geolocation`;
 - as coordenadas são salvas apenas em `~/.config/ares/config.json`;
@@ -371,7 +375,7 @@ Como funciona:
 - o clima usa Open-Meteo diretamente por latitude/longitude quando disponível;
 - o prompt recebe apenas uma linha curta com a localização aproximada (sem enviar histórico extra ao LLM).
 
-Você pode ativar/desativar e atualizar manualmente em Configurações > Integrações > Detectar agora.
+Você pode ativar/desativar, detectar novamente e trocar a cidade de fallback em Configurações > Localização.
 
 Se a permissão for negada, o app continua funcionando com `integrations.weatherCity` e avisa de forma amigável.
 
@@ -885,12 +889,20 @@ Ideias priorizadas para deixar o Ares mais fácil e útil para **pessoas comuns*
 guiado, ajuda com exemplos, listas simples, lembretes de remédio/rotina, timer por voz,
 acessibilidade, backup em 1 clique e mais) estão em [`ROADMAP.md`](ROADMAP.md).
 
-## Empacotamento Futuro
+## Empacotamento
 
-O alvo configurado é `.deb`:
+Os artefatos saem em `dist/`:
 
 ```bash
-npm run dist:deb
+npm run dist:linux # .deb + AppImage
+npm run dist:deb   # somente .deb
+npm run dist:win   # instalador NSIS .exe para Windows
+npm run dist:all   # Linux + Windows
 ```
 
-Não use esse comando até a etapa de empacotamento ser solicitada.
+Ao gerar Windows a partir do Linux, o Electron Builder pode exigir Wine/NSIS disponíveis no sistema. Em um runner Windows, `npm run dist:win` gera o instalador diretamente.
+
+O workflow `.github/workflows/build-installers.yml` roda em pushes no `main`, em releases publicadas e manualmente (`workflow_dispatch`). Ele valida com `npm run test` e envia os artefatos:
+
+- `ares-linux-installers`: `.deb`, AppImage e metadata Linux.
+- `ares-windows-installer`: instalador NSIS `.exe`.

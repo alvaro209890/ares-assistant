@@ -1,0 +1,74 @@
+name: Build Installers
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+  release:
+    types:
+      - published
+
+jobs:
+  linux:
+    name: Linux installers
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate
+        run: npm run test
+
+      - name: Build Linux installers
+        run: npm run dist:linux
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ares-linux-installers
+          path: |
+            dist/*.deb
+            dist/*.AppImage
+            dist/latest-linux.yml
+
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate
+        run: npm run test
+
+      - name: Build Windows installer
+        run: npm run dist:win
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ares-windows-installer
+          path: |
+            dist/*.exe
+            dist/latest.yml

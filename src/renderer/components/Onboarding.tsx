@@ -6,7 +6,7 @@ import ProviderConfig from './ProviderConfig'
 // Assistente de primeiros passos. Aparece só no 1º uso (config.ui.onboarded=false).
 // Reduz o atrito para quem não é técnico: nome, localização, voz e exemplos.
 export default function Onboarding(): JSX.Element {
-  const { ready, config, finishOnboarding, locateUser, testVoice, openHelp } = useAres()
+  const { ready, config, finishOnboarding, locateUser, testVoice, openHelp, saveConfig } = useAres()
   const [step, setStep] = useState(0)
   const [name, setName] = useState('')
 
@@ -64,18 +64,36 @@ export default function Onboarding(): JSX.Element {
             {step === 2 && (
               <div>
                 <p className="text-sm text-cyan-100/85">
-                  {name ? `Prazer, ${name}! ` : ''}Posso usar sua localização aproximada para o clima e testar minha voz neural.
+                  {name ? `Prazer, ${name}! ` : ''}Posso usar sua localização aproximada para melhorar clima, briefing e
+                  contexto local?
                 </p>
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <button onClick={() => void locateUser()} className="btn-ghost">
-                    DETECTAR LOCALIZAÇÃO
+                  <button
+                    onClick={async () => {
+                      await locateUser()
+                      setStep(3)
+                    }}
+                    className="btn-ghost"
+                  >
+                    PERMITIR E DETECTAR
                   </button>
+                  <button
+                    onClick={async () => {
+                      await saveConfig({ integrations: { location: { enabled: false } } })
+                      setStep(3)
+                    }}
+                    className="btn-ghost"
+                  >
+                    USAR CIDADE PADRÃO
+                  </button>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
                   <button onClick={() => void testVoice('Olá! Aqui é o Ares, pronto para ajudar.')} className="btn-ghost">
                     TESTAR VOZ
                   </button>
                 </div>
                 <p className="mt-3 text-[11px] text-cyan-200/45">
-                  Tudo fica no seu computador. Você pode mudar isso depois em Configurações.
+                  As coordenadas ficam neste computador. Você pode mudar isso depois em Configurações / Localização.
                 </p>
               </div>
             )}

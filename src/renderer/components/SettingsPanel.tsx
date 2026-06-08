@@ -686,13 +686,21 @@ export default function SettingsPanel(): JSX.Element {
               </Field>
             </Section>
 
-            <Section title="INTEGRAÇÕES">
+            <Section title="LOCALIZAÇÃO">
               <Toggle
                 label="Usar localização aproximada"
                 checked={config.integrations.location.enabled}
-                onChange={(v) =>
-                  saveConfig({ integrations: { ...config.integrations, location: { ...config.integrations.location, enabled: v } } })
-                }
+                onChange={(v) => {
+                  if (!v) {
+                    void saveConfig({ integrations: { location: { enabled: false } } })
+                    return
+                  }
+                  if (typeof config.integrations.location.latitude === 'number') {
+                    void saveConfig({ integrations: { location: { ...config.integrations.location, enabled: true } } })
+                  } else {
+                    void locateUser()
+                  }
+                }}
               />
               <div className="rounded-lg border border-cyan-300/15 bg-black/20 p-3">
                 <p className="text-xs text-cyan-100/85">
@@ -721,6 +729,12 @@ export default function SettingsPanel(): JSX.Element {
                   }
                 />
               </Field>
+              <p className="text-[11px] text-cyan-200/45">
+                Se a localização estiver desligada ou sem permissão, o clima usa a cidade padrão.
+              </p>
+            </Section>
+
+            <Section title="INTEGRAÇÕES">
               <Field label="Tema padrão de notícias">
                 <input
                   className="input"

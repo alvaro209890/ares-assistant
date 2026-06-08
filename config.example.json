@@ -27,11 +27,11 @@
   },
 
   "integrations": {
-    "_doc": "Integrações sem chave: clima Open-Meteo, geolocalização local via Chromium + Nominatim, busca DuckDuckGo HTML, notícias Google News RSS. hermes: ponte opcional para delegar comandos externos e tarefas de programação ao Hermes. code: ferramentas locais read-only de programação.",
+    "_doc": "Integrações sem chave: clima Open-Meteo, geolocalização local via Chromium + Nominatim, busca DuckDuckGo HTML, notícias Google News RSS. A geolocalização começa desligada e é pedida no 1º uso. hermes: ponte opcional para delegar comandos externos e tarefas de programação ao Hermes. code: ferramentas locais read-only de programação.",
     "weatherCity": "São Paulo",
     "newsTopic": "",
     "location": {
-      "enabled": true,
+      "enabled": false,
       "latitude": null,
       "longitude": null,
       "accuracy": null,
@@ -54,8 +54,9 @@
     },
     "code": {
       "enabled": true,
-      "workspaceRoot": "/home/acer/Documentos",
-      "allowedRoots": ["/home/acer"],
+      "_doc": "Na config real, workspaceRoot usa a pasta de documentos do sistema (Documents no Windows; Documentos/Documents no Linux) e allowedRoots começa na pasta do usuário.",
+      "workspaceRoot": "~/Documentos",
+      "allowedRoots": ["~"],
       "maxFileKB": 256,
       "maxSearchResults": 40,
       "maxContextChars": 16000,
@@ -108,7 +109,7 @@
     "control": {
       "_doc": "Controle do computador por voz. enabled: liga abrir apps/sites, volume, bloquear tela, captura. screenshotDir: pasta das capturas.",
       "enabled": true,
-      "screenshotDir": "/home/acer/Pictures"
+      "screenshotDir": "~/Imagens"
     }
   },
 

@@ -1,6 +1,6 @@
-# Configuração do empacotador. NÃO é executada nesta etapa.
-# Quando você quiser gerar o instalador (somente no futuro), rode:  npm run dist:deb
-# O ÚNICO alvo configurado é .deb (Linux), como combinado.
+# Configuracao do empacotador para Linux e Windows.
+# Linux: npm run dist:linux  -> .deb + AppImage
+# Windows: npm run dist:win  -> instalador NSIS .exe
 appId: com.ares.assistant
 productName: ARES
 directories:
@@ -9,12 +9,27 @@ directories:
 files:
   - out/**
   - package.json
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 linux:
   target:
     - deb
+    - AppImage
   category: Utility
   maintainer: acer
   synopsis: Assistente de IA pessoal estilo JARVIS
   description: >-
     ARES — assistente de IA pessoal com voz (STT/TTS), cérebro via 9 Router
     (GPT 5.5) e módulo de tarefas estilo Trello. Uso local, sem login.
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-Setup-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: ARES

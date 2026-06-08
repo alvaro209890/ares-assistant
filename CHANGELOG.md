@@ -4,6 +4,33 @@ Todas as mudanças relevantes do Ares. O formato segue de perto
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/) e o projeto usa
 versionamento semântico.
 
+## [0.17.0] — 2026-06-08
+
+Foco: **instalação multiplataforma** e localização com consentimento claro.
+
+### Adicionado
+
+- **Instaladores Linux e Windows** — `electron-builder.yml` agora configura Linux
+  (`.deb` + AppImage) e Windows (NSIS `.exe`). Novos scripts: `dist:linux`,
+  `dist:win` e `dist:all`, mantendo `dist:deb`.
+- **Workflow Build Installers** — `.github/workflows/build-installers.yml` gera
+  os artefatos em runners nativos do GitHub (Linux e Windows) em push no `main`,
+  release publicada ou execução manual.
+- **Localização no 1º uso** — o onboarding pede autorização explicitamente antes
+  de chamar `navigator.geolocation`; a pessoa pode aceitar ou seguir com a cidade
+  padrão.
+- **Configurações > Localização** — seção própria para ativar/desativar a
+  localização aproximada, detectar novamente e ajustar a cidade de fallback do
+  clima.
+
+### Corrigido
+
+- **Defaults Windows/Linux** — workspace padrão e pasta de capturas usam a pasta
+  existente do sistema (`Documents`/`Pictures` no Windows, `Documentos`/`Imagens`
+  no Linux pt-BR quando existirem), em vez de caminhos fixos de Linux.
+- **Sem prompt automático escondido** — o app não tenta detectar localização em
+  segundo plano só porque `location.enabled` está ativo sem coordenadas.
+
 ## [0.16.1] — 2026-06-08
 
 ### Corrigido

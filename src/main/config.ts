@@ -5,6 +5,36 @@ import { homedir } from 'os'
 import type { AppConfig, DeepPartial } from '../shared/types'
 import { detectProviderId } from '../shared/providers'
 
+// Pastas padrão que variam por sistema/idioma. Windows normalmente usa
+// Documents/Pictures; Linux pt-BR costuma usar Documentos/Imagens.
+function firstExistingDir(candidates: string[], fallback: string): string {
+  for (const c of candidates) {
+    try {
+      if (existsSync(c)) return c
+    } catch {
+      /* ignora */
+    }
+  }
+  return fallback
+}
+const home = homedir()
+const documentCandidates =
+  process.platform === 'win32'
+    ? [join(home, 'Documents'), join(home, 'Documentos')]
+    : [join(home, 'Documentos'), join(home, 'Documents')]
+const pictureCandidates =
+  process.platform === 'win32'
+    ? [join(home, 'Pictures'), join(home, 'Imagens')]
+    : [join(home, 'Imagens'), join(home, 'Pictures')]
+const DEFAULT_DOCS = firstExistingDir(
+  documentCandidates,
+  home
+)
+const DEFAULT_PICTURES = firstExistingDir(
+  pictureCandidates,
+  home
+)
+
 // ---------------------------------------------------------------------------
 // Configuração do Ares.
 // A fonte da verdade é um arquivo JSON em userData (Linux: ~/.config/ares/config.json).
@@ -37,7 +67,8 @@ const DEFAULT_CONFIG: AppConfig = {
   integrations: {
     weatherCity: 'São Paulo',
     newsTopic: '',
-    location: { enabled: true },
+    // O app pede permissao no onboarding. Ate la, usa a cidade padrao.
+    location: { enabled: false },
     hermes: {
       enabled: false,
       baseUrl: 'http://localhost:18789',
@@ -51,7 +82,7 @@ const DEFAULT_CONFIG: AppConfig = {
     },
     code: {
       enabled: true,
-      workspaceRoot: join(homedir(), 'Documentos'),
+      workspaceRoot: DEFAULT_DOCS,
       allowedRoots: [homedir()],
       maxFileKB: 256,
       maxSearchResults: 40,
@@ -104,7 +135,7 @@ const DEFAULT_CONFIG: AppConfig = {
     },
     control: {
       enabled: true,
-      screenshotDir: join(homedir(), 'Pictures')
+      screenshotDir: DEFAULT_PICTURES
     }
   },
   ui: {
