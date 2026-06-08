@@ -1,9 +1,10 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useAres } from '../lib/store'
 import Orb3D from '../components/Orb3D'
 import StateIndicator from '../components/StateIndicator'
 import Conversation from '../components/Conversation'
+import ConversationList from '../components/ConversationList'
 import Controls from '../components/Controls'
 
 const sameDay = (iso: string, ref = new Date()) => {
@@ -22,7 +23,9 @@ function formatUptime(sec: number): string {
 }
 
 export default function Assistant(): JSX.Element {
-  const { aresState, conversation, status, weather, events, board, metrics, createSession, openBriefing } = useAres()
+  const { aresState, conversation, status, weather, events, board, metrics, sessions, createSession, openBriefing } =
+    useAres()
+  const [showHistory, setShowHistory] = useState(false)
   const todayEvents = useMemo(() => events.filter((e) => sameDay(e.whenISO)).slice(0, 3), [events])
   const reminders = useMemo(
     () =>
@@ -122,13 +125,32 @@ export default function Assistant(): JSX.Element {
 
       <aside className="glass flex min-h-[420px] min-w-0 flex-col rounded-2xl p-4 lg:min-h-0">
         <div className="mb-3 flex items-center justify-between px-1">
-          <h3 className="text-xs title-track text-cyan-300/60">CONVERSA</h3>
-          <button onClick={() => createSession()} className="text-xs text-cyan-200/60 hover:text-cyan-100">
-            NOVA
-          </button>
+          <h3 className="text-xs title-track text-cyan-300/60">{showHistory ? 'HISTÓRICO' : 'CONVERSA'}</h3>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowHistory((v) => !v)}
+              className={`text-xs transition ${showHistory ? 'text-cyan-100' : 'text-cyan-200/60 hover:text-cyan-100'}`}
+              title="Ver histórico de conversas"
+            >
+              HISTÓRICO{sessions.length ? ` (${sessions.length})` : ''}
+            </button>
+            <button
+              onClick={() => {
+                void createSession()
+                setShowHistory(false)
+              }}
+              className="text-xs text-cyan-200/60 hover:text-cyan-100"
+            >
+              NOVA
+            </button>
+          </div>
         </div>
         <div className="min-h-0 flex-1">
-          <Conversation messages={conversation} />
+          {showHistory ? (
+            <ConversationList onPick={() => setShowHistory(false)} />
+          ) : (
+            <Conversation messages={conversation} />
+          )}
         </div>
       </aside>
     </motion.div>
