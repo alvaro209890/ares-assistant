@@ -243,7 +243,9 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
       voiceURI: cfg?.tts.webVoiceURI,
       rate: cfg?.tts.rate,
       pitch: cfg?.tts.pitch,
-      volume: cfg?.tts.volume
+      volume: cfg?.tts.volume,
+      // Falhas de voz deixam de ser silenciosas: aparecem no status.
+      onError: (msg) => setStatus(`Voz: ${msg}`)
     }
   }, [])
 

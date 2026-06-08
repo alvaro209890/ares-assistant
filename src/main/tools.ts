@@ -156,20 +156,64 @@ async function forecastByCoords(lat: number, lon: number, label: string): Promis
   }
 }
 
+// UF -> nome do estado (a geocoding da Open-Meteo devolve o nome completo em admin1).
+const UF_TO_STATE: Record<string, string> = {
+  AC: 'Acre', AL: 'Alagoas', AP: 'Amapá', AM: 'Amazonas', BA: 'Bahia', CE: 'Ceará',
+  DF: 'Distrito Federal', ES: 'Espírito Santo', GO: 'Goiás', MA: 'Maranhão',
+  MT: 'Mato Grosso', MS: 'Mato Grosso do Sul', MG: 'Minas Gerais', PA: 'Pará',
+  PB: 'Paraíba', PR: 'Paraná', PE: 'Pernambuco', PI: 'Piauí', RJ: 'Rio de Janeiro',
+  RN: 'Rio Grande do Norte', RS: 'Rio Grande do Sul', RO: 'Rondônia', RR: 'Roraima',
+  SC: 'Santa Catarina', SP: 'São Paulo', SE: 'Sergipe', TO: 'Tocantins'
+}
+
+const stripAccents = (s: string): string =>
+  s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
+
+/**
+ * Separa "Cidade, UF" (ou "Cidade - Estado", "Cidade/MT") em cidade + dica de
+ * região. A geocoding da Open-Meteo só aceita o NOME PURO da cidade — passar o
+ * sufixo do estado junto zera os resultados (era a causa do "Não encontrei a
+ * cidade"). A UF/estado vira filtro para desambiguar cidades homônimas.
+ */
+export function parseCityQuery(raw: string): { city: string; region: string } {
+  const parts = (raw || '').split(/[,/]|\s-\s/)
+  const city = (parts[0] || '').trim()
+  let region = parts.slice(1).join(' ').trim()
+  const uf = region.toUpperCase()
+  if (UF_TO_STATE[uf]) region = UF_TO_STATE[uf]
+  return { city, region }
+}
+
+/** Escolhe o melhor resultado de geocoding: região batendo -> Brasil -> primeiro. */
+export function pickGeoResult<T extends { admin1?: string; admin2?: string; country_code?: string }>(
+  results: T[],
+  region: string
+): T | undefined {
+  if (!results.length) return undefined
+  const want = region ? stripAccents(region) : ''
+  const byRegion = want
+    ? results.find((r) => stripAccents(r.admin1 || '') === want || stripAccents(r.admin2 || '') === want)
+    : undefined
+  return byRegion || results.find((r) => r.country_code === 'BR') || results[0]
+}
+
 export async function getWeather(city: string): Promise<WeatherResult> {
-  const q = (city || '').trim()
-  if (!q) throw new Error('Diga uma cidade para eu consultar o tempo.')
+  const raw = (city || '').trim()
+  if (!raw) throw new Error('Diga uma cidade para eu consultar o tempo.')
+  const { city: name, region } = parseCityQuery(raw)
   let geo: any
   try {
+    // Busca pelo nome puro com várias opções para conseguir desambiguar pela região.
     const txt = await fetchText(
-      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=1&language=pt&format=json`
+      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=10&language=pt&format=json`
     )
     geo = JSON.parse(txt)
   } catch {
     throw new Error('Não consegui consultar o clima agora (sem internet ou serviço fora do ar).')
   }
-  const loc = geo?.results?.[0]
-  if (!loc) throw new Error(`Não encontrei a cidade "${q}".`)
+  const results: any[] = geo?.results || []
+  const loc = pickGeoResult(results, region)
+  if (!loc) throw new Error(`Não encontrei a cidade "${name}".`)
   return forecastByCoords(loc.latitude, loc.longitude, `${loc.name}${loc.admin1 ? ', ' + loc.admin1 : ''}`)
 }
 

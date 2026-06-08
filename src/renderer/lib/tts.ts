@@ -60,13 +60,17 @@ export interface SpeakOptions {
   onError?: (msg: string) => void
 }
 
-function webSpeak(text: string, opts: SpeakOptions): void {
+async function webSpeak(text: string, opts: SpeakOptions): Promise<void> {
   const synth = window.speechSynthesis
   if (!synth) {
     opts.onError?.('Síntese de voz indisponível neste sistema.')
     opts.onEnd?.()
     return
   }
+  // No Windows/Electron a 1ª fala costuma ser engolida quando getVoices() ainda
+  // está vazio. Espera as vozes carregarem antes de falar.
+  let voices = synth.getVoices()
+  if (!voices.length) voices = await loadVoices()
   synth.cancel()
   const u = new SpeechSynthesisUtterance(text)
   u.lang = 'pt-BR'
@@ -74,7 +78,6 @@ function webSpeak(text: string, opts: SpeakOptions): void {
   u.rate = opts.rate ?? (win ? 0.92 : 1)
   u.pitch = opts.pitch ?? (win ? 1.04 : 1)
   u.volume = opts.volume ?? 1
-  const voices = synth.getVoices()
   const chosen =
     (opts.voiceURI && voices.find((v) => v.voiceURI === opts.voiceURI)) ||
     ptVoices(voices)[0] ||
@@ -84,10 +87,14 @@ function webSpeak(text: string, opts: SpeakOptions): void {
   u.onstart = () => opts.onStart?.()
   u.onend = () => opts.onEnd?.()
   u.onerror = (e) => {
-    opts.onError?.(`Falha na fala (${(e as SpeechSynthesisErrorEvent).error}).`)
+    const err = (e as SpeechSynthesisErrorEvent).error
+    // "canceled"/"interrupted" são esperados em barge-in; não trate como falha.
+    if (err !== 'canceled' && err !== 'interrupted') opts.onError?.(`Falha na fala (${err}).`)
     opts.onEnd?.()
   }
   synth.speak(u)
+  // Workaround do Chromium: às vezes a fila fica "pausada" e nada toca.
+  synth.resume()
 }
 
 async function piperSpeak(text: string, opts: SpeakOptions): Promise<boolean> {
@@ -129,12 +136,11 @@ export async function speak(text: string, opts: SpeakOptions = {}): Promise<void
     (opts.engine !== 'web' && (platform === 'linux' || platform === 'win32'))
   if (wantsPiper) {
     const ok = await piperSpeak(clean, opts)
-    if (ok || opts.engine === 'piper') {
-      if (!ok) opts.onEnd?.()
-      return
-    }
+    // Se o Piper foi forçado mas falhou, ainda assim cai para a Web Speech (assim
+    // o usuário nunca fica sem voz — ex.: Windows enquanto o Piper ainda baixa).
+    if (ok) return
   }
-  webSpeak(clean, opts)
+  await webSpeak(clean, opts)
 }
 
 export function cancelSpeech(): void {
@@ -166,7 +172,15 @@ async function drainQueue(): Promise<void> {
   while (sentenceQueue.length) {
     const { text, opts } = sentenceQueue.shift()!
     await new Promise<void>((resolve) => {
-      void speak(text, { ...opts, onEnd: () => resolve(), onError: () => resolve() })
+      void speak(text, {
+        ...opts,
+        onEnd: () => resolve(),
+        // Preserva o onError original (para a UI mostrar a falha) e segue a fila.
+        onError: (msg) => {
+          opts.onError?.(msg)
+          resolve()
+        }
+      })
     })
   }
   draining = false
