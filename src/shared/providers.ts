@@ -7,6 +7,7 @@ export interface ProviderPreset {
   label: string
   baseUrl: string
   defaultModel: string
+  models?: Array<{ label: string; value: string }>
   needsKey: boolean
   keyPlaceholder: string
   /** Provedor que oferece login OAuth (recebe a chave automaticamente). */
@@ -22,10 +23,14 @@ export const PROVIDERS: ProviderPreset[] = [
     id: 'deepseek',
     label: 'DeepSeek',
     baseUrl: 'https://api.deepseek.com/v1',
-    defaultModel: 'deepseek-chat',
+    defaultModel: 'deepseek-v4-flash',
+    models: [
+      { label: 'DeepSeek V4 Flash', value: 'deepseek-v4-flash' },
+      { label: 'DeepSeek V4 Pro', value: 'deepseek-v4-pro' }
+    ],
     needsKey: true,
     keyPlaceholder: 'sk-...',
-    hint: 'Barato e ótimo em português. Cole a chave sk-... da sua conta DeepSeek.',
+    hint: 'Modelos V4 atuais da API oficial: V4 Flash para velocidade e V4 Pro para raciocínio mais forte.',
     keyUrl: 'https://platform.deepseek.com/api_keys'
   },
   {

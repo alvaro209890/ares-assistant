@@ -246,6 +246,8 @@ function buildSystemPrompt(ctx: {
   const loc =
     ctx.location.enabled && typeof ctx.location.latitude === 'number' && typeof ctx.location.longitude === 'number'
       ? `${ctx.location.label || ctx.location.city || 'localização atual'} (aprox.)`
+      : ctx.location.city || ctx.location.label
+        ? `${ctx.location.label || [ctx.location.city, ctx.location.region].filter(Boolean).join(', ')} (manual)`
       : '(não disponível; use a cidade padrão quando necessário)'
   const hermes = ctx.hermes.enabled
     ? `Ativada em ${ctx.hermes.baseUrl}${ctx.hermes.messagePath || '/message'}. Use hermes.executar para comandos de WhatsApp, Trello, Obsidian, office de agentes e automações do Hermes.`

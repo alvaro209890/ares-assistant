@@ -34,4 +34,10 @@ describe('provedores de IA (cérebro)', () => {
     expect(getProvider('local')?.needsKey).toBe(false)
     expect(getProvider('deepseek')?.needsKey).toBe(true)
   })
+
+  it('limita DeepSeek aos modelos V4 oficiais atuais', () => {
+    const models = getProvider('deepseek')?.models?.map((m) => m.value)
+    expect(getProvider('deepseek')?.defaultModel).toBe('deepseek-v4-flash')
+    expect(models).toEqual(['deepseek-v4-flash', 'deepseek-v4-pro'])
+  })
 })

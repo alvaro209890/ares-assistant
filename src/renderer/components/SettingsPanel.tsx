@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useAres } from '../lib/store'
 import { ptVoices } from '../lib/tts'
 import ProviderConfig from './ProviderConfig'
+import { BRAZIL_STATES } from '../../shared/locations'
 
 export default function SettingsPanel(): JSX.Element {
   const {
@@ -24,6 +25,27 @@ export default function SettingsPanel(): JSX.Element {
   } = useAres()
   const pt = ptVoices(voices)
   const [hermesTest, setHermesTest] = useState<string>('')
+
+  const saveManualLocation = (nextCity: string, nextRegion: string): void => {
+    if (!config) return
+    const cleanCity = nextCity.trim()
+    const cleanRegion = nextRegion.trim().toUpperCase()
+    const label = [cleanCity, cleanRegion].filter(Boolean).join(', ')
+    void saveConfig({
+      integrations: {
+        weatherCity: label || config.integrations.weatherCity,
+        location: {
+          ...config.integrations.location,
+          enabled: !!(cleanCity && cleanRegion),
+          city: cleanCity,
+          region: cleanRegion,
+          country: cleanRegion ? 'BR' : config.integrations.location.country,
+          label,
+          updatedAt: Date.now()
+        }
+      }
+    })
+  }
 
   return (
     <AnimatePresence>
@@ -720,17 +742,31 @@ export default function SettingsPanel(): JSX.Element {
                   DETECTAR AGORA
                 </button>
               </div>
-              <Field label="Cidade padrão do clima">
-                <input
-                  className="input"
-                  value={config.integrations.weatherCity}
-                  onChange={(e) =>
-                    saveConfig({ integrations: { ...config.integrations, weatherCity: e.target.value } })
-                  }
-                />
-              </Field>
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Estado">
+                  <select
+                    className="input"
+                    value={config.integrations.location.region || ''}
+                    onChange={(e) => saveManualLocation(config.integrations.location.city || '', e.target.value)}
+                  >
+                    <option value="">UF</option>
+                    {BRAZIL_STATES.map((state) => (
+                      <option key={state.uf} value={state.uf}>
+                        {state.uf} - {state.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Cidade">
+                  <input
+                    className="input"
+                    value={config.integrations.location.city || ''}
+                    onChange={(e) => saveManualLocation(e.target.value, config.integrations.location.region || '')}
+                  />
+                </Field>
+              </div>
               <p className="text-[11px] text-cyan-200/45">
-                Se a localização estiver desligada ou sem permissão, o clima usa a cidade padrão.
+                Estado e cidade alimentam clima, briefing e contexto local. Detectar agora pode preencher coordenadas aproximadas.
               </p>
             </Section>
 

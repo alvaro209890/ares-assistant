@@ -24,11 +24,22 @@ export function loadVoices(): Promise<SpeechSynthesisVoice[]> {
 
 export function ptVoices(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice[] {
   const pt = voices.filter((v) => v.lang?.toLowerCase().startsWith('pt'))
-  return pt.sort((a, b) => {
-    const ab = a.lang.toLowerCase() === 'pt-br' ? -1 : 0
-    const bb = b.lang.toLowerCase() === 'pt-br' ? -1 : 0
-    return ab - bb
-  })
+  return pt.sort((a, b) => voiceScore(b) - voiceScore(a))
+}
+
+function voiceScore(v: SpeechSynthesisVoice): number {
+  const name = `${v.name} ${v.voiceURI}`.toLowerCase()
+  const lang = v.lang?.toLowerCase() || ''
+  let score = 0
+  if (lang === 'pt-br') score += 100
+  else if (lang.startsWith('pt')) score += 60
+  if (name.includes('natural')) score += 70
+  if (name.includes('neural')) score += 60
+  if (name.includes('online')) score += 35
+  if (name.includes('microsoft')) score += 25
+  if (name.includes('maria') || name.includes('francisca') || name.includes('antonio')) score += 20
+  if (name.includes('desktop')) score -= 10
+  return score
 }
 
 export interface SpeakOptions {
@@ -53,8 +64,9 @@ function webSpeak(text: string, opts: SpeakOptions): void {
   synth.cancel()
   const u = new SpeechSynthesisUtterance(text)
   u.lang = 'pt-BR'
-  u.rate = opts.rate ?? 1
-  u.pitch = opts.pitch ?? 1
+  const win = window.ares.system.platform === 'win32'
+  u.rate = opts.rate ?? (win ? 0.92 : 1)
+  u.pitch = opts.pitch ?? (win ? 1.04 : 1)
   u.volume = opts.volume ?? 1
   const voices = synth.getVoices()
   const chosen =

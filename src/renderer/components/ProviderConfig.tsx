@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAres } from '../lib/store'
 import { PROVIDERS, detectProviderId, getProvider } from '../../shared/providers'
 
@@ -15,9 +15,18 @@ export default function ProviderConfig({ compact = false }: { compact?: boolean 
     () => (config ? detectProviderId(config.nineRouter.baseUrl) : 'local'),
     [config?.nineRouter.baseUrl]
   )
-  if (!config) return null
   const preset = getProvider(currentId)
-  const nr = config.nineRouter
+  const nr = config?.nineRouter
+  const modelOptions = preset?.models || []
+
+  useEffect(() => {
+    if (!nr) return
+    if (!preset?.models?.length) return
+    if (preset.models.some((m) => m.value === nr.model)) return
+    void saveConfig({ nineRouter: { ...nr, model: preset.defaultModel } })
+  }, [preset?.id, preset?.defaultModel, nr?.model])
+
+  if (!config || !nr) return null
 
   const pickProvider = (id: string): void => {
     const p = getProvider(id)
@@ -99,11 +108,25 @@ export default function ProviderConfig({ compact = false }: { compact?: boolean 
 
       <label className="block text-sm text-cyan-100/80">
         <span className="mb-1 block text-[12px] text-cyan-200/60">Modelo</span>
-        <input
-          className="input"
-          value={nr.model}
-          onChange={(e) => saveConfig({ nineRouter: { ...nr, model: e.target.value } })}
-        />
+        {modelOptions.length ? (
+          <select
+            className="input"
+            value={modelOptions.some((m) => m.value === nr.model) ? nr.model : preset?.defaultModel}
+            onChange={(e) => saveConfig({ nineRouter: { ...nr, model: e.target.value } })}
+          >
+            {modelOptions.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            className="input"
+            value={nr.model}
+            onChange={(e) => saveConfig({ nineRouter: { ...nr, model: e.target.value } })}
+          />
+        )}
       </label>
 
       {!compact && (

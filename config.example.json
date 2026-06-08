@@ -9,7 +9,7 @@
   },
 
   "grog": {
-    "_doc": "Voz->texto (STT) via Groq, modelo Whisper. A apiKey é preenchida automaticamente a partir da chave Groq já existente no PC quando possível.",
+    "_doc": "Voz->texto (STT) via Groq, modelo Whisper. A apiKey é obrigatória no primeiro uso; quando possível, é preenchida automaticamente a partir da chave Groq já existente no PC.",
     "baseUrl": "https://api.groq.com/openai/v1",
     "apiKey": "COLE_AQUI_SUA_CHAVE_GROQ_gsk_...",
     "sttModel": "whisper-large-v3-turbo"
@@ -21,13 +21,13 @@
     "engine": "auto",
     "piperVoice": "pt_BR-faber-medium",
     "webVoiceURI": "",
-    "rate": 1.0,
-    "pitch": 1.0,
+    "rate": 0.92,
+    "pitch": 1.04,
     "volume": 1.0
   },
 
   "integrations": {
-    "_doc": "Integrações sem chave: clima Open-Meteo, geolocalização local via Chromium + Nominatim, busca DuckDuckGo HTML, notícias Google News RSS. A geolocalização começa desligada e é pedida no 1º uso. hermes: ponte opcional para delegar comandos externos e tarefas de programação ao Hermes. code: ferramentas locais read-only de programação.",
+    "_doc": "Integrações sem chave: clima Open-Meteo, geolocalização local via Chromium + Nominatim, busca DuckDuckGo HTML, notícias Google News RSS. Cidade e UF são obrigatórias no 1º uso; coordenadas por geolocalização são opcionais. hermes: ponte opcional para delegar comandos externos e tarefas de programação ao Hermes. code: ferramentas locais read-only de programação.",
     "weatherCity": "São Paulo",
     "newsTopic": "",
     "location": {

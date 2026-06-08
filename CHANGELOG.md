@@ -4,6 +4,29 @@ Todas as mudanças relevantes do Ares. O formato segue de perto
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/) e o projeto usa
 versionamento semântico.
 
+## [0.18.0] — 2026-06-08
+
+Foco: **primeira execução obrigatória**, voz mais natural no Windows e DeepSeek V4.
+
+### Adicionado
+
+- **Setup obrigatório no primeiro uso** — o onboarding não pode mais ser pulado:
+  exige chave Groq `gsk_...`, estado, cidade e um provedor de IA válido antes de
+  liberar o app.
+- **DeepSeek V4** — o preset DeepSeek agora oferece somente os modelos oficiais
+  atuais `deepseek-v4-flash` e `deepseek-v4-pro`, com seletor fechado na UI.
+- **Voz Windows menos robótica** — Web Speech prioriza vozes pt-BR
+  Natural/Neural/Microsoft quando disponíveis, com velocidade e tom padrão mais
+  naturais (`rate=0.92`, `pitch=1.04`).
+- **Instalador Windows reseta configurações antigas** — o NSIS apaga
+  `%APPDATA%\ares\config.json` e o marcador de reset durante instalação/atualização.
+  Ao abrir, o Ares recria a config e força o setup obrigatório.
+
+### Corrigido
+
+- **Local manual no prompt** — cidade/UF selecionadas manualmente passam a entrar
+  no contexto do agente mesmo sem coordenadas de geolocalização.
+
 ## [0.17.0] — 2026-06-08
 
 Foco: **instalação multiplataforma** e localização com consentimento claro.

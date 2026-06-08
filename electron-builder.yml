@@ -33,3 +33,4 @@ nsis:
   createDesktopShortcut: always
   createStartMenuShortcut: true
   shortcutName: ARES
+  include: build/installer.nsh

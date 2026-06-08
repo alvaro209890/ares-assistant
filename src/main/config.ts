@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'fs'
 import { join, dirname } from 'path'
 import { homedir } from 'os'
 import type { AppConfig, DeepPartial } from '../shared/types'
@@ -44,6 +44,8 @@ const DEFAULT_PICTURES = firstExistingDir(
 
 export type { AppConfig }
 
+const CONFIG_RESET_VERSION = '0.18.0'
+
 const DEFAULT_CONFIG: AppConfig = {
   nineRouter: {
     baseUrl: 'http://localhost:20128/v1',
@@ -60,8 +62,8 @@ const DEFAULT_CONFIG: AppConfig = {
     engine: 'auto', // Piper (neural) no Linux; Web Speech no Windows
     piperVoice: 'pt_BR-faber-medium',
     webVoiceURI: '',
-    rate: 1.0,
-    pitch: 1.0,
+    rate: 0.92,
+    pitch: 1.04,
     volume: 1.0
   },
   integrations: {
@@ -169,6 +171,27 @@ function configPath(): string {
   return join(app.getPath('userData'), 'config.json')
 }
 
+function resetMarkerPath(): string {
+  return join(app.getPath('userData'), 'config-reset.json')
+}
+
+function readResetMarker(): string {
+  try {
+    const path = resetMarkerPath()
+    if (!existsSync(path)) return ''
+    const data = JSON.parse(readFileSync(path, 'utf8'))
+    return typeof data?.version === 'string' ? data.version : ''
+  } catch {
+    return ''
+  }
+}
+
+function writeResetMarker(): void {
+  const path = resetMarkerPath()
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, JSON.stringify({ version: CONFIG_RESET_VERSION, resetAt: Date.now() }, null, 2), 'utf8')
+}
+
 /** Mescla profundamente "patch" sobre "base" (apenas objetos simples). */
 function deepMerge<T>(base: T, patch: DeepPartial<T>): T {
   const out: any = Array.isArray(base) ? [...(base as any)] : { ...base }
@@ -228,13 +251,22 @@ function persist(cfg: AppConfig): void {
 /** Cria a config no 1º uso e auto-preenche a chave Groq se estiver vazia. */
 export function ensureConfig(): AppConfig {
   const path = configPath()
-  const fresh = !existsSync(path)
+  let fresh = !existsSync(path)
+  if (!fresh && readResetMarker() !== CONFIG_RESET_VERSION) {
+    try {
+      rmSync(path, { force: true })
+      fresh = true
+    } catch {
+      fresh = false
+    }
+  }
   const cfg = readConfig()
   if (!cfg.grog.apiKey) {
     const detected = detectGroqKey()
     if (detected) cfg.grog.apiKey = detected
   }
   if (fresh || !readConfig().grog.apiKey) persist(cfg)
+  if (fresh || readResetMarker() === CONFIG_RESET_VERSION || !existsSync(path)) writeResetMarker()
   return cfg
 }
 

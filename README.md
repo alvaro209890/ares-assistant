@@ -16,6 +16,10 @@ O projeto roda em modo de desenvolvimento e já possui empacotamento configurado
 
 ### O que há de novo
 
+- **Setup obrigatório no primeiro uso**: sem pular. A pessoa precisa informar chave Groq `gsk_...`, estado, cidade e provedor de IA antes de entrar.
+- **DeepSeek V4 fechado**: o preset DeepSeek mostra somente `deepseek-v4-flash` e `deepseek-v4-pro`.
+- **Voz Windows menos robótica**: Web Speech prioriza vozes pt-BR Natural/Neural/Microsoft e usa ritmo/tom padrão mais naturais.
+- **Atualização limpa**: o instalador Windows apaga a configuração antiga (`config.json`) ao atualizar; o app abre no setup obrigatório de novo.
 - **Instaladores Linux e Windows**: scripts `dist:linux`, `dist:deb`, `dist:win` e `dist:all`, com Electron Builder gerando `.deb`/AppImage no Linux e NSIS no Windows. O workflow `Build Installers` publica os artefatos em runners nativos do GitHub.
 - **Localização com consentimento explícito**: no 1º uso, o Ares pergunta antes de detectar a localização. Depois, a pessoa pode trocar em Configurações > Localização.
 - **Defaults multiplataforma**: pastas padrão de documentos e capturas respeitam Windows (`Documents`/`Pictures`) e Linux pt-BR (`Documentos`/`Imagens`) quando existirem.
@@ -136,7 +140,7 @@ Histórico completo em [`CHANGELOG.md`](CHANGELOG.md).
 
 ### Fácil para o dia a dia (pessoas comuns)
 
-- **Primeiros passos guiados (onboarding)**: no 1º uso, um passo a passo pede o nome, detecta localização, testa a voz e mostra exemplos.
+- **Primeiros passos guiados (onboarding)**: no 1º uso, um passo a passo obrigatório pede Groq, cidade/estado, provedor de IA e testa a voz.
 - **Ajuda "O que eu sei fazer"**: botão na barra com exemplos clicáveis que já executam o comando.
 - **Listas simples e notas rápidas**: listas de compras/afazeres e anotações, por toque ou por voz.
 - **Lembretes, timers e despertador**: "me lembra do remédio às 8h", "põe um timer de 10 minutos", "me acorda às 7h" — com repetição e notificação.
@@ -230,14 +234,15 @@ Campos principais:
 | `nineRouter.baseUrl` | endpoint OpenAI-compatible do 9 Router |
 | `nineRouter.model` | modelo do cérebro, padrão `cx/gpt-5.5` |
 | `nineRouter.apiKey` | vazio para localhost |
-| `grog.apiKey` | chave Groq para Whisper/STT |
+| `grog.apiKey` | chave Groq obrigatória no primeiro uso para Whisper/STT |
 | `tts.engine` | `auto`, `piper` ou `web` |
 | `tts.piperVoice` | voz neural local Piper |
 | `tts.webVoiceURI` | voz Chromium/Web Speech |
 | `tts.rate`, `tts.pitch`, `tts.volume` | ajustes de fala |
-| `integrations.weatherCity` | cidade padrão quando a localização não está disponível |
+| `integrations.weatherCity` | cidade/UF usada para clima quando não há coordenadas |
 | `integrations.location.enabled` | ativa uso de localização aproximada após consentimento do usuário |
-| `integrations.location.latitude/longitude` | coordenadas salvas localmente após permissão |
+| `integrations.location.city/region` | cidade e UF obrigatórias no primeiro uso |
+| `integrations.location.latitude/longitude` | coordenadas salvas localmente após permissão opcional |
 | `integrations.hermes.enabled` | ativa a delegação de comandos ao Hermes |
 | `integrations.hermes.baseUrl` | URL base do Hermes |
 | `integrations.hermes.messagePath` | rota usada para `POST` de comandos, padrão `/message` |
@@ -294,6 +299,8 @@ No painel Configurações você pode:
 - testar a voz;
 - ajustar a **sensibilidade do microfone**, o **tempo de silêncio** para encerrar a fala e a **pausa após o Ares falar**;
 - ligar/desligar o **barge-in** (interromper a fala falando por cima).
+
+No Windows, o Ares ordena vozes Web Speech para preferir pt-BR Natural/Neural/Microsoft quando o sistema disponibiliza essas vozes. Os defaults `rate=0.92` e `pitch=1.04` reduzem o efeito robótico.
 
 O modo Conversa Contínua usa o microfone em ciclos:
 
@@ -496,7 +503,7 @@ Por voz: "me lembra de tomar o remédio todo dia às 8h", "põe um timer de 10 m
 
 ## Onboarding e Ajuda
 
-- No primeiro uso, um assistente de **primeiros passos** pede o nome (salvo na memória como perfil), oferece detectar a localização, testar a voz e ver exemplos.
+- No primeiro uso, um assistente de **primeiros passos** obrigatório pede Groq (`gsk_...`), estado, cidade, provedor de IA e teste de voz. O nome continua opcional.
 - O botão **Ajuda** (barra lateral) abre "O que eu sei fazer", com exemplos clicáveis que executam o comando — a forma mais fácil de aprender usando.
 
 ## Acessibilidade
@@ -906,3 +913,5 @@ O workflow `.github/workflows/build-installers.yml` roda em pushes no `main`, em
 
 - `ares-linux-installers`: `.deb`, AppImage e metadata Linux.
 - `ares-windows-installer`: instalador NSIS `.exe`.
+
+No Windows, o instalador usa `build/installer.nsh` para apagar configurações antigas em `%APPDATA%\ares\config.json` e `%LOCALAPPDATA%\ares\config.json` durante instalação/atualização. Dados de tarefas, memória e conversas não são apagados por esse script.
