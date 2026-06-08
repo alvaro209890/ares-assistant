@@ -108,6 +108,7 @@ interface AresStore {
   setAutostart: (enabled: boolean) => Promise<void>
   testBrain: () => Promise<{ ok: boolean; detail: string }>
   testHermes: () => Promise<HermesStatus>
+  connectOpenRouter: () => Promise<{ ok: boolean; error?: string }>
   finishOnboarding: (name: string) => Promise<void>
 }
 
@@ -951,6 +952,16 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   const testBrain = useCallback(() => window.ares.system.testBrain(), [])
   const testHermes = useCallback(() => window.ares.system.testHermes(), [])
 
+  const connectOpenRouter = useCallback(async (): Promise<{ ok: boolean; error?: string }> => {
+    const r = await window.ares.provider.oauth('openrouter')
+    if (r.ok && r.config) {
+      configRef.current = r.config
+      setConfig(r.config)
+      return { ok: true }
+    }
+    return { ok: false, error: r.error }
+  }, [])
+
   const finishOnboarding = useCallback(
     async (name: string) => {
       const userName = name.trim()
@@ -1099,6 +1110,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     setAutostart,
     testBrain,
     testHermes,
+    connectOpenRouter,
     finishOnboarding
   }
 

@@ -146,6 +146,11 @@ const api = {
       return () => ipcRenderer.removeListener('shortcut:briefing', listener)
     }
   },
+  provider: {
+    // Login OAuth de provedor (OpenRouter). Devolve a config já atualizada com a chave.
+    oauth: (id: string): Promise<{ ok: boolean; config?: AppConfig; error?: string }> =>
+      ipcRenderer.invoke('provider:oauth', id)
+  },
   overlay: {
     // Liga/desliga a mini-orbe flutuante; devolve a config atualizada.
     set: (enabled: boolean): Promise<AppConfig> => ipcRenderer.invoke('overlay:set', enabled),

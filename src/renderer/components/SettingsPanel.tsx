@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useAres } from '../lib/store'
 import { ptVoices } from '../lib/tts'
+import ProviderConfig from './ProviderConfig'
 
 export default function SettingsPanel(): JSX.Element {
   const {
@@ -19,11 +20,9 @@ export default function SettingsPanel(): JSX.Element {
     importData,
     setGlobalShortcut,
     setAutostart,
-    testBrain,
     testHermes
   } = useAres()
   const pt = ptVoices(voices)
-  const [brainTest, setBrainTest] = useState<string>('')
   const [hermesTest, setHermesTest] = useState<string>('')
 
   return (
@@ -658,43 +657,8 @@ export default function SettingsPanel(): JSX.Element {
               </p>
             </Section>
 
-            <Section title="CÉREBRO - 9 ROUTER">
-              <Field label="URL base">
-                <input
-                  className="input"
-                  value={config.nineRouter.baseUrl}
-                  onChange={(e) => saveConfig({ nineRouter: { ...config.nineRouter, baseUrl: e.target.value } })}
-                />
-              </Field>
-              <Field label="Modelo">
-                <input
-                  className="input"
-                  value={config.nineRouter.model}
-                  onChange={(e) => saveConfig({ nineRouter: { ...config.nineRouter, model: e.target.value } })}
-                />
-              </Field>
-              <Field label="Chave">
-                <input
-                  className="input"
-                  type="password"
-                  placeholder="vazio para localhost"
-                  value={config.nineRouter.apiKey}
-                  onChange={(e) => saveConfig({ nineRouter: { ...config.nineRouter, apiKey: e.target.value } })}
-                />
-              </Field>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={async () => {
-                    setBrainTest('testando…')
-                    const r = await testBrain()
-                    setBrainTest(r.ok ? '✓ ' + r.detail : '✕ ' + r.detail)
-                  }}
-                  className="btn-ghost"
-                >
-                  TESTAR CONEXÃO
-                </button>
-                {brainTest && <span className="text-[11px] text-cyan-200/60">{brainTest}</span>}
-              </div>
+            <Section title="PROVEDOR DE IA (CÉREBRO)">
+              <ProviderConfig />
             </Section>
 
             <Section title="TRANSCRIÇÃO - GROQ">

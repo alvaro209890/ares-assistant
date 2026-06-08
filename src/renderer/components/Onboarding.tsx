@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useAres } from '../lib/store'
+import ProviderConfig from './ProviderConfig'
 
 // Assistente de primeiros passos. Aparece só no 1º uso (config.ui.onboarded=false).
 // Reduz o atrito para quem não é técnico: nome, localização, voz e exemplos.
@@ -34,7 +35,8 @@ export default function Onboarding(): JSX.Element {
             {step === 0 && (
               <div>
                 <p className="text-sm text-cyan-100/85">
-                  Sou seu assistente pessoal, 100% local. Para começar, como você gostaria que eu te chamasse?
+                  Sou seu assistente pessoal. Seus dados ficam neste computador. Para começar, como você gostaria que eu
+                  te chamasse?
                 </p>
                 <input
                   className="input mt-4"
@@ -48,6 +50,18 @@ export default function Onboarding(): JSX.Element {
             )}
 
             {step === 1 && (
+              <div>
+                <p className="text-sm text-cyan-100/85">
+                  Escolha o cérebro de IA que vou usar. Faça login no OpenRouter ou cole uma chave (DeepSeek, Groq…) e
+                  toque em <span className="text-cyan-200">Testar conexão</span>.
+                </p>
+                <div className="mt-4">
+                  <ProviderConfig compact />
+                </div>
+              </div>
+            )}
+
+            {step === 2 && (
               <div>
                 <p className="text-sm text-cyan-100/85">
                   {name ? `Prazer, ${name}! ` : ''}Posso usar sua localização aproximada para o clima e testar minha voz neural.
@@ -66,7 +80,7 @@ export default function Onboarding(): JSX.Element {
               </div>
             )}
 
-            {step === 2 && (
+            {step === 3 && (
               <div>
                 <p className="text-sm text-cyan-100/85">Pronto! Experimente pedir coisas como:</p>
                 <ul className="mt-3 grid gap-1.5 text-sm text-cyan-100/80">
@@ -92,10 +106,10 @@ export default function Onboarding(): JSX.Element {
                 Pular
               </button>
               <div className="flex items-center gap-2">
-                {[0, 1, 2].map((i) => (
+                {[0, 1, 2, 3].map((i) => (
                   <span key={i} className={`h-1.5 w-1.5 rounded-full ${i === step ? 'bg-cyan-300' : 'bg-cyan-200/25'}`} />
                 ))}
-                {step < 2 ? (
+                {step < 3 ? (
                   <button onClick={() => setStep(step + 1)} className="btn-ghost ml-2">
                     PRÓXIMO
                   </button>

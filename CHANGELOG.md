@@ -4,6 +4,34 @@ Todas as mudanças relevantes do Ares. O formato segue de perto
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/) e o projeto usa
 versionamento semântico.
 
+## [0.16.0] — 2026-06-08
+
+Foco: **portabilidade do cérebro** — o Ares deixa de depender do 9Router local e
+passa a escolher um provedor de IA na nuvem no 1º uso, com login ou chave própria.
+Instalar em outro PC não precisa de Hermes (a ponte sempre foi opcional).
+
+### Adicionado
+
+- **Aba "Provedor de IA (Cérebro)"** — `src/renderer/components/ProviderConfig.tsx`,
+  reutilizada nas Configurações e no onboarding. Seletor de presets que troca
+  `baseUrl` + modelo + chave de uma vez. Presets em `src/shared/providers.ts`:
+  **DeepSeek, Groq (grátis), OpenRouter, OpenAI** e **Local (9 Router)**.
+- **Login OAuth do OpenRouter (PKCE)** — `src/main/oauth.ts`: o botão *Entrar com
+  OpenRouter* abre o navegador, sobe um callback efêmero em `127.0.0.1`, troca o
+  code pela API key (S256) e grava no app — sem digitar chave. IPC `provider:oauth`.
+- **Passo de provedor no onboarding** — `Onboarding.tsx` ganhou uma etapa para
+  escolher o cérebro (login ou chave) e **testar a conexão** antes de concluir.
+- **Atalho "pegar chave →"** abre a página de chaves do provedor no navegador.
+
+### Observação
+
+- O cliente LLM (`ninerouter.ts`) já era compatível com OpenAI, então todos os
+  provedores funcionam sem mudança no caminho de chat. **OAuth com conta da OpenAI
+  não existe** (login do ChatGPT ≠ acesso à API); o OpenRouter é o caminho legítimo
+  de "login → chave".
+- `tests/providers.test.ts`: detecção de provedor por host, presets e regras de
+  OAuth/chave. Total: 104 testes.
+
 ## [0.15.0] — 2026-06-06
 
 Foco: **autonomia em programação** — o Ares deixa de fazer um passo por vez e passa
