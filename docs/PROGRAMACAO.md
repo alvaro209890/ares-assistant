@@ -42,6 +42,19 @@ O terminal nativo tem tres camadas:
 
 No Windows, `codigo.terminal` usa PowerShell. Nos demais sistemas, usa Bash. Exemplos bloqueados incluem elevacao de privilegio, formatacao de disco, reinicio da maquina e remocoes recursivas perigosas.
 
+## Uso por Voz
+
+Quando o comando vem do microfone, o Ares cria uma interpretacao auxiliar para termos comuns em codigo:
+
+- "src barra main ponto ts" -> `src/main.ts`;
+- "app ponto t s x" -> `app.tsx`;
+- "traço" -> `-`;
+- "underline" ou "sublinhado" -> `_`;
+- "npm rum verify" -> `npm run verify`;
+- "git estado" -> `git status`.
+
+Em respostas faladas, o Ares nao deve ler codigo, diffs, JSON, `stdout` ou `stderr`. Para ferramentas `codigo.*`, a resposta final e gerada primeiro, sanitizada e enviada ao TTS so depois. O formato ideal da fala e: arquivo principal, acao feita, validacao e proximo passo em uma ou duas frases.
+
 ## Diagnostico
 
 `codigo.diagnostico` examina `package.json` e tenta rodar scripts comuns quando eles estao permitidos:

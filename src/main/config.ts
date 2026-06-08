@@ -44,7 +44,7 @@ const DEFAULT_PICTURES = firstExistingDir(
 
 export type { AppConfig }
 
-const CONFIG_RESET_VERSION = '0.19.0'
+const CONFIG_RESET_VERSION = '0.19.1'
 
 const DEFAULT_CONFIG: AppConfig = {
   nineRouter: {

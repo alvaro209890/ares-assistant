@@ -9,6 +9,7 @@ Ares e um assistente desktop em Electron, React e TypeScript, feito para uso loc
 - **Voz no Linux**: usa Piper local quando disponivel, com fallback web.
 - **Modelos DeepSeek**: somente `deepseek-v4-flash` e `deepseek-v4-pro` ficam disponiveis.
 - **Modo Programador nativo**: busca codigo, le arquivos com linhas, cria arquivos, aplica patches, gera scaffold, roda diagnostico e usa terminal local com autorizacao.
+- **Edicao por voz no codigo**: entende caminhos ditados como "src barra main ponto ts" e evita ler codigo, diffs ou logs em voz alta.
 - **Windows pronto para upgrade**: o instalador NSIS remove a configuracao local antiga antes de instalar, forçando novo onboarding em PCs ja existentes.
 - **Dados locais**: tarefas, memoria, agenda, listas, notas e lembretes ficam no `userData` do Electron.
 
@@ -97,11 +98,16 @@ O Ares nao depende de servico externo para editar codigo. As ferramentas nativas
 
 No Windows, o terminal nativo usa PowerShell. No Linux e macOS, usa Bash. Comandos destrutivos ou de elevacao continuam bloqueados mesmo com confirmacao.
 
+### Voz no Modo Programador
+
+Quando a entrada vem do microfone, o agente adiciona uma interpretacao auxiliar para termos comuns de desenvolvimento: "barra" vira `/`, "ponto ts" vira `.ts`, "traço" vira `-`, "underline" vira `_`, "npm rum" vira `npm run` e "git estado" vira `git status`. A resposta final de ferramentas `codigo.*` nao e transmitida em streaming bruto; ela e gerada, filtrada e so entao falada para evitar que o Ares leia codigo, JSON, diffs ou logs longos. A fala deve ficar em ate duas frases com o arquivo principal, o que mudou, se a validacao passou e qual autorizacao falta.
+
 ## Arquitetura
 
 - `src/main/agent.ts`: prompt do agente, roteamento de acoes e execucao das ferramentas.
 - `src/main/code.ts`: motor nativo de programacao, patches, terminal, scaffold e diagnostico.
 - `src/main/coder.ts`: executor autonomo para tarefas de codigo em varias etapas.
+- `src/main/voiceCode.ts`: interpretacao e sanitizacao de respostas de programacao por voz.
 - `src/main/config.ts`: defaults, migracao e reset de primeira execucao.
 - `src/renderer`: interface React.
 - `src/preload`: API IPC tipada exposta ao renderer.

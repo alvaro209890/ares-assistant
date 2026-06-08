@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.19.1 - 2026-06-08
+
+- Melhorou o modo programador por voz: interpreta termos ditados como "barra", "ponto ts", "traço", `npm run` e `git status`.
+- Respostas de ferramentas `codigo.*` em modo voz agora sao geradas completas primeiro, sanitizadas e so entao enviadas ao TTS.
+- Evita leitura em voz alta de codigo, diffs, JSON, `stdout` e `stderr`, mantendo a fala curta com arquivo, acao, validacao e proximo passo.
+- Adicionou testes unitarios para interpretacao de voz e filtro de fala em edicao de codigo.
+
 ## 0.19.0 - 2026-06-08
 
 - Removeu a delegacao externa do fluxo de programacao.

@@ -65,6 +65,7 @@ import {
   writeCodeFile
 } from './code'
 import { clearPendingCode, getPendingCode, setPendingCode } from './pending'
+import { hasCodeAction, sanitizeVoiceCodeFala, toolResultsPrompt, voiceAwareUserContent } from './voiceCode'
 
 const norm = (s: unknown) => String(s ?? '').toLowerCase().trim()
 const uid = (p: string) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
@@ -107,6 +108,8 @@ Em assuntos de programação você é um engenheiro de software sênior: fala co
 const VOICE_HINT =
   'A resposta será OUVIDA em voz alta: seja MUITO conciso (1-2 frases), sem listas, sem markdown, sem URLs longas. Diga o essencial.'
 const TEXT_HINT = 'Pode ser um pouco mais detalhado quando ajudar, mas evite enrolação e listas longas desnecessárias.'
+const CODE_VOICE_HINT =
+  'Modo voz em programação: interprete ditados como "barra", "ponto ts", "traço", "underline", "npm run" e "git status" como caminhos/comandos quando fizer sentido. Nunca leia código, diffs, JSON, stdout ou stderr em voz; diga só o arquivo, a ação feita, se passou/falhou e o próximo passo. Se precisar autorização para terminal, fale o comando uma vez e peça sim ou não.'
 
 function toolDocs(): string {
   return `Você SEMPRE responde com um único objeto JSON válido, sem texto fora dele, no formato:
@@ -248,6 +251,7 @@ function buildSystemPrompt(ctx: {
   return [
     PERSONA,
     ctx.voice ? VOICE_HINT : TEXT_HINT,
+    ctx.voice ? CODE_VOICE_HINT : '',
     toolDocs(),
     `# CONTEXTO`,
     `## DATAS\n${dateAnchors(now)}`,
@@ -639,7 +643,7 @@ export async function runTurn(
   const messages: ChatMessage[] = [
     { role: 'system', content: sys },
     ...recent.map((m) => ({ role: m.role, content: m.content }) as ChatMessage),
-    { role: 'user', content: userText }
+    { role: 'user', content: voiceAwareUserContent(userText, voice) }
   ]
 
   const env = parseEnvelope(await streamTurn(cfg, messages, 1, onDelta))
@@ -652,19 +656,20 @@ export async function runTurn(
     // Ferramentas de consulta rodam em PARALELO (são, em geral, independentes:
     // clima, notícias, web, código). Promise.all preserva a ordem dos resultados.
     const results = await Promise.all(queries.map((q) => runQuery(q, cfg, sessionId)))
+    const codeMode = hasCodeAction(queries)
     const followup: ChatMessage[] = [
       ...messages,
       { role: 'assistant', content: env.fala || '...' },
       {
         role: 'system',
-        content:
-          'Resultados das ferramentas (responda ao usuário em pt-BR, curto e falável, sem inventar nada além disto):\n' +
-          JSON.stringify(results)
+        content: toolResultsPrompt(results, voice, codeMode)
       }
     ]
     // Fase 2 (resposta final após as ferramentas): novo streaming, fase 2 = reset no cliente.
-    const env2 = parseEnvelope(await streamTurn(cfg, followup, 2, onDelta))
-    if (env2.fala) fala = env2.fala
+    const raw2 = await streamTurn(cfg, followup, 2, voice && codeMode ? undefined : onDelta)
+    const env2 = parseEnvelope(raw2)
+    if (env2.fala) fala = voice && codeMode ? sanitizeVoiceCodeFala(env2.fala) : env2.fala
+    if (voice && codeMode && fala && onDelta) onDelta(fala, 2)
     mutations = mutations.concat(env2.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo)))
   }
 
