@@ -11,24 +11,34 @@ import {
 const which = (have: string[]) => (t: string) => have.includes(t)
 
 describe('controle do computador — resolveOpenTarget', () => {
-  it('abre URL http(s) com xdg-open', () => {
-    expect(resolveOpenTarget('https://example.com', which([]))).toMatchObject({
-      kind: 'url',
-      cmd: 'xdg-open',
-      args: ['https://example.com']
-    })
+  it('abre URL http(s) com o opener do sistema', () => {
+    const plan = resolveOpenTarget('https://example.com', which([]))
+    expect(plan.kind).toBe('url')
+    if (process.platform === 'win32') {
+      expect(plan.cmd).toBe('cmd')
+      expect(plan.args).toContain('https://example.com')
+    } else {
+      expect(plan.cmd).toBe('xdg-open')
+      expect(plan.args).toEqual(['https://example.com'])
+    }
   })
 
   it('completa domínio sem esquema para https', () => {
     const p = resolveOpenTarget('youtube.com', which([]))
     expect(p.kind).toBe('url')
-    expect(p.args).toEqual(['https://youtube.com'])
+    expect(p.args).toContain('https://youtube.com')
   })
 
   it('resolve apelido de app para o primeiro binário existente', () => {
-    expect(resolveOpenTarget('navegador', which(['google-chrome'])).cmd).toBe('google-chrome')
-    expect(resolveOpenTarget('firefox', which(['firefox'])).cmd).toBe('firefox')
-    expect(resolveOpenTarget('calculadora', which(['gnome-calculator'])).cmd).toBe('gnome-calculator')
+    if (process.platform === 'win32') {
+      expect(resolveOpenTarget('navegador', which(['chrome'])).cmd).toBe('chrome')
+      expect(resolveOpenTarget('firefox', which(['firefox'])).cmd).toBe('firefox')
+      expect(resolveOpenTarget('calculadora', which(['calc'])).cmd).toBe('calc')
+    } else {
+      expect(resolveOpenTarget('navegador', which(['google-chrome'])).cmd).toBe('google-chrome')
+      expect(resolveOpenTarget('firefox', which(['firefox'])).cmd).toBe('firefox')
+      expect(resolveOpenTarget('calculadora', which(['gnome-calculator'])).cmd).toBe('gnome-calculator')
+    }
   })
 
   it('erro quando o app do apelido não está instalado', () => {
@@ -50,11 +60,15 @@ describe('controle do computador — resolveOpenTarget', () => {
 })
 
 describe('controle do computador — audioBackend', () => {
-  it('prioriza wpctl > pactl > amixer', () => {
-    expect(audioBackend(which(['wpctl', 'pactl', 'amixer']))).toBe('wpctl')
-    expect(audioBackend(which(['pactl', 'amixer']))).toBe('pactl')
-    expect(audioBackend(which(['amixer']))).toBe('amixer')
-    expect(audioBackend(which([]))).toBeNull()
+  it('retorna backend de áudio adequado à plataforma', () => {
+    if (process.platform === 'win32') {
+      expect(audioBackend(which([]))).toBe('powershell')
+    } else {
+      expect(audioBackend(which(['wpctl', 'pactl', 'amixer']))).toBe('wpctl')
+      expect(audioBackend(which(['pactl', 'amixer']))).toBe('pactl')
+      expect(audioBackend(which(['amixer']))).toBe('amixer')
+      expect(audioBackend(which([]))).toBeNull()
+    }
   })
 })
 
@@ -87,10 +101,14 @@ describe('controle do computador — buildVolume', () => {
 })
 
 describe('controle do computador — mídia', () => {
-  it('mediaBackend prioriza playerctl, depois dbus', () => {
-    expect(mediaBackend(which(['playerctl', 'dbus-send']))).toBe('playerctl')
-    expect(mediaBackend(which(['dbus-send']))).toBe('dbus')
-    expect(mediaBackend(which([]))).toBeNull()
+  it('mediaBackend retorna backend adequado à plataforma', () => {
+    if (process.platform === 'win32') {
+      expect(mediaBackend(which([]))).toBe('winkeys')
+    } else {
+      expect(mediaBackend(which(['playerctl', 'dbus-send']))).toBe('playerctl')
+      expect(mediaBackend(which(['dbus-send']))).toBe('dbus')
+      expect(mediaBackend(which([]))).toBeNull()
+    }
   })
 
   it('buildMedia: playerctl usa verbos', () => {

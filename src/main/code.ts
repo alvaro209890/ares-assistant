@@ -61,6 +61,9 @@ const LANGUAGE_BY_EXT: Record<string, string> = {
   '.yaml': 'YAML'
 }
 
+// Orcamento curto para pastas grandes: resultado parcial e voz responsiva.
+const CODE_SCAN_TIMEOUT_MS = 2500
+
 function codeConfig(cfg: AppConfig): AppConfig['integrations']['code'] {
   return cfg.integrations.code
 }
@@ -125,6 +128,10 @@ function git(root: string, args: string[]): string | null {
   return null
 }
 
+function timeoutSummary(command: string): string {
+  return `Timeout ao executar "${command}". Operacao interrompida para manter o Ares responsivo.`
+}
+
 function packageInfo(root: string): Pick<CodeWorkspaceSummary, 'packageManager' | 'scripts'> {
   const pkgPath = join(root, 'package.json')
   let scripts: Record<string, string> | undefined
@@ -161,12 +168,23 @@ function isLikelyText(path: string, maxBytes: number): boolean {
   }
 }
 
-function walkFiles(root: string, maxDepth: number, maxFiles: number): { files: string[]; ignored: string[]; languages: Record<string, number> } {
+function walkFiles(
+  root: string,
+  maxDepth: number,
+  maxFiles: number,
+  timeoutMs = CODE_SCAN_TIMEOUT_MS
+): { files: string[]; ignored: string[]; languages: Record<string, number>; timedOut: boolean } {
   const files: string[] = []
   const ignored: string[] = []
   const languages: Record<string, number> = {}
+  const deadline = Date.now() + Math.max(250, timeoutMs)
+  let timedOut = false
 
   const walk = (dir: string, depth: number): void => {
+    if (Date.now() > deadline) {
+      timedOut = true
+      return
+    }
     if (files.length >= maxFiles || depth > maxDepth) return
     let entries: string[]
     try {
@@ -175,6 +193,10 @@ function walkFiles(root: string, maxDepth: number, maxFiles: number): { files: s
       return
     }
     for (const name of entries.sort()) {
+      if (Date.now() > deadline) {
+        timedOut = true
+        return
+      }
       if (files.length >= maxFiles) return
       const abs = join(dir, name)
       const rel = relativeDisplayPath(root, abs)
@@ -199,7 +221,7 @@ function walkFiles(root: string, maxDepth: number, maxFiles: number): { files: s
   }
 
   walk(root, 0)
-  return { files, ignored, languages }
+  return { files, ignored, languages, timedOut }
 }
 
 export function summarizeCodeWorkspace(cfg: AppConfig, requested = ''): CodeWorkspaceSummary {
@@ -209,7 +231,7 @@ export function summarizeCodeWorkspace(cfg: AppConfig, requested = ''): CodeWork
     return { root, name, exists: false, languages: {}, files: [], ignored: [], hints: ['workspace não encontrado'] }
   }
 
-  const { files, ignored, languages } = walkFiles(root, 4, 180)
+  const { files, ignored, languages, timedOut } = walkFiles(root, 4, 180)
   const branch = git(root, ['rev-parse', '--abbrev-ref', 'HEAD'])
   const status = git(root, ['status', '--short'])
   const pkg = packageInfo(root)
@@ -219,6 +241,7 @@ export function summarizeCodeWorkspace(cfg: AppConfig, requested = ''): CodeWork
   if (pkg.scripts?.build) hints.push(`build disponível: ${pkg.packageManager || 'npm'} run build`)
   if (files.some((f) => f.endsWith('tsconfig.json'))) hints.push('TypeScript detectado')
   if (files.some((f) => f.endsWith('electron.vite.config.ts'))) hints.push('Electron + Vite detectado')
+  if (timedOut) hints.push('analise parcial: limite de tempo atingido para manter a voz responsiva')
 
   return {
     root,
@@ -254,11 +277,12 @@ export function searchCode(
   const maxResults = Math.max(1, Math.min(Number(opts.maxResults) || codeConfig(cfg).maxSearchResults, 200))
   const internalLimit = maxResults + 1
   const maxBytes = Math.max(1, codeConfig(cfg).maxFileKB) * 1024
-  const { files } = walkFiles(root, 8, 2000)
+  const { files, timedOut } = walkFiles(root, 8, 2000)
   const matches: CodeSearchMatch[] = []
+  const deadline = Date.now() + CODE_SCAN_TIMEOUT_MS
 
   for (const rel of files) {
-    if (matches.length >= internalLimit) break
+    if (matches.length >= internalLimit || Date.now() > deadline) break
     if (!matchesFilter(rel, opts.filter || '')) continue
     const abs = resolveCodeFile(cfg, root, rel)
     if (!isLikelyText(abs, maxBytes)) continue
@@ -271,7 +295,7 @@ export function searchCode(
     }
   }
 
-  return { root, query, matches: matches.slice(0, maxResults), truncated: matches.length > maxResults }
+  return { root, query, matches: matches.slice(0, maxResults), truncated: timedOut || Date.now() > deadline || matches.length > maxResults }
 }
 
 export function readCodeFile(
@@ -364,14 +388,17 @@ export function runCodeCommand(cfg: AppConfig, opts: { root?: string; command: s
     timeout: Math.max(1000, Math.min(Number(codeConfig(cfg).commandTimeoutMs) || 120000, 10 * 60_000)),
     maxBuffer: 1024 * 1024 * 4
   })
+  const timedOut = !!res.error && /timed|timeout/i.test(String(res.error.message || res.error))
 
   return {
     root,
     command,
-    ok: res.status === 0,
+    ok: !timedOut && res.status === 0,
     code: res.status,
-    stdout: String(res.stdout || '').slice(0, 12000),
-    stderr: (res.error ? String(res.error.message || res.error) + '\n' : '') + String(res.stderr || '').slice(0, 12000),
+    stdout: timedOut ? '' : String(res.stdout || '').slice(0, 12000),
+    stderr: timedOut
+      ? timeoutSummary(command)
+      : (res.error ? String(res.error.message || res.error) + '\n' : '') + String(res.stderr || '').slice(0, 12000),
     durationMs: Date.now() - started
   }
 }
@@ -515,15 +542,18 @@ export function runCodeTerminal(
     timeout: Math.max(1000, Math.min(Number(codeConfig(cfg).commandTimeoutMs) || 120000, 10 * 60_000)),
     maxBuffer: 1024 * 1024 * 8
   })
+  const timedOut = !!res.error && /timed|timeout/i.test(String(res.error.message || res.error))
 
   return {
     ...empty,
     requiresApproval: false,
     ran: true,
-    ok: res.status === 0,
+    ok: !timedOut && res.status === 0,
     code: res.status,
-    stdout: String(res.stdout || '').slice(0, 16000),
-    stderr: (res.error ? String(res.error.message || res.error) + '\n' : '') + String(res.stderr || '').slice(0, 16000),
+    stdout: timedOut ? '' : String(res.stdout || '').slice(0, 16000),
+    stderr: timedOut
+      ? timeoutSummary(command)
+      : (res.error ? String(res.error.message || res.error) + '\n' : '') + String(res.stderr || '').slice(0, 16000),
     durationMs: Date.now() - started
   }
 }
@@ -536,13 +566,16 @@ function gitResult(cfg: AppConfig, root: string, args: string[]): CodeCommandRes
     timeout: Math.max(1000, Math.min(Number(codeConfig(cfg).commandTimeoutMs) || 120000, 10 * 60_000)),
     maxBuffer: 1024 * 1024 * 4
   })
+  const timedOut = !!res.error && /timed|timeout/i.test(String(res.error.message || res.error))
   return {
     root,
     command,
-    ok: res.status === 0,
+    ok: !timedOut && res.status === 0,
     code: res.status,
-    stdout: String(res.stdout || '').slice(0, 16000),
-    stderr: (res.error ? String(res.error.message || res.error) + '\n' : '') + String(res.stderr || '').slice(0, 16000),
+    stdout: timedOut ? '' : String(res.stdout || '').slice(0, 16000),
+    stderr: timedOut
+      ? timeoutSummary(command)
+      : (res.error ? String(res.error.message || res.error) + '\n' : '') + String(res.stderr || '').slice(0, 16000),
     durationMs: Date.now() - started
   }
 }

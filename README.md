@@ -9,7 +9,8 @@ Ares e um assistente desktop em Electron, React e TypeScript, feito para uso loc
 - **Responde por voz tambem ao texto**: mensagens digitadas no chat sao faladas quando o TTS esta ligado, nao so os comandos de microfone.
 - **Modelos DeepSeek**: somente `deepseek-v4-flash` e `deepseek-v4-pro` ficam disponiveis.
 - **Modo Programador nativo**: busca codigo, le arquivos com linhas, cria arquivos, aplica patches, gera scaffold, roda diagnostico e usa terminal local com autorizacao.
-- **Edicao por voz no codigo**: entende caminhos ditados como "src barra main ponto ts" e evita ler codigo, diffs ou logs em voz alta.
+- **Edicao por voz no codigo**: entende caminhos ditados como "src barra main ponto ts" e evita ler codigo, diffs ou logs em voz alta. Resultados grandes sao truncados para voz e comandos lentos retornam resumo curto.
+- **Interface HUD refinada**: selects da memoria usam seta SVG, foco com glow cyan e hover claro; o seletor de provedor mostra icones por IA e chave de API com toggle de visibilidade.
 - **Atualizar por cima preserva os dados**: instalar uma versao nova sobre a antiga (Windows) mantem config, chaves, cidade, localizacao, tarefas, memoria e sessoes.
 - **Dados locais**: tarefas, memoria, agenda, listas, notas e lembretes ficam no `userData` do Electron.
 
@@ -67,7 +68,7 @@ Campos importantes:
 | `grog.apiKey` | chave Groq obrigatoria para transcricao de voz |
 | `nineRouter.baseUrl` | endpoint OpenAI-compatible do cerebro |
 | `nineRouter.model` | modelo de texto selecionado |
-| `tts.engine` | `auto` (Piper no Linux/Windows, Web Speech de fallback), `piper` ou `web` |
+| `tts.engine` | `auto` (Web Speech primeiro no Windows, Piper primeiro no Linux, sempre com fallback), `piper` ou `web` |
 | `tts.piperVoice` | voz neural do Piper (padrao `pt_BR-faber-medium`) |
 | `tts.webVoiceURI` | voz do sistema usada no fallback Web Speech |
 | `integrations.location.city` | cidade definida no onboarding |
@@ -103,6 +104,23 @@ No Windows, o terminal nativo usa PowerShell. No Linux e macOS, usa Bash. Comand
 
 Quando a entrada vem do microfone, o agente adiciona uma interpretacao auxiliar para termos comuns de desenvolvimento: "barra" vira `/`, "ponto ts" vira `.ts`, "traço" vira `-`, "underline" vira `_`, "npm rum" vira `npm run` e "git estado" vira `git status`. A resposta final de ferramentas `codigo.*` nao e transmitida em streaming bruto; ela e gerada, filtrada e so entao falada para evitar que o Ares leia codigo, JSON, diffs ou logs longos. A fala deve ficar em ate duas frases com o arquivo principal, o que mudou, se a validacao passou e qual autorizacao falta.
 
+O modo de voz tambem limita explicitamente resultados de ferramentas de codigo antes de enviar ao LLM. Conteudos como `content`, `stdout`, `stderr`, diffs e listas grandes recebem o marcador `[...resultado truncado para voz...]`. A sintese Piper tem retry curto com orcamento total de 8s; se falhar ou demorar, o Ares cai para Web Speech automaticamente. Ao iniciar uma nova fala ou detectar barge-in, a fala anterior e cancelada junto com a fila pendente para evitar sobreposicao.
+
+O TTS tem watchdogs para evitar silencio preso: o processo Piper e encerrado em timeout, a reproducao do WAV tem limite de duracao e o Web Speech tenta de novo quando nao dispara `onstart`. No Windows, o modo `auto` tenta Web Speech primeiro para usar vozes mais naturais do sistema; se falhar, Piper entra como reserva. No Linux, Piper continua sendo a primeira tentativa. Se o streaming nao enviar deltas de fala, o Ares ainda enfileira a resposta final (`result.fala`) para nao ficar mudo.
+
+A fala tambem passa por normalizacao de pontuacao antes da sintese: virgulas, ponto-e-virgula e travessoes viram pausas suaves, dois-pontos viram fim curto de frase, reticencias sao reduzidas e textos longos sem pontuacao sao quebrados por tamanho para a voz acompanhar a resposta.
+
+As ferramentas de codigo tambem usam orcamento de tempo em varreduras de pasta. Quando uma pasta e grande demais, `codigo.workspace` e `codigo.buscar` devolvem resultado parcial com aviso, em vez de segurar o processo principal e atrasar a voz.
+
+## Interface
+
+- **Memoria**: os selects de categoria e filtro usam bordas cyan mais visiveis, hover claro, foco com glow suave e seta SVG customizada. As pilulas de categoria continuam inline e editaveis.
+- **Provedor de IA**: o cadastro mostra icones por provedor (`DeepSeek`, `Groq`, `OpenRouter`, `OpenAI`, `Local`) e borda colorida sutil conforme o provedor selecionado.
+- **Chave de API**: o campo tem icone de chave e botao para mostrar/ocultar a senha sem trocar de tela.
+- **Voz em programacao**: Piper tenta responder rapido, cai para Web Speech no timeout, reduz pausas em virgulas e cancela fala antiga quando entra uma nova resposta ou interrupcao.
+- **Escala compacta**: novas instalacoes abrem com texto em 92% e janela menor. Em instalacoes existentes, ajuste em **Configuracoes > Acessibilidade > Tamanho do texto**.
+- **Perfil de voz mais humano**: use `tts.rate` perto de `1.08` e `tts.pitch` perto de `0.78` para uma voz mais grave, fluida e menos robotica.
+
 ## Arquitetura
 
 - `src/main/agent.ts`: prompt do agente, roteamento de acoes e execucao das ferramentas.
@@ -123,5 +141,17 @@ Antes de publicar:
 ```bash
 npm run verify
 ```
+
+Para checar manualmente as melhorias desta versao:
+
+```bash
+npm run typecheck
+npm run test:unit
+npm run build
+```
+
+Na interface, abra a aba **Memoria**, altere o filtro e edite uma pilula de categoria para confirmar que `onChange` continua funcionando. Em **Configuracoes**, troque o provedor/modelo, use o botao de olho na chave de API e rode **TESTAR CONEXAO**.
+
+Para voz, ative TTS e modo continuo, peca uma resposta curta, uma media e depois interrompa falando por cima. Para simular o fallback, deixe o Piper indisponivel ou lento; o Ares deve cancelar a tentativa, cair para Web Speech e continuar a conversa. No modo programador, rode uma analise em pasta grande e confirme que a resposta falada fica curta, com aviso de resultado truncado quando necessario.
 
 O workflow de instaladores roda em push para `main` e publica artefatos para Windows e Linux.

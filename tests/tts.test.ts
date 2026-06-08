@@ -1,0 +1,180 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { clearSpeechQueue, enqueueSentence, normalizeSpeechText, speak, splitSentences, whenSpeechQueueIdle } from '../src/renderer/lib/tts'
+
+class MockUtterance {
+  text: string
+  lang = ''
+  rate = 1
+  pitch = 1
+  volume = 1
+  voice: SpeechSynthesisVoice | null = null
+  onstart: (() => void) | null = null
+  onend: (() => void) | null = null
+  onerror: ((e: { error: string }) => void) | null = null
+
+  constructor(text: string) {
+    this.text = text
+  }
+}
+
+function installSpeechMock(opts: { autoStart?: boolean; autoEnd?: boolean } = {}): { speakCalls: string[]; cancel: ReturnType<typeof vi.fn> } {
+  const speakCalls: string[] = []
+  const cancel = vi.fn()
+  const synth = {
+    getVoices: vi.fn(() => [{ lang: 'pt-BR', name: 'Antonio Neural', voiceURI: 'pt' }]),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    cancel,
+    resume: vi.fn(),
+    speak: vi.fn((u: MockUtterance) => {
+      speakCalls.push(u.text)
+      if (opts.autoStart !== false) {
+        u.onstart?.()
+        if (opts.autoEnd !== false) setTimeout(() => u.onend?.(), 10)
+      }
+    })
+  }
+  vi.stubGlobal('SpeechSynthesisUtterance', MockUtterance)
+  vi.stubGlobal('window', {
+    speechSynthesis: synth,
+    ares: {
+      system: { platform: 'win32' },
+      tts: {
+        status: vi.fn(async () => ({ ready: true, voices: ['pt_BR-faber-medium'], platform: 'win32' })),
+        synthesize: vi.fn(() => new Promise<ArrayBuffer>(() => {}))
+      }
+    }
+  })
+  return { speakCalls, cancel }
+}
+
+function installAudioMock(): { playCalls: string[] } {
+  const playCalls: string[] = []
+  class MockAudio {
+    src = ''
+    volume = 1
+    onended: (() => void) | null = null
+    onerror: (() => void) | null = null
+    constructor(src: string) {
+      this.src = src
+    }
+    play(): Promise<void> {
+      playCalls.push(this.src)
+      setTimeout(() => this.onended?.(), 10)
+      return Promise.resolve()
+    }
+    pause(): void {}
+  }
+  vi.stubGlobal('Audio', MockAudio)
+  vi.stubGlobal('URL', {
+    createObjectURL: vi.fn(() => 'blob:mock-wav'),
+    revokeObjectURL: vi.fn()
+  })
+  return { playCalls }
+}
+
+describe('tts', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    clearSpeechQueue()
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  it('cai para Web Speech quando Piper passa do timeout com retry em modo Piper', async () => {
+    const { speakCalls } = installSpeechMock()
+
+    const done = speak('teste curto', { engine: 'piper' })
+    await vi.advanceTimersByTimeAsync(3500)
+    await vi.advanceTimersByTimeAsync(180)
+    await vi.advanceTimersByTimeAsync(3500)
+    await vi.advanceTimersByTimeAsync(20)
+    await done
+
+    expect(window.ares.tts.synthesize).toHaveBeenCalledTimes(2)
+    expect(speakCalls).toEqual(['teste curto'])
+  })
+
+  it('em auto no Windows tenta Web Speech antes do Piper', async () => {
+    const { speakCalls } = installSpeechMock()
+
+    const done = speak('fala direta', { engine: 'auto' })
+    await vi.advanceTimersByTimeAsync(20)
+    await done
+
+    expect(window.ares.tts.synthesize).not.toHaveBeenCalled()
+    expect(speakCalls).toEqual(['fala direta'])
+  })
+
+  it('fala a fila em ordem sem sobrepor frases no fallback web', async () => {
+    const { speakCalls } = installSpeechMock()
+    enqueueSentence('primeira frase.', { engine: 'web' })
+    enqueueSentence('segunda frase.', { engine: 'web' })
+    const idle = whenSpeechQueueIdle()
+    await vi.advanceTimersByTimeAsync(30)
+    await idle
+
+    expect(speakCalls).toEqual(['primeira frase.', 'segunda frase.'])
+  })
+
+  it('nao deixa a fila presa quando Web Speech nao inicia', async () => {
+    const { speakCalls, cancel } = installSpeechMock({ autoStart: false })
+    const onError = vi.fn()
+    const onEnd = vi.fn()
+
+    const done = speak('teste sem inicio de audio', { engine: 'web', onError, onEnd })
+    await vi.advanceTimersByTimeAsync(2600)
+    await vi.advanceTimersByTimeAsync(140)
+    await vi.advanceTimersByTimeAsync(2600)
+    await done
+
+    expect(speakCalls).toEqual(['teste sem inicio de audio', 'teste sem inicio de audio'])
+    expect(cancel).toHaveBeenCalled()
+    expect(onError).toHaveBeenCalledWith(expect.stringContaining('Web Speech'))
+    expect(onEnd).toHaveBeenCalledTimes(1)
+  })
+
+  it('cai para Piper quando Web Speech falha em modo auto', async () => {
+    const { speakCalls } = installSpeechMock({ autoStart: false })
+    const { playCalls } = installAudioMock()
+    window.ares.tts.synthesize = vi.fn(async () => new ArrayBuffer(44100))
+
+    const done = speak('usar fallback neural', { engine: 'auto' })
+    await vi.advanceTimersByTimeAsync(2600)
+    await vi.advanceTimersByTimeAsync(140)
+    await vi.advanceTimersByTimeAsync(2600)
+    await vi.advanceTimersByTimeAsync(20)
+    await done
+
+    expect(speakCalls).toEqual(['usar fallback neural', 'usar fallback neural'])
+    expect(window.ares.tts.synthesize).toHaveBeenCalledTimes(1)
+    expect(playCalls).toEqual(['blob:mock-wav'])
+  })
+
+  it('nao quebra fala em dois-pontos ou ponto-e-virgula', () => {
+    installSpeechMock()
+    const split = splitSentences('Sistemas online: pronto; aguardando comando. Tudo certo', false)
+
+    expect(split.sentences).toEqual(['Sistemas online: pronto; aguardando comando.'])
+    expect(split.rest).toBe(' Tudo certo')
+  })
+
+  it('normaliza pontuacao antes da fala', () => {
+    installSpeechMock()
+
+    expect(normalizeSpeechText('Ares: pronto, senhor; sistemas online...')).toBe('Ares. pronto senhor sistemas online.')
+  })
+
+  it('quebra texto longo sem pontuacao para nao atrasar a voz', () => {
+    installSpeechMock()
+    const long = Array.from({ length: 70 }, (_, i) => `palavra${i}`).join(' ')
+    const split = splitSentences(long, false)
+
+    expect(split.sentences.length).toBeGreaterThan(0)
+    expect(split.sentences[0].length).toBeLessThanOrEqual(220)
+    expect(split.rest.length).toBeGreaterThan(0)
+  })
+})

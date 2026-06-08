@@ -64,10 +64,10 @@ let mainWindow: BrowserWindow | null = null
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
-    width: 1360,
-    height: 880,
-    minWidth: 1040,
-    minHeight: 700,
+    width: 1180,
+    height: 760,
+    minWidth: 900,
+    minHeight: 620,
     show: false,
     backgroundColor: '#04070f',
     title: 'ARES',

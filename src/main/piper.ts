@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import { spawn } from 'child_process'
-import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync, rmSync, chmodSync } from 'fs'
+import { existsSync, readdirSync, mkdirSync, writeFileSync, rmSync, chmodSync } from 'fs'
 import { join, dirname } from 'path'
 import { tmpdir } from 'os'
 
@@ -17,6 +17,7 @@ const BIN_ASSET: Partial<Record<NodeJS.Platform, string>> = {
   win32: 'piper_windows_amd64.zip'
 }
 const VOICE_BASE = 'https://huggingface.co/rhasspy/piper-voices/resolve/main/pt/pt_BR'
+const PIPER_SYNTHESIS_TIMEOUT_MS = 6500
 // faber-medium: voz masculina pt-BR, grave e clara — perfil "JARVIS" profissional.
 const DEFAULT_VOICE = {
   name: 'pt_BR-faber-medium',
@@ -61,22 +62,35 @@ function resolveVoice(voice?: string): string {
   return first ? join(dir, `${first}.onnx`) : ''
 }
 
-/** Sintetiza texto -> WAV (PCM 16-bit). Devolve os bytes do .wav. */
+/**
+ * Pre-processa o texto para reduzir pausas excessivas em virgulas/pontuacao.
+ * O Piper pausa bastante em virgulas; removemos essas pausas internas e mantemos
+ * pontuacao forte para preservar respiracao natural entre frases.
+ */
+function prepareText(text: string): string {
+  return text
+    .replace(/\b(senhor|senhora)\s*[,;:]\s*/gi, '$1. ')
+    .replace(/\s*[,;]\s*/g, ' ')
+    .replace(/\.{3,}|…/g, '. ')
+    .replace(/\s*[—–]\s*/g, ' ')
+    .replace(/\s*:\s*/g, ' ')
+    .replace(/\s+([.!?])/g, '$1')
+    .replace(/([.!?]){2,}/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/** Sintetiza texto -> WAV via stdout (sem arquivo temporário, menor latência). */
 export function synthesize(text: string, opts: { voice?: string; rate?: number } = {}): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const bin = binPath()
     const model = resolveVoice(opts.voice)
     if (!existsSync(bin) || !model) return reject(new Error('Piper indisponível.'))
 
-    // rate (0.5..1.6) -> length_scale (inverso: maior rate = fala mais rápida)
-    const rate = Math.min(1.6, Math.max(0.5, opts.rate ?? 1))
+    const rate = Math.min(1.6, Math.max(0.5, opts.rate ?? 1.08))
     const lengthScale = (1 / rate).toFixed(3)
 
-    const out = join(tmpdir(), `ares-tts-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.wav`)
     const binDir = dirname(bin)
-    // No Linux as libs do Piper ficam ao lado do binário (LD_LIBRARY_PATH).
-    // No Windows, as DLLs (onnxruntime etc.) e o espeak-ng-data são resolvidos a
-    // partir do diretório de trabalho — por isso rodamos com cwd = pasta do piper.
     const env = {
       ...process.env,
       LD_LIBRARY_PATH: `${binDir}:${process.env.LD_LIBRARY_PATH || ''}`,
@@ -89,30 +103,64 @@ export function synthesize(text: string, opts: { voice?: string; rate?: number }
         model,
         '--length_scale',
         lengthScale,
-        // Pausa natural entre frases (cadência mais humana, estilo JARVIS).
         '--sentence_silence',
-        '0.28',
-        '--output_file',
-        out
+        '0.035',
+        '--output-raw'
       ],
       { env, cwd: binDir }
     )
+    const chunks: Buffer[] = []
+    let done = false
+    const finish = (fn: () => void): void => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      fn()
+    }
+    const timer = setTimeout(() => {
+      child.kill()
+      finish(() => reject(new Error('Piper timeout.')))
+    }, PIPER_SYNTHESIS_TIMEOUT_MS)
+    child.stdout.on('data', (d: Buffer) => chunks.push(d))
     let err = ''
     child.stderr.on('data', (d) => (err += d.toString()))
-    child.on('error', (e) => reject(e))
+    child.on('error', (e) => finish(() => reject(e)))
     child.on('close', (code) => {
-      if (code !== 0 || !existsSync(out)) return reject(new Error(`Piper falhou: ${err.slice(-200)}`))
-      try {
-        const buf = readFileSync(out)
-        rmSync(out, { force: true })
-        resolve(buf)
-      } catch (e) {
-        reject(e as Error)
-      }
+      if (done) return
+      if (code !== 0) return finish(() => reject(new Error(`Piper falhou: ${err.slice(-200)}`)))
+      const raw = Buffer.concat(chunks)
+      if (!raw.length) return finish(() => reject(new Error('Piper sem saida de audio.')))
+      finish(() => resolve(rawToWav(raw, 22050, 1, 16)))
     })
-    child.stdin.write(text)
-    child.stdin.end()
+    try {
+      child.stdin.write(prepareText(text))
+      child.stdin.end()
+    } catch (e) {
+      child.kill()
+      finish(() => reject(e instanceof Error ? e : new Error(String(e))))
+    }
   })
+}
+
+/** Encapsula PCM raw em um WAV header mínimo. */
+function rawToWav(raw: Buffer, sampleRate: number, channels: number, bitsPerSample: number): Buffer {
+  const byteRate = sampleRate * channels * (bitsPerSample / 8)
+  const blockAlign = channels * (bitsPerSample / 8)
+  const header = Buffer.alloc(44)
+  header.write('RIFF', 0)
+  header.writeUInt32LE(36 + raw.length, 4)
+  header.write('WAVE', 8)
+  header.write('fmt ', 12)
+  header.writeUInt32LE(16, 16)
+  header.writeUInt16LE(1, 20)
+  header.writeUInt16LE(channels, 22)
+  header.writeUInt32LE(sampleRate, 24)
+  header.writeUInt32LE(byteRate, 28)
+  header.writeUInt16LE(blockAlign, 32)
+  header.writeUInt16LE(bitsPerSample, 34)
+  header.write('data', 36)
+  header.writeUInt32LE(raw.length, 40)
+  return Buffer.concat([header, raw])
 }
 
 async function download(url: string, dest: string): Promise<void> {

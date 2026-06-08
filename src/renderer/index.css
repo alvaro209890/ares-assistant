@@ -4,7 +4,21 @@
 
 @layer components {
   .input {
-    @apply w-full rounded-lg border border-cyan-300/20 bg-black/30 px-3 py-2 text-sm text-cyan-50 outline-none focus:border-cyan-300/50;
+    @apply w-full rounded-lg border border-cyan-300/20 bg-black/30 px-3 py-2 text-sm text-cyan-50 outline-none focus:border-cyan-300/50 transition-colors duration-150;
+  }
+  .input-select {
+    @apply input cursor-pointer appearance-none pr-8 bg-no-repeat;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='rgba(56,225,255,0.7)' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-position: right 10px center;
+    background-size: 14px;
+  }
+  .input-select:hover {
+    border-color: rgba(56, 225, 255, 0.45);
+    box-shadow: 0 0 8px rgba(56, 225, 255, 0.1);
+  }
+  .input-select:focus {
+    border-color: rgba(56, 225, 255, 0.6);
+    box-shadow: 0 0 12px rgba(56, 225, 255, 0.15);
   }
   .btn-ghost {
     @apply self-start rounded-lg border border-cyan-300/30 bg-cyan-400/10 px-3 py-1.5 text-sm text-cyan-100 transition hover:bg-cyan-400/20;

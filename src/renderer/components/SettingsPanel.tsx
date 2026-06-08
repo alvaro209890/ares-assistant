@@ -126,8 +126,8 @@ export default function SettingsPanel(): JSX.Element {
 
               <Slider
                 label={`Velocidade: ${config.tts.rate.toFixed(2)}`}
-                min={0.5}
-                max={1.6}
+                min={0.75}
+                max={1.35}
                 step={0.05}
                 value={config.tts.rate}
                 onChange={(v) => saveConfig({ tts: { ...config.tts, rate: v } })}
@@ -135,7 +135,7 @@ export default function SettingsPanel(): JSX.Element {
               <Slider
                 label={`Tom: ${config.tts.pitch.toFixed(2)} (Chromium)`}
                 min={0.5}
-                max={1.6}
+                max={1.2}
                 step={0.05}
                 value={config.tts.pitch}
                 onChange={(v) => saveConfig({ tts: { ...config.tts, pitch: v } })}
@@ -270,8 +270,8 @@ export default function SettingsPanel(): JSX.Element {
             <Section title="ACESSIBILIDADE">
               <Slider
                 label={`Tamanho do texto: ${Math.round(config.ui.fontScale * 100)}%`}
-                min={0.85}
-                max={1.5}
+                min={0.8}
+                max={1.25}
                 step={0.05}
                 value={config.ui.fontScale}
                 onChange={(v) => saveConfig({ ui: { fontScale: v } })}

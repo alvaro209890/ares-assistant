@@ -17,7 +17,8 @@ type WhichFn = (tool: string) => boolean
 
 const realWhich: WhichFn = (tool) => {
   try {
-    return spawnSync('which', [tool], { encoding: 'utf8' }).status === 0
+    const cmd = process.platform === 'win32' ? 'where' : 'which'
+    return spawnSync(cmd, [tool], { encoding: 'utf8', timeout: 4000 }).status === 0
   } catch {
     return false
   }
@@ -33,7 +34,7 @@ function ensureEnabled(cfg: AppConfig): void {
 
 // --- Abrir app / site / arquivo -------------------------------------------
 
-const APP_ALIASES: Record<string, string[]> = {
+const APP_ALIASES_LINUX: Record<string, string[]> = {
   firefox: ['firefox'],
   chrome: ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser'],
   'google chrome': ['google-chrome', 'google-chrome-stable'],
@@ -49,6 +50,24 @@ const APP_ALIASES: Record<string, string[]> = {
   terminal: ['gnome-terminal', 'konsole', 'xterm', 'x-terminal-emulator']
 }
 
+const APP_ALIASES_WIN: Record<string, string[]> = {
+  firefox: ['firefox'],
+  chrome: ['chrome'],
+  'google chrome': ['chrome'],
+  navegador: ['chrome', 'firefox', 'msedge'],
+  vscode: ['code'],
+  'vs code': ['code'],
+  code: ['code'],
+  editor: ['code', 'notepad'],
+  calculadora: ['calc'],
+  arquivos: ['explorer'],
+  explorador: ['explorer'],
+  terminal: ['wt', 'powershell', 'cmd']
+}
+
+const APP_ALIASES: Record<string, string[]> =
+  process.platform === 'win32' ? APP_ALIASES_WIN : APP_ALIASES_LINUX
+
 export interface OpenPlan {
   kind: 'url' | 'app' | 'path' | 'error'
   cmd?: string
@@ -62,11 +81,15 @@ export function resolveOpenTarget(target: string, which: WhichFn = realWhich): O
   const raw = String(target || '').trim()
   if (!raw) return { kind: 'error', detail: 'diga o que devo abrir' }
 
+  const opener = process.platform === 'win32' ? 'cmd' : 'xdg-open'
+  const openArgs = (target: string): string[] =>
+    process.platform === 'win32' ? ['/c', 'start', '', target] : [target]
+
   // Esquema explícito (algo:...): só permite navegação/arquivo seguros.
   const scheme = raw.match(/^([a-zA-Z][\w+.-]*):/)
   if (scheme) {
     const s = scheme[1].toLowerCase()
-    if (/^(https?|file|mailto|ftp)$/.test(s)) return { kind: 'url', cmd: 'xdg-open', args: [raw], label: raw }
+    if (/^(https?|file|mailto|ftp)$/.test(s)) return { kind: 'url', cmd: opener, args: openArgs(raw), label: raw }
     return { kind: 'error', detail: `esquema não permitido: ${s}:` }
   }
 
@@ -75,7 +98,7 @@ export function resolveOpenTarget(target: string, which: WhichFn = realWhich): O
   // Domínio sem esquema (youtube.com, github.com/x) -> https://
   if (/^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(raw)) {
     const url = `https://${raw}`
-    return { kind: 'url', cmd: 'xdg-open', args: [url], label: url }
+    return { kind: 'url', cmd: opener, args: openArgs(url), label: url }
   }
 
   // Aplicativo por apelido conhecido.
@@ -89,13 +112,13 @@ export function resolveOpenTarget(target: string, which: WhichFn = realWhich): O
 
   // Caminho existente (absoluto ou relativo ao HOME).
   const path = isAbsolute(raw) ? raw : resolve(homedir(), raw)
-  if (existsSync(path)) return { kind: 'path', cmd: 'xdg-open', args: [path], label: path }
+  if (existsSync(path)) return { kind: 'path', cmd: opener, args: openArgs(path), label: path }
 
   // Binário direto no PATH.
   if (/^[\w.+-]+$/.test(raw) && which(raw)) return { kind: 'app', cmd: raw, args: [], label: raw }
 
-  // Último recurso: deixa o xdg-open tentar resolver (nome de .desktop, etc.).
-  if (/^[\w.+ -]+$/.test(raw)) return { kind: 'app', cmd: 'xdg-open', args: [raw], label: raw }
+  // Último recurso: deixa o sistema tentar resolver.
+  if (/^[\w.+ -]+$/.test(raw)) return { kind: 'app', cmd: opener, args: openArgs(raw), label: raw }
 
   return { kind: 'error', detail: `não consegui interpretar "${raw}"` }
 }
@@ -116,10 +139,11 @@ export function runOpen(cfg: AppConfig, target: string): DesktopActionResult {
 
 // --- Volume ----------------------------------------------------------------
 
-export type VolumeBackend = 'wpctl' | 'pactl' | 'amixer'
+export type VolumeBackend = 'wpctl' | 'pactl' | 'amixer' | 'powershell'
 export type VolumeAction = 'set' | 'up' | 'down' | 'mute' | 'unmute' | 'toggle'
 
 export function audioBackend(which: WhichFn = realWhich): VolumeBackend | null {
+  if (process.platform === 'win32') return 'powershell'
   if (which('wpctl')) return 'wpctl'
   if (which('pactl')) return 'pactl'
   if (which('amixer')) return 'amixer'
@@ -137,6 +161,23 @@ export interface VolumePlan {
 /** Monta o comando de volume para o backend (sem executar). Pura: testável. */
 export function buildVolume(backend: VolumeBackend, opts: { action: VolumeAction; level?: number }): VolumePlan {
   const lvl = clampPct(Number(opts.level))
+  if (backend === 'powershell') {
+    const ps = (script: string): VolumePlan => ({
+      cmd: 'powershell.exe',
+      args: ['-NoProfile', '-NonInteractive', '-Command', script]
+    })
+    const sendKey = (key: string): VolumePlan => ps(
+      `$w = New-Object -ComObject WScript.Shell; $w.SendKeys([char]${key})`
+    )
+    switch (opts.action) {
+      case 'set': return ps(
+        `$v = (New-Object -ComObject MMDeviceEnumerator.MMDeviceEnumerator).GetDefaultAudioEndpoint(0,1).AudioEndpointVolume; $v.MasterVolumeLevelScalar = ${lvl / 100}; if($v.Mute){$v.Mute = $false}`
+      )
+      case 'up': return sendKey('0xAF')
+      case 'down': return sendKey('0xAE')
+      case 'mute': case 'unmute': case 'toggle': return sendKey('0xAD')
+    }
+  }
   if (backend === 'wpctl') {
     const sink = '@DEFAULT_AUDIO_SINK@'
     switch (opts.action) {
@@ -174,7 +215,13 @@ export function buildVolume(backend: VolumeBackend, opts: { action: VolumeAction
 /** Lê o volume atual (0..100) para confirmar a fala. Best-effort. */
 export function readVolumePercent(backend: VolumeBackend): number | null {
   try {
-    if (backend === 'wpctl') {
+    if (backend === 'powershell') {
+      const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+        '(New-Object -ComObject MMDeviceEnumerator.MMDeviceEnumerator).GetDefaultAudioEndpoint(0,1).AudioEndpointVolume.MasterVolumeLevelScalar * 100'
+      ], { encoding: 'utf8', timeout: 4000 })
+      const m = String(r.stdout).match(/([0-9.]+)/)
+      if (m) return clampPct(parseFloat(m[1]))
+    } else if (backend === 'wpctl') {
       const r = spawnSync('wpctl', ['get-volume', '@DEFAULT_AUDIO_SINK@'], { encoding: 'utf8', timeout: 4000 })
       const m = String(r.stdout).match(/Volume:\s*([0-9.]+)/)
       if (m) return clampPct(parseFloat(m[1]) * 100)
@@ -216,6 +263,12 @@ export function runVolume(cfg: AppConfig, opts: { action: VolumeAction; level?: 
 
 export function runLock(cfg: AppConfig): DesktopActionResult {
   ensureEnabled(cfg)
+  if (process.platform === 'win32') {
+    const r = spawnSync('rundll32.exe', ['user32.dll,LockWorkStation'], { encoding: 'utf8', timeout: 5000 })
+    return r.status === 0
+      ? { ok: true, action: 'bloquear', detail: 'tela bloqueada' }
+      : { ok: false, action: 'bloquear', detail: 'falha ao bloquear a tela' }
+  }
   const tries: Array<[string, string[]]> = [
     ['loginctl', ['lock-session']],
     ['cinnamon-screensaver-command', ['--lock']],
@@ -234,7 +287,7 @@ export function runLock(cfg: AppConfig): DesktopActionResult {
 
 export function runScreenshot(cfg: AppConfig): DesktopActionResult {
   ensureEnabled(cfg)
-  const dir = controlConfig(cfg).screenshotDir || join(homedir(), 'Pictures')
+  const dir = controlConfig(cfg).screenshotDir || join(homedir(), process.platform === 'win32' ? 'Pictures' : 'Pictures')
   try {
     mkdirSync(dir, { recursive: true })
   } catch {
@@ -242,6 +295,12 @@ export function runScreenshot(cfg: AppConfig): DesktopActionResult {
   }
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
   const file = join(dir, `ares-${stamp}.png`)
+  if (process.platform === 'win32') {
+    const ps = `Add-Type -AssemblyName System.Windows.Forms; $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $bmp = New-Object System.Drawing.Bitmap($b.Width,$b.Height); $g = [System.Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($b.Location,[System.Drawing.Point]::Empty,$b.Size); $bmp.Save('${file.replace(/'/g, "''")}'); $g.Dispose(); $bmp.Dispose()`
+    const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { encoding: 'utf8', timeout: 15000 })
+    if (r.status === 0 && existsSync(file)) return { ok: true, action: 'captura', detail: `captura salva em ${file}`, target: file }
+    return { ok: false, action: 'captura', detail: String(r.stderr || r.error?.message || 'falha na captura de tela') }
+  }
   const tries: Array<[string, string[]]> = [
     ['gnome-screenshot', ['-f', file]],
     ['grim', [file]],
@@ -258,10 +317,11 @@ export function runScreenshot(cfg: AppConfig): DesktopActionResult {
 
 // --- Mídia (play/pause/próxima/anterior) -----------------------------------
 
-export type MediaBackend = 'playerctl' | 'dbus'
+export type MediaBackend = 'playerctl' | 'dbus' | 'winkeys'
 export type MediaAction = 'playpause' | 'play' | 'pause' | 'next' | 'previous' | 'stop'
 
 export function mediaBackend(which: WhichFn = realWhich): MediaBackend | null {
+  if (process.platform === 'win32') return 'winkeys'
   if (which('playerctl')) return 'playerctl'
   if (which('dbus-send')) return 'dbus'
   return null
@@ -323,6 +383,25 @@ export function runMedia(cfg: AppConfig, action: MediaAction): DesktopActionResu
   ensureEnabled(cfg)
   const backend = mediaBackend()
   if (!backend) return { ok: false, action: 'midia', detail: 'não encontrei controle de mídia (playerctl/dbus)' }
+  const label: Record<MediaAction, string> = {
+    playpause: 'play/pause',
+    play: 'tocando',
+    pause: 'pausado',
+    next: 'próxima faixa',
+    previous: 'faixa anterior',
+    stop: 'parado'
+  }
+  if (backend === 'winkeys') {
+    const keyMap: Record<MediaAction, string> = {
+      playpause: '0xB3', play: '0xB3', pause: '0xB3',
+      next: '0xB0', previous: '0xB1', stop: '0xB2'
+    }
+    const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+      `$w = New-Object -ComObject WScript.Shell; $w.SendKeys([char]${keyMap[action]})`
+    ], { encoding: 'utf8', timeout: 5000 })
+    const ok = r.status === 0
+    return { ok, action: 'midia', detail: ok ? label[action] : String(r.stderr || r.error?.message || 'falha na mídia') }
+  }
   let plan: MediaPlan
   if (backend === 'dbus') {
     const players = mprisPlayers()
@@ -333,14 +412,6 @@ export function runMedia(cfg: AppConfig, action: MediaAction): DesktopActionResu
   }
   const r = spawnSync(plan.cmd, plan.args, { encoding: 'utf8', timeout: 5000 })
   const ok = r.status === 0
-  const label: Record<MediaAction, string> = {
-    playpause: 'play/pause',
-    play: 'tocando',
-    pause: 'pausado',
-    next: 'próxima faixa',
-    previous: 'faixa anterior',
-    stop: 'parado'
-  }
   return { ok, action: 'midia', detail: ok ? label[action] : String(r.stderr || r.error?.message || 'falha na mídia') }
 }
 
@@ -361,6 +432,14 @@ export function xrandrOutputs(): string[] {
 
 export function readBrightness(): number | null {
   try {
+    if (process.platform === 'win32') {
+      const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+        '(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightness).CurrentBrightness'
+      ], { encoding: 'utf8', timeout: 4000 })
+      const m = String(r.stdout || '').match(/(\d+)/)
+      if (m) return clampPct(parseInt(m[1], 10))
+      return null
+    }
     const r = spawnSync('xrandr', ['--verbose'], { encoding: 'utf8', timeout: 4000 })
     const m = String(r.stdout || '').match(/Brightness:\s*([0-9.]+)/i)
     if (m) return clampBrightness(parseFloat(m[1]))
@@ -388,6 +467,17 @@ export function buildBrightness(output: string, opts: { action: BrightnessAction
 
 export function runBrightness(cfg: AppConfig, opts: { action: BrightnessAction; level?: number }): DesktopActionResult {
   ensureEnabled(cfg)
+  if (process.platform === 'win32') {
+    const cur = opts.action === 'set' ? undefined : readBrightness() ?? 100
+    let pct: number
+    if (opts.action === 'set') pct = clampPct(Number(opts.level) || 0)
+    else if (opts.action === 'up') pct = clampPct((cur ?? 100) + 10)
+    else pct = clampPct((cur ?? 100) - 10)
+    const ps = `(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1,${pct})`
+    const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { encoding: 'utf8', timeout: 5000 })
+    const ok = r.status === 0
+    return { ok, action: 'brilho', detail: ok ? `brilho em ${pct}%` : 'controle de brilho indisponível (apenas notebooks)', value: pct }
+  }
   if (!realWhich('xrandr')) return { ok: false, action: 'brilho', detail: 'controle de brilho indisponível (sem xrandr)' }
   const output = xrandrOutputs()[0]
   if (!output) return { ok: false, action: 'brilho', detail: 'não encontrei a saída de vídeo' }
@@ -403,5 +493,5 @@ export function controlPromptContext(cfg: AppConfig): string {
   if (controlConfig(cfg).enabled === false) return 'Controle do computador: desativado nas Configurações.'
   const audio = audioBackend()
   const media = mediaBackend()
-  return `Controle do computador: ativado — abrir apps/sites, volume (${audio || 'sem áudio'}), mídia (${media ? 'play/pause/próxima' : 'indisponível'}), brilho da tela, bloquear tela, captura de tela e escrever na área de transferência.`
+  return `Controle do computador: ativado (${process.platform === 'win32' ? 'Windows' : 'Linux'}) — abrir apps/sites, volume (${audio || 'sem áudio'}), mídia (${media ? 'play/pause/próxima' : 'indisponível'}), brilho da tela, bloquear tela, captura de tela e escrever na área de transferência.`
 }

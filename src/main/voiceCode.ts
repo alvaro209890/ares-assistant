@@ -79,10 +79,59 @@ export function sanitizeVoiceCodeFala(input: string): string {
   return text
 }
 
+const VOICE_TOOL_RESULT_LIMIT = 4000
+const VOICE_TRUNCATED_MARK = '[...resultado truncado para voz...]'
+
+function compactVoiceValue(value: unknown, depth = 0): unknown {
+  if (value == null) return value
+  if (typeof value === 'string') {
+    if (value.length <= 360) return value
+    return `${value.slice(0, 320).replace(/\s+\S*$/, '').trim()} ${VOICE_TRUNCATED_MARK}`
+  }
+  if (typeof value !== 'object') return value
+  if (depth >= 4) return VOICE_TRUNCATED_MARK
+
+  if (Array.isArray(value)) {
+    const maxItems = depth <= 1 ? 12 : 6
+    const items = value.slice(0, maxItems).map((item) => compactVoiceValue(item, depth + 1))
+    return value.length > maxItems ? [...items, `${VOICE_TRUNCATED_MARK} (${value.length - maxItems} itens)`] : items
+  }
+
+  const out: Record<string, unknown> = {}
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    // Campos pesados sao resumidos antes de chegar ao LLM em modo voz.
+    if (['content', 'stdout', 'stderr', 'output', 'diff', 'patch', 'texto'].includes(key) && typeof raw === 'string') {
+      out[key] =
+        raw.length > 180
+          ? `${raw.slice(0, 160).replace(/\s+\S*$/, '').trim()} ${VOICE_TRUNCATED_MARK}`
+          : raw
+      continue
+    }
+    out[key] = compactVoiceValue(raw, depth + 1)
+  }
+  return out
+}
+
+function truncateForVoice(results: unknown[]): unknown[] {
+  const json = JSON.stringify(results)
+  if (json.length <= VOICE_TOOL_RESULT_LIMIT) return results
+
+  let compacted = results.map((r) => compactVoiceValue(r))
+  let compactedJson = JSON.stringify(compacted)
+  if (compactedJson.length <= VOICE_TOOL_RESULT_LIMIT) return compacted as unknown[]
+
+  compacted = compacted.slice(0, 6)
+  compactedJson = JSON.stringify(compacted)
+  const room = Math.max(0, VOICE_TOOL_RESULT_LIMIT - VOICE_TRUNCATED_MARK.length - 32)
+  const clipped = compactedJson.slice(0, room).replace(/[,{\[]?[^,[{\]}]*$/, '')
+  return [`${clipped} ${VOICE_TRUNCATED_MARK}`]
+}
+
 export function toolResultsPrompt(results: unknown[], voice: boolean, codeMode: boolean): string {
   const base = 'Resultados das ferramentas (responda ao usuario em pt-BR, curto e falavel, sem inventar nada alem disto):'
   const voiceCode =
     'MODO VOZ PARA CODIGO: responda em ate 2 frases; nao leia codigo, diff, JSON, stdout ou stderr; diga apenas o que foi feito, arquivos principais, status de validacao e se precisa de autorizacao.'
   const instruction = voice && codeMode ? `${base}\n${voiceCode}` : base
-  return `${instruction}\n${JSON.stringify(results)}`
+  const payload = voice && codeMode ? truncateForVoice(results) : results
+  return `${instruction}\n${JSON.stringify(payload)}`
 }

@@ -87,7 +87,7 @@ export default function Memory(): JSX.Element {
             onChange={(e) => setFact(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && submitFact()}
           />
-          <select className="input w-[150px]" value={newCat} onChange={(e) => setNewCat(e.target.value as MemoryCategory)}>
+          <select className="input-select w-[150px] border-cyan-300/45 bg-black/40 shadow-[0_0_0_1px_rgba(56,225,255,0.04)] hover:border-cyan-200/70 hover:bg-cyan-400/10 focus:border-cyan-200/80 focus:shadow-[0_0_14px_rgba(56,225,255,0.18)]" value={newCat} onChange={(e) => setNewCat(e.target.value as MemoryCategory)}>
             {MEMORY_CATEGORIES.map((c) => (
               <option key={c} value={c}>
                 {MEMORY_CATEGORY_LABEL[c]}
@@ -122,7 +122,7 @@ export default function Memory(): JSX.Element {
 
         <div className="mt-4 flex items-center gap-2">
           <span className="text-[11px] text-cyan-200/45">Filtrar:</span>
-          <select className="input w-[170px] py-1" value={filter} onChange={(e) => setFilter(e.target.value as MemoryCategory | 'todas')}>
+          <select className="input-select w-[170px] border-cyan-300/45 bg-black/40 py-1 shadow-[0_0_0_1px_rgba(56,225,255,0.04)] hover:border-cyan-200/70 hover:bg-cyan-400/10 focus:border-cyan-200/80 focus:shadow-[0_0_14px_rgba(56,225,255,0.18)]" value={filter} onChange={(e) => setFilter(e.target.value as MemoryCategory | 'todas')}>
             <option value="todas">todas categorias</option>
             {MEMORY_CATEGORIES.map((c) => (
               <option key={c} value={c}>
@@ -159,7 +159,7 @@ function CategoryPill({ fact, onCategory }: { fact: MemoryFact; onCategory: (c: 
     <select
       value={fact.category}
       onChange={(e) => onCategory(e.target.value as MemoryCategory)}
-      className={`rounded-full border bg-black/30 px-2 py-0.5 text-[10px] outline-none ${CAT_CLASS[fact.category]}`}
+      className={`input-select inline-block w-auto min-w-[96px] rounded-full border bg-black/35 py-0.5 pl-2.5 pr-7 text-[10px] outline-none shadow-[0_0_0_1px_rgba(56,225,255,0.04)] transition-all duration-150 hover:border-cyan-200/70 hover:bg-cyan-400/10 hover:brightness-125 hover:shadow-[0_0_10px_rgba(56,225,255,0.14)] focus:border-cyan-200/80 focus:shadow-[0_0_12px_rgba(56,225,255,0.2)] ${CAT_CLASS[fact.category]}`}
       title="Categoria"
     >
       {MEMORY_CATEGORIES.map((c) => (

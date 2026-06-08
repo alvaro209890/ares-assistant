@@ -59,11 +59,11 @@ const DEFAULT_CONFIG: AppConfig = {
   },
   tts: {
     enabled: true,
-    engine: 'auto', // Piper (neural) no Linux e Windows; Web Speech como fallback
+    engine: 'auto', // Windows: Web Speech primeiro; Linux: Piper primeiro; ambos com fallback
     piperVoice: 'pt_BR-faber-medium',
     webVoiceURI: '',
-    rate: 0.92,
-    pitch: 1.04,
+    rate: 1.08,
+    pitch: 0.78,
     volume: 1.0
   },
   integrations: {
@@ -148,7 +148,7 @@ const DEFAULT_CONFIG: AppConfig = {
     overlayEnabled: false,
     onboarded: false,
     userName: '',
-    fontScale: 1,
+    fontScale: 0.92,
     highContrast: false,
     simpleMode: false,
     autostart: false,

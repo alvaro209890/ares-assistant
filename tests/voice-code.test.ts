@@ -45,4 +45,49 @@ describe('voz no modo programador', () => {
     expect(prompt).toContain('nao leia codigo')
     expect(toolResultsPrompt([], true, false)).not.toContain('MODO VOZ PARA CODIGO')
   })
+
+  it('trunca tool results grandes em modo voz+codigo', () => {
+    const bigResult = [
+      {
+        tipo: 'codigo.ler',
+        resultado: { file: 'x.ts', content: 'a'.repeat(5000), stdout: 'b'.repeat(3000) }
+      }
+    ]
+    const prompt = toolResultsPrompt(bigResult, true, true)
+    expect(prompt).toContain('truncado para voz')
+    // O conteúdo original de 5000 chars NÃO deve aparecer inteiro
+    expect(prompt).not.toContain('a'.repeat(5000))
+  })
+
+  it('trunca campos aninhados e mantem prompt de voz abaixo do limite', () => {
+    const bigResult = [
+      {
+        tipo: 'codigo.workspace',
+        resultado: {
+          files: Array.from({ length: 200 }, (_, i) => `src/arquivo-${i}.ts`),
+          nested: { output: 'x'.repeat(8000) }
+        }
+      }
+    ]
+    const prompt = toolResultsPrompt(bigResult, true, true)
+
+    expect(prompt).toContain('[...resultado truncado para voz...]')
+    expect(prompt.length).toBeLessThan(4700)
+    expect(prompt).not.toContain('x'.repeat(8000))
+  })
+
+  it('nao trunca tool results pequenos em modo voz', () => {
+    const smallResult = [{ tipo: 'codigo.ler', resultado: { file: 'x.ts', content: 'hello world' } }]
+    const prompt = toolResultsPrompt(smallResult, true, true)
+    expect(prompt).toContain('hello world')
+    expect(prompt).not.toContain('truncado para voz')
+  })
+
+  it('nao trunca em modo texto (voice=false)', () => {
+    const bigResult = [
+      { tipo: 'codigo.ler', resultado: { file: 'x.ts', content: 'a'.repeat(5000) } }
+    ]
+    const prompt = toolResultsPrompt(bigResult, false, true)
+    expect(prompt).toContain('a'.repeat(5000))
+  })
 })

@@ -442,6 +442,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
       let display = ''
       let sentenceBuf = ''
       let speaking = false
+      let queuedSpeech = false
       const opts = voiceOpts()
 
       const flush = (final: boolean): void => {
@@ -456,6 +457,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
             speaking = true
             setAresState('speaking')
           }
+          queuedSpeech = true
           enqueueSentence(s, opts)
         }
       }
@@ -491,6 +493,11 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
         setConversation((prev) =>
           prev.map((m) => (m.id === assistantId ? { ...m, content: result.fala, pending: false } : m))
         )
+        if (speak && !queuedSpeech && result.fala.trim()) {
+          queuedSpeech = true
+          setAresState('speaking')
+          enqueueSentence(result.fala, opts)
+        }
         if (result.notes.length) showToast(result.notes.join('   ·   '))
         await refreshSessions()
         void refreshWidgets()
@@ -789,7 +796,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   }, [refreshWidgets, showToast])
 
   const testVoice = useCallback(
-    async (text = 'Olá, senhor. Aqui é o Ares, com voz neural pronta para ajudar.') => {
+    async (text = 'Ola senhor. Sistemas online. Estou pronto para ajudar com calma precisao e resposta rapida.') => {
       await speakText(text)
     },
     [speakText]

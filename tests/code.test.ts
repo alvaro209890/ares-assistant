@@ -141,6 +141,15 @@ describe('ferramentas locais de programação', () => {
     expect(() => runCodeCommand(config(), { command: 'rm -rf .' })).toThrow(/não permitido/)
   })
 
+  it('retorna resumo curto quando comando de codigo expira', () => {
+    const command = 'node -e "setTimeout(function(){}, 1000)"'
+    const r = runCodeCommand(config({ allowedCommands: [command], commandTimeoutMs: 50 }), { command })
+
+    expect(r.ok).toBe(false)
+    expect(r.stderr).toContain('Timeout ao executar')
+    expect(r.stdout).toBe('')
+  })
+
   it('consulta Git local sem alterar o repositório', () => {
     const status = runCodeGit(config(), { operation: 'status' })
 
@@ -197,24 +206,26 @@ describe('terminal com autorização', () => {
   })
 
   it('exige autorização para comando fora da allowlist e roda após aprovar', () => {
-    const proposta = runCodeTerminal(config(), { command: 'printf autorizado' })
+    const cmd = process.platform === 'win32' ? 'hostname' : 'printf autorizado'
+    const proposta = runCodeTerminal(config(), { command: cmd })
 
     expect(proposta.tier).toBe('confirm')
     expect(proposta.requiresApproval).toBe(true)
     expect(proposta.ran).toBe(false)
 
-    const aprovado = runCodeTerminal(config(), { command: 'printf autorizado', approved: true })
+    const aprovado = runCodeTerminal(config(), { command: cmd, approved: true })
     expect(aprovado.requiresApproval).toBe(false)
     expect(aprovado.ran).toBe(true)
-    expect(aprovado.stdout).toContain('autorizado')
+    expect(aprovado.stdout.trim().length).toBeGreaterThan(0)
   })
 
   it('roda direto quando terminalAutoApprove está ligado', () => {
-    const r = runCodeTerminal(config({ terminalAutoApprove: true }), { command: 'printf auto' })
+    const cmd = process.platform === 'win32' ? 'hostname' : 'printf auto'
+    const r = runCodeTerminal(config({ terminalAutoApprove: true }), { command: cmd })
 
     expect(r.requiresApproval).toBe(false)
     expect(r.ran).toBe(true)
-    expect(r.stdout).toContain('auto')
+    expect(r.stdout.trim().length).toBeGreaterThan(0)
   })
 
   it('nunca executa comandos bloqueados, mesmo aprovados', () => {
