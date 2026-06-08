@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
 import { homedir } from 'os'
 import type { AppConfig, DeepPartial } from '../shared/types'
+import { detectProviderId } from '../shared/providers'
 
 // ---------------------------------------------------------------------------
 // Configuração do Ares.
@@ -209,6 +210,16 @@ export function ensureConfig(): AppConfig {
 /** Aplica um patch parcial (em profundidade) e devolve a config completa atualizada. */
 export function updateConfig(patch: DeepPartial<AppConfig>): AppConfig {
   const merged = deepMerge(readConfig(), patch)
+  // Conveniência: se o cérebro usa a Groq e a transcrição de voz ainda não tem
+  // chave, reaproveita a mesma chave gsk_ para o STT. Assim, num PC novo, quem
+  // escolhe Groq como provedor passa a usar o microfone sem colar a chave 2x.
+  if (
+    detectProviderId(merged.nineRouter.baseUrl) === 'groq' &&
+    merged.nineRouter.apiKey.startsWith('gsk_') &&
+    !merged.grog.apiKey
+  ) {
+    merged.grog.apiKey = merged.nineRouter.apiKey
+  }
   persist(merged)
   return merged
 }

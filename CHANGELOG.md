@@ -4,6 +4,15 @@ Todas as mudanças relevantes do Ares. O formato segue de perto
 [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/) e o projeto usa
 versionamento semântico.
 
+## [0.16.1] — 2026-06-08
+
+### Corrigido
+
+- **Chave Groq compartilhada com o STT** — ao escolher **Groq** como provedor do
+  cérebro, a mesma chave `gsk_` passa a abastecer também a transcrição de voz
+  (`updateConfig` em `src/main/config.ts`), desde que o STT ainda não tenha chave.
+  Num PC novo, o microfone funciona sem colar a chave duas vezes.
+
 ## [0.16.0] — 2026-06-08
 
 Foco: **portabilidade do cérebro** — o Ares deixa de depender do 9Router local e
