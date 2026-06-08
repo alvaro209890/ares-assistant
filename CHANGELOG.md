@@ -28,6 +28,9 @@ Foco: **instalação multiplataforma** e localização com consentimento claro.
 - **Defaults Windows/Linux** — workspace padrão e pasta de capturas usam a pasta
   existente do sistema (`Documents`/`Pictures` no Windows, `Documentos`/`Imagens`
   no Linux pt-BR quando existirem), em vez de caminhos fixos de Linux.
+- **Caminhos de código no Windows** — resultados de workspace, busca, leitura,
+  índice e escrita agora expõem caminhos relativos com `/`, inclusive em Windows,
+  evitando payloads inconsistentes para UI, testes e Hermes.
 - **Sem prompt automático escondido** — o app não tenta detectar localização em
   segundo plano só porque `location.enabled` está ativo sem coordenadas.
 

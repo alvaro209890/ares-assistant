@@ -76,6 +76,14 @@ function isInside(root: string, target: string): boolean {
   return rel === '' || (!!rel && !rel.startsWith('..') && !isAbsolute(rel))
 }
 
+function displayPath(path: string): string {
+  return path.split(/[\\/]+/).filter(Boolean).join('/')
+}
+
+function relativeDisplayPath(root: string, target: string): string {
+  return displayPath(relative(root, target))
+}
+
 function allowedRoots(cfg: AppConfig): string[] {
   return (codeConfig(cfg).allowedRoots || [])
     .map((r) => {
@@ -171,7 +179,7 @@ function walkFiles(root: string, maxDepth: number, maxFiles: number): { files: s
     for (const name of entries.sort()) {
       if (files.length >= maxFiles) return
       const abs = join(dir, name)
-      const rel = relative(root, abs)
+      const rel = relativeDisplayPath(root, abs)
       let st
       try {
         st = statSync(abs)
@@ -289,7 +297,7 @@ export function readCodeFile(
     .join('\n')
 
   return {
-    file: relative(root, abs),
+    file: relativeDisplayPath(root, abs),
     startLine: start,
     endLine: end,
     totalLines,
@@ -561,7 +569,7 @@ export function runCodeGit(
 ): CodeCommandResult {
   const root = resolveCodeWorkspace(cfg, opts.root)
   const op = String(opts.operation || '').trim()
-  const file = opts.file ? relative(root, resolveCodeFile(cfg, root, opts.file)) : ''
+  const file = opts.file ? relativeDisplayPath(root, resolveCodeFile(cfg, root, opts.file)) : ''
   if (file && (file.startsWith('..') || isAbsolute(file))) throw new Error(`Arquivo fora do workspace: ${opts.file}`)
   if (op === 'status') return gitResult(cfg, root, ['status', '--short'])
   if (op === 'diffStat') return gitResult(cfg, root, file ? ['diff', '--stat', '--', file] : ['diff', '--stat'])
@@ -834,7 +842,7 @@ export function writeCodeFile(
   mkdirSync(dirname(abs), { recursive: true })
   const content = String(opts.content ?? '')
   writeFileSync(abs, content, 'utf8')
-  return { file: relative(root, abs), bytes: Buffer.byteLength(content, 'utf8'), created: !existed, overwritten: existed }
+  return { file: relativeDisplayPath(root, abs), bytes: Buffer.byteLength(content, 'utf8'), created: !existed, overwritten: existed }
 }
 
 const DIAGNOSE_SCRIPTS = ['typecheck', 'lint', 'test'] as const
