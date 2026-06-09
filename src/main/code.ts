@@ -502,8 +502,8 @@ const BLOCKED_PATTERNS: Array<{ re: RegExp; why: string }> = [
   { re: /(^|[\s;&|])sudo(\s|$)/, why: 'elevação de privilégio (sudo) não é permitida' },
   { re: /(^|[\s;&|])su(\s|$)/, why: 'troca de usuário (su) não é permitida' },
   { re: /(^|[\s;&|])doas(\s|$)/, why: 'elevação de privilégio (doas) não é permitida' },
-  { re: /rm\s+(-\S*\s+)*-\S*[rf]\S*\s+(-\S*\s+)*(\/|~|\$home|\.{1,2}|\*)(\s|\/|$)/, why: 'remoção recursiva de raiz/HOME/diretório atual' },
-  { re: /rm\s+-\S*[rf].*\s\/(\s|$)/, why: 'remoção recursiva da raiz do sistema' },
+  { re: /rm\s+(-\S*\s+)*-\S*[rf]\S*\s+(-\S*\s+)*(\/|~|\$home|\.{1,2}|\*)(\s|\/|$|[)'"`;&|])/, why: 'remoção recursiva de raiz/HOME/diretório atual' },
+  { re: /rm\s+-\S*[rf].*\s\/(\s|$|[)'"`;&|])/, why: 'remoção recursiva da raiz do sistema' },
   { re: /\bmkfs(\.\w+)?\b/, why: 'formatação de sistema de arquivos' },
   { re: /\bdd\b[^\n]*\bof=\/dev\//, why: 'escrita direta em dispositivo de bloco' },
   { re: /[>]\s*\/dev\/(sd|nvme|hd|mmcblk|disk)/, why: 'escrita direta em disco' },
@@ -567,20 +567,96 @@ function terminalSafePrefixes(cfg: AppConfig): string[] {
 }
 
 /**
- * Classifica um comando antes de executá-lo. Não roda nada — apenas decide a
- * camada de segurança. Usado pelo terminal e testável isoladamente.
+ * Quebra um comando nos operadores de shell (`;`, `&&`, `||`, `|`, `&`, nova linha),
+ * respeitando aspas. Cada trecho é um sub-comando independente, classificado por conta
+ * própria — fecha o bypass de "prefixo seguro + comando perigoso encadeado"
+ * (ex.: `git status && rm -rf algo`).
+ */
+export function splitShellSegments(command: string): string[] {
+  const segs: string[] = []
+  let cur = ''
+  let quote: '"' | "'" | '' = ''
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i]
+    if (quote) {
+      if (ch === quote) quote = ''
+      cur += ch
+      continue
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch
+      cur += ch
+      continue
+    }
+    if (ch === '|' || ch === '&') {
+      if (command[i + 1] === ch) i++ // consome || e &&
+      segs.push(cur)
+      cur = ''
+      continue
+    }
+    if (ch === ';' || ch === '\n' || ch === '\r') {
+      segs.push(cur)
+      cur = ''
+      continue
+    }
+    cur += ch
+  }
+  segs.push(cur)
+  return segs.map((s) => s.trim()).filter(Boolean)
+}
+
+// Substituição de comando / process substitution: canais que permitem ESCONDER um
+// comando dentro de um trecho aparentemente seguro (ex.: `echo $(rm -rf algo)`,
+// `cat \`id\``). Na presença deles, o comando nunca é 'allowed' — vai para 'confirm'
+// para o usuário ver o texto literal e decidir.
+const COMMAND_SUBSTITUTION_RE = /\$\(|`|<\(|>\(/
+
+/**
+ * Classifica um comando antes de executá-lo. Não roda nada — apenas decide a camada de
+ * segurança. Defesa em profundidade: a denylist é checada no comando inteiro E em cada
+ * trecho; o tier 'allowed' (auto-executável, sem confirmação) só vale quando TODOS os
+ * trechos batem em prefixo seguro/allowlist E não há substituição de comando. Qualquer
+ * outra coisa cai em 'confirm' (exige o "sim" do usuário). Testável isoladamente.
  */
 export function classifyCommand(cfg: AppConfig, command: string): CommandClassification {
   const c = normalizeCommand(command)
   if (!c) return { tier: 'blocked', reason: 'comando vazio' }
+  // Caracteres de controle (exceto whitespace normal) são recusados — evitam truques de
+  // ofuscação com bytes nulos/escape.
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(c)) {
+    return { tier: 'blocked', reason: 'caracteres de controle não são permitidos' }
+  }
   const lower = c.toLowerCase()
   for (const { re, why } of BLOCKED_PATTERNS) {
     if (re.test(lower)) return { tier: 'blocked', reason: why }
   }
+
+  const segments = splitShellSegments(c)
+  // A denylist também roda em cada trecho (defesa em profundidade contra padrões
+  // ancorados no início do comando, como sudo/su).
+  for (const seg of segments) {
+    const sl = seg.toLowerCase()
+    for (const { re, why } of BLOCKED_PATTERNS) {
+      if (re.test(sl)) return { tier: 'blocked', reason: why }
+    }
+  }
+
   const allowlist = codeConfig(cfg).allowedCommands || []
-  if (allowlist.some((a) => matchesPrefix(c, a))) return { tier: 'allowed', reason: 'comando na allowlist' }
-  if (terminalSafePrefixes(cfg).some((p) => matchesPrefix(c, p))) return { tier: 'allowed', reason: 'comando seguro (somente leitura/dev)' }
-  return { tier: 'confirm', reason: 'comando fora da allowlist: requer autorização do usuário' }
+  const safe = terminalSafePrefixes(cfg)
+  const isAllowedSegment = (seg: string): boolean =>
+    allowlist.some((a) => matchesPrefix(seg, a)) || safe.some((p) => matchesPrefix(seg, p))
+
+  if (COMMAND_SUBSTITUTION_RE.test(c)) {
+    return { tier: 'confirm', reason: 'substituição de comando ($(), crases): requer autorização do usuário' }
+  }
+  if (segments.length > 0 && segments.every(isAllowedSegment)) {
+    return {
+      tier: 'allowed',
+      reason: segments.length > 1 ? 'todos os trechos são seguros/allowlist' : 'comando seguro (somente leitura/dev)'
+    }
+  }
+  return { tier: 'confirm', reason: 'comando fora da allowlist ou com encadeamento perigoso: requer autorização do usuário' }
 }
 
 /**

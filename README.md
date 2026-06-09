@@ -114,7 +114,18 @@ No Windows, o terminal nativo usa PowerShell. No Linux e macOS, usa Bash. Comand
 
 Toda execucao de comando do modo programador (`codigo.comando`, `codigo.terminal`, `codigo.git`, `codigo.diagnostico` e o coder autonomo) agora roda de forma **assincrona** via `src/main/exec.ts` (`spawnAsync`), e nao mais com `spawnSync`. Isso resolve o congelamento do processo principal do Electron durante builds/instalacoes longas: o event loop fica livre, a voz e a proatividade continuam vivas e as ferramentas de consulta em paralelo nao sao mais bloqueadas por um terminal.
 
-O `spawnAsync` aplica timeout (mata o processo com SIGTERM e, se preciso, SIGKILL), limita a captura por fluxo, suporta `onChunk` (saida em tempo real, base para uma futura UI de terminal ao vivo) e aceita um `AbortSignal`. Cada turno cria um `AbortController` registrado por sessao em `src/main/running.ts`; **pressionar `Esc` interrompe** nao so a fala como qualquer comando/build/coder em andamento (IPC `code:cancel` -> `cancelSession`). Comandos interrompidos voltam com `ok: false` e a mensagem "Comando interrompido pelo usuario.". A classificacao de seguranca (`allowed`/`confirm`/`blocked`) e inalterada.
+O `spawnAsync` aplica timeout (mata o processo com SIGTERM e, se preciso, SIGKILL), limita a captura por fluxo, suporta `onChunk` (saida em tempo real, base para uma futura UI de terminal ao vivo) e aceita um `AbortSignal`. Cada turno cria um `AbortController` registrado por sessao em `src/main/running.ts`; **pressionar `Esc` interrompe** nao so a fala como qualquer comando/build/coder em andamento (IPC `code:cancel` -> `cancelSession`). Comandos interrompidos voltam com `ok: false` e a mensagem "Comando interrompido pelo usuario.".
+
+### Seguranca do terminal: analise por trecho
+
+O `classifyCommand` foi endurecido contra evasao. Antes, a classificacao casava o **comando inteiro** contra os prefixos seguros — entao `git status && rm -rf algo` casava o prefixo `git status` e era tratado como `allowed` (auto-executado, sem confirmacao). Agora:
+
+- O comando e **quebrado nos operadores de shell** (`;`, `&&`, `||`, `|`, `&`, nova linha), respeitando aspas (`splitShellSegments`). O tier `allowed` (auto-executavel) so vale quando **TODOS** os trechos batem em prefixo seguro/allowlist — qualquer comando perigoso encadeado derruba para `confirm` (exige o "sim").
+- **Substituicao de comando** (`$(...)`, crases, `<(...)`, `>(...)`) nunca e `allowed`: vai para `confirm`, para o usuario ver o texto literal e decidir (fecha `echo $(comando-perigoso)`).
+- A **denylist** (sudo/su, `rm -rf` de raiz/HOME, mkfs, dd em disco, shutdown, fork bomb, `curl|sh`, etc.) roda no comando inteiro **e em cada trecho** (defesa em profundidade), e tolera fechadores de shell — `rm -rf /` continua bloqueado mesmo dentro de `$( )`.
+- **Caracteres de controle** (byte nulo, escape ANSI) sao recusados.
+
+Comandos `blocked` (catastroficos/elevacao) nunca rodam, nem com confirmacao. Pipelines somente-leitura compostos so de trechos seguros (ex.: `ls | cat`, `ls && pwd`) continuam `allowed`. No Windows o terminal usa PowerShell; no Linux/macOS, Bash.
 
 ### Voz no Modo Programador
 
