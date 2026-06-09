@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useAres } from '../lib/store'
+import Select from '../components/Select'
 import type { CalendarEvent, Recurrence } from '../../shared/types'
 
 const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
@@ -87,24 +88,38 @@ export default function Calendar(): JSX.Element {
           <div className="grid grid-cols-2 gap-2">
             <label className="text-[11px] text-cyan-200/60">
               Avisar antes
-              <select className="input mt-1" value={remind} onChange={(e) => setRemind(Number(e.target.value))}>
-                <option value={0}>na hora</option>
-                <option value={5}>5 min</option>
-                <option value={10}>10 min</option>
-                <option value={15}>15 min</option>
-                <option value={30}>30 min</option>
-                <option value={60}>1 hora</option>
-                <option value={1440}>1 dia</option>
-              </select>
+              <div className="mt-1">
+                <Select
+                  ariaLabel="Avisar antes"
+                  value={String(remind)}
+                  onChange={(v) => setRemind(Number(v))}
+                  options={[
+                    { value: '0', label: 'na hora' },
+                    { value: '5', label: '5 min' },
+                    { value: '10', label: '10 min' },
+                    { value: '15', label: '15 min' },
+                    { value: '30', label: '30 min' },
+                    { value: '60', label: '1 hora' },
+                    { value: '1440', label: '1 dia' }
+                  ]}
+                />
+              </div>
             </label>
             <label className="text-[11px] text-cyan-200/60">
               Repetir
-              <select className="input mt-1" value={recurrence} onChange={(e) => setRecurrence(e.target.value as Recurrence)}>
-                <option value="none">não repetir</option>
-                <option value="daily">diário</option>
-                <option value="weekly">semanal</option>
-                <option value="monthly">mensal</option>
-              </select>
+              <div className="mt-1">
+                <Select
+                  ariaLabel="Repetir"
+                  value={recurrence}
+                  onChange={(v) => setRecurrence(v as Recurrence)}
+                  options={[
+                    { value: 'none', label: 'não repetir' },
+                    { value: 'daily', label: 'diário' },
+                    { value: 'weekly', label: 'semanal' },
+                    { value: 'monthly', label: 'mensal' }
+                  ]}
+                />
+              </div>
             </label>
           </div>
           <button onClick={submit} disabled={!title.trim() || !when} className="btn-ghost disabled:opacity-40">

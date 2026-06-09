@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAres } from '../lib/store'
 import { PROVIDERS, detectProviderId, getProvider } from '../../shared/providers'
+import Select, { type SelectOption } from './Select'
 
 // Ícone e cor de borda por provedor (visual distinto sem dependências externas).
 const PROVIDER_STYLE: Record<string, { icon: string; border: string; glow: string }> = {
@@ -31,6 +32,16 @@ export default function ProviderConfig({ compact = false }: { compact?: boolean 
   const nr = config?.nineRouter
   const modelOptions = preset?.models || []
   const style = PROVIDER_STYLE[currentId] || fallbackStyle
+
+  const providerOptions: SelectOption[] = useMemo(() => {
+    const base = PROVIDERS.map((p) => ({
+      value: p.id,
+      label: p.label,
+      icon: (PROVIDER_STYLE[p.id] || fallbackStyle).icon
+    }))
+    if (currentId === 'custom') base.push({ value: 'custom', label: 'Personalizado', icon: '🔧' })
+    return base
+  }, [currentId])
 
   useEffect(() => {
     if (!nr) return
@@ -79,24 +90,13 @@ export default function ProviderConfig({ compact = false }: { compact?: boolean 
       {/* Seletor de provedor com icone e borda colorida. */}
       <label className="block text-sm text-cyan-100/80">
         <span className="mb-1 block text-[12px] text-cyan-200/60">Provedor</span>
-        <div className="relative">
-          <span className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-base">{style.icon}</span>
-          <select
-            className={`input-select pl-10 transition-all duration-200 ${style.border} ${style.glow}`}
-            value={currentId}
-            onChange={(e) => pickProvider(e.target.value)}
-          >
-            {PROVIDERS.map((p) => {
-              const s = PROVIDER_STYLE[p.id] || fallbackStyle
-              return (
-                <option key={p.id} value={p.id}>
-                  {s.icon} {p.label}
-                </option>
-              )
-            })}
-            {currentId === 'custom' && <option value="custom">🔧 Personalizado</option>}
-          </select>
-        </div>
+        <Select
+          ariaLabel="Provedor de IA"
+          className={`transition-all duration-200 ${style.border} ${style.glow}`}
+          value={currentId}
+          onChange={pickProvider}
+          options={providerOptions}
+        />
       </label>
 
       {preset && <p className="-mt-1 text-[11px] text-cyan-200/45">{preset.hint}</p>}
@@ -146,17 +146,13 @@ export default function ProviderConfig({ compact = false }: { compact?: boolean 
       <label className="block text-sm text-cyan-100/80">
         <span className="mb-1 block text-[12px] text-cyan-200/60">Modelo</span>
         {modelOptions.length ? (
-          <select
-            className={`input-select transition-all duration-200 ${style.border} ${style.glow}`}
-            value={modelOptions.some((m) => m.value === nr.model) ? nr.model : preset?.defaultModel}
-            onChange={(e) => saveConfig({ nineRouter: { ...nr, model: e.target.value } })}
-          >
-            {modelOptions.map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
-              </option>
-            ))}
-          </select>
+          <Select
+            ariaLabel="Modelo"
+            className={`transition-all duration-200 ${style.border} ${style.glow}`}
+            value={modelOptions.some((m) => m.value === nr.model) ? nr.model : preset?.defaultModel ?? ''}
+            onChange={(v) => saveConfig({ nineRouter: { ...nr, model: v } })}
+            options={modelOptions.map((m) => ({ value: m.value, label: m.label }))}
+          />
         ) : (
           <input
             className="input"

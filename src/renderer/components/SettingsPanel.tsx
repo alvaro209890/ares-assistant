@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useAres } from '../lib/store'
 import { ptVoices } from '../lib/tts'
 import ProviderConfig from './ProviderConfig'
+import Select from './Select'
 import { BRAZIL_STATES } from '../../shared/locations'
 
 export default function SettingsPanel(): JSX.Element {
@@ -76,47 +77,43 @@ export default function SettingsPanel(): JSX.Element {
                 onChange={(v) => saveConfig({ tts: { ...config.tts, enabled: v } })}
               />
               <Field label="Motor">
-                <select
+                <Select
+                  ariaLabel="Motor de voz"
                   value={config.tts.engine}
-                  onChange={(e) => saveConfig({ tts: { ...config.tts, engine: e.target.value as 'auto' | 'piper' | 'web' } })}
-                  className="input"
-                >
-                  <option value="auto">Automático (Piper no Linux)</option>
-                  <option value="piper">Piper neural local</option>
-                  <option value="web">Chromium Web Speech</option>
-                </select>
+                  onChange={(v) => saveConfig({ tts: { ...config.tts, engine: v as 'auto' | 'piper' | 'web' } })}
+                  options={[
+                    { value: 'auto', label: 'Automático (Piper neural)' },
+                    { value: 'piper', label: 'Piper neural local' },
+                    { value: 'web', label: 'Chromium Web Speech' }
+                  ]}
+                />
               </Field>
 
               <Field label="Voz Piper">
-                <select
+                <Select
+                  ariaLabel="Voz Piper"
                   value={config.tts.piperVoice}
-                  onChange={(e) => saveConfig({ tts: { ...config.tts, piperVoice: e.target.value } })}
-                  className="input"
-                >
-                  {(piper?.voices.length ? piper.voices : [config.tts.piperVoice]).map((v) => (
-                    <option key={v} value={v}>
-                      {v}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(v) => saveConfig({ tts: { ...config.tts, piperVoice: v } })}
+                  options={(piper?.voices.length ? piper.voices : [config.tts.piperVoice]).map((v) => ({
+                    value: v,
+                    label: v
+                  }))}
+                />
                 <p className="mt-1 text-[11px] text-cyan-200/45">
                   {piper?.ready ? 'Piper pronto: voz neural local ativa.' : 'Piper ainda indisponível; o Ares usa Web Speech como reserva.'}
                 </p>
               </Field>
 
               <Field label="Voz Chromium">
-                <select
+                <Select
+                  ariaLabel="Voz Chromium"
                   value={config.tts.webVoiceURI}
-                  onChange={(e) => saveConfig({ tts: { ...config.tts, webVoiceURI: e.target.value } })}
-                  className="input"
-                >
-                  <option value="">Automática (prioriza pt-BR)</option>
-                  {pt.map((v) => (
-                    <option key={v.voiceURI} value={v.voiceURI}>
-                      {v.name} - {v.lang}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(v) => saveConfig({ tts: { ...config.tts, webVoiceURI: v } })}
+                  options={[
+                    { value: '', label: 'Automática (prioriza pt-BR)' },
+                    ...pt.map((v) => ({ value: v.voiceURI, label: `${v.name} - ${v.lang}` }))
+                  ]}
+                />
                 {pt.length === 0 && (
                   <p className="mt-1 text-[11px] text-amber-300/80">
                     Nenhuma voz pt-BR do Chromium foi carregada. O Piper neural continua sendo a opção recomendada no Linux.
@@ -610,18 +607,16 @@ export default function SettingsPanel(): JSX.Element {
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <Field label="Estado">
-                  <select
-                    className="input"
+                  <Select
+                    ariaLabel="Estado (UF)"
+                    placeholder="UF"
                     value={config.integrations.location.region || ''}
-                    onChange={(e) => saveManualLocation(config.integrations.location.city || '', e.target.value)}
-                  >
-                    <option value="">UF</option>
-                    {BRAZIL_STATES.map((state) => (
-                      <option key={state.uf} value={state.uf}>
-                        {state.uf} - {state.name}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(v) => saveManualLocation(config.integrations.location.city || '', v)}
+                    options={[
+                      { value: '', label: 'UF' },
+                      ...BRAZIL_STATES.map((state) => ({ value: state.uf, label: `${state.uf} - ${state.name}` }))
+                    ]}
+                  />
                 </Field>
                 <Field label="Cidade">
                   <input

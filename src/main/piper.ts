@@ -5,6 +5,7 @@ import { join, dirname } from 'path'
 import { tmpdir } from 'os'
 import { PIPER_SENTENCE_SILENCE, computeLengthScale, computeNoise, detectTone, prepareText } from './speech'
 import { warmSynthesize, type PiperSynthParams } from './piperEngine'
+import { logger } from './logger'
 
 // Voz neural local via Piper (https://github.com/rhasspy/piper).
 // Binário + vozes ficam em userData/piper. É o motor padrão no Linux E no Windows
@@ -232,7 +233,8 @@ export async function ensurePiper(): Promise<boolean> {
       await download(DEFAULT_VOICE.json, `${onnx}.json`)
     }
     return isPiperReady()
-  } catch {
+  } catch (e) {
+    logger.warn('piper', 'download/instalação do Piper falhou', e)
     return false
   }
 }

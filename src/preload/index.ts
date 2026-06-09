@@ -91,6 +91,9 @@ const api = {
   diagnostics: {
     get: (): Promise<DiagnosticsResult> => ipcRenderer.invoke('diagnostics:get')
   },
+  logs: {
+    recent: (limit?: number): Promise<string[]> => ipcRenderer.invoke('logs:recent', limit)
+  },
   lists: {
     load: (): Promise<Checklist[]> => ipcRenderer.invoke('lists:load'),
     save: (lists: Checklist[]): Promise<Checklist[]> => ipcRenderer.invoke('lists:save', lists)

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useAres } from '../lib/store'
+import Select from '../components/Select'
 import type { Recurrence, Reminder } from '../../shared/types'
 
 const REC_LABEL: Record<Recurrence, string> = { none: 'uma vez', daily: 'diário', weekly: 'semanal', monthly: 'mensal' }
@@ -60,12 +61,19 @@ export default function Reminders(): JSX.Element {
           </label>
           <label className="text-[11px] text-cyan-200/60">
             Repetir
-            <select className="input mt-1" value={recurrence} onChange={(e) => setRecurrence(e.target.value as Recurrence)}>
-              <option value="none">uma vez</option>
-              <option value="daily">todo dia</option>
-              <option value="weekly">toda semana</option>
-              <option value="monthly">todo mês</option>
-            </select>
+            <div className="mt-1">
+              <Select
+                ariaLabel="Repetir"
+                value={recurrence}
+                onChange={(v) => setRecurrence(v as Recurrence)}
+                options={[
+                  { value: 'none', label: 'uma vez' },
+                  { value: 'daily', label: 'todo dia' },
+                  { value: 'weekly', label: 'toda semana' },
+                  { value: 'monthly', label: 'todo mês' }
+                ]}
+              />
+            </div>
           </label>
           <button onClick={submit} disabled={!text.trim() || (!when && minutes <= 0)} className="btn-ghost disabled:opacity-40">
             CRIAR LEMBRETE

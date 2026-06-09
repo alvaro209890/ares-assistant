@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useAres } from '../lib/store'
 import ProviderConfig from './ProviderConfig'
+import Select from './Select'
 import { detectProviderId, getProvider } from '../../shared/providers'
 import { BRAZIL_STATES } from '../../shared/locations'
 
@@ -165,14 +166,16 @@ export default function Onboarding(): JSX.Element {
                   <div className="grid gap-3 sm:grid-cols-[150px_1fr]">
                     <label className="block text-sm text-cyan-100/80">
                       <span className="mb-1 block text-[12px] text-cyan-200/60">Estado</span>
-                      <select className="input" value={stateUf} onChange={(e) => setStateUf(e.target.value)}>
-                        <option value="">UF</option>
-                        {BRAZIL_STATES.map((state) => (
-                          <option key={state.uf} value={state.uf}>
-                            {state.uf} - {state.name}
-                          </option>
-                        ))}
-                      </select>
+                      <Select
+                        ariaLabel="Estado (UF)"
+                        placeholder="UF"
+                        value={stateUf}
+                        onChange={setStateUf}
+                        options={[
+                          { value: '', label: 'UF' },
+                          ...BRAZIL_STATES.map((state) => ({ value: state.uf, label: `${state.uf} - ${state.name}` }))
+                        ]}
+                      />
                     </label>
                     <label className="block text-sm text-cyan-100/80">
                       <span className="mb-1 block text-[12px] text-cyan-200/60">Cidade</span>

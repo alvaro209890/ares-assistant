@@ -168,11 +168,12 @@ As ferramentas de codigo tambem usam orcamento de tempo em varreduras de pasta. 
 - `src/main/voiceCode.ts`: interpretacao e sanitizacao de respostas de programacao por voz (inclui causa raiz de erros).
 - `src/main/piper.ts`: voz neural Piper multiplataforma (download do binario + sintese em Linux e Windows; engine quente com fallback um-processo-por-frase).
 - `src/main/piperEngine.ts`: pool de processos Piper "quentes" (modelo carregado em memoria entre falas) indexado por parametros de prosodia.
-- `src/main/speech.ts`: pre-processamento puro da fala (normalizacao pt-BR de numeros/simbolos, pausas, tom dinamico e expressividade).
-- `src/main/speech.ts`: pre-processamento de fala puro e testavel (siglas tecnicas, tom dinamico, length_scale).
+- `src/main/speech.ts`: pre-processamento de fala puro e testavel (normalizacao pt-BR de numeros/simbolos, pausas, tom dinamico, length_scale e expressividade).
+- `src/main/logger.ts`: log estruturado (anel em memoria + `ares.log` em userData, com rotacao); base do painel "Registro do sistema".
 - `src/main/preferences.ts`: extracao das preferencias de codificacao do usuario (pilulas de contexto).
 - `src/main/config.ts`: defaults e merge nao-destrutivo da configuracao (preserva dados em upgrades).
 - `src/renderer`: interface React.
+- `src/renderer/components/Select.tsx`: seletor moderno do tema HUD (dropdown em portal, teclado, ARIA) que substitui o `<select>` nativo em toda a UI.
 - `src/preload`: API IPC tipada exposta ao renderer.
 - `build/installer.nsh`: customizacoes NSIS (upgrade no mesmo diretorio, preservando os dados do usuario).
 - `.github/workflows/build-installers.yml`: gera instaladores Linux e Windows.

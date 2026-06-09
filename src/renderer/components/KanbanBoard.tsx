@@ -4,6 +4,7 @@ import type { Board, Card, CardColor, Priority } from '../../shared/types'
 import { useAres } from '../lib/store'
 import { uid } from '../lib/actions'
 import ColumnView from './ColumnView'
+import Select from './Select'
 
 const isDone = (title: string) => /conclu/i.test(title)
 const COLORS: ('todas' | CardColor)[] = ['todas', 'cyan', 'blue', 'green', 'amber', 'pink']
@@ -180,37 +181,54 @@ export default function KanbanBoard(): JSX.Element {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-          <select className="input" value={colorFilter} onChange={(e) => setColorFilter(e.target.value as 'todas' | CardColor)}>
-            {COLORS.map((c) => (
-              <option key={c} value={c}>
-                cor {c}
-              </option>
-            ))}
-          </select>
-          <select className="input" value={labelFilter} onChange={(e) => setLabelFilter(e.target.value)}>
-            <option value="todas">toda etiqueta</option>
-            {allLabels.map((l) => (
-              <option key={l} value={l}>
-                {l}
-              </option>
-            ))}
-          </select>
-          <select className="input" value={dueFilter} onChange={(e) => setDueFilter(e.target.value as DueFilter)}>
-            <option value="todos">todos prazos</option>
-            <option value="vencidas">vencidas</option>
-            <option value="hoje">hoje</option>
-            <option value="proximas">próximas</option>
-          </select>
-          <select className="input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}>
-            <option value="todos">todo status</option>
-            <option value="abertas">abertas</option>
-            <option value="concluidas">concluídas</option>
-          </select>
-          <select className="input" value={sortMode} onChange={(e) => setSortMode(e.target.value as SortMode)}>
-            <option value="manual">ordem manual</option>
-            <option value="prazo">por prazo</option>
-            <option value="prioridade">por prioridade</option>
-          </select>
+          <Select
+            ariaLabel="Filtrar por cor"
+            className="w-[130px]"
+            value={colorFilter}
+            onChange={(v) => setColorFilter(v as 'todas' | CardColor)}
+            options={COLORS.map((c) => ({ value: c, label: `cor ${c}` }))}
+          />
+          <Select
+            ariaLabel="Filtrar por etiqueta"
+            className="w-[150px]"
+            value={labelFilter}
+            onChange={setLabelFilter}
+            options={[{ value: 'todas', label: 'toda etiqueta' }, ...allLabels.map((l) => ({ value: l, label: l }))]}
+          />
+          <Select
+            ariaLabel="Filtrar por prazo"
+            className="w-[140px]"
+            value={dueFilter}
+            onChange={(v) => setDueFilter(v as DueFilter)}
+            options={[
+              { value: 'todos', label: 'todos prazos' },
+              { value: 'vencidas', label: 'vencidas' },
+              { value: 'hoje', label: 'hoje' },
+              { value: 'proximas', label: 'próximas' }
+            ]}
+          />
+          <Select
+            ariaLabel="Filtrar por status"
+            className="w-[140px]"
+            value={statusFilter}
+            onChange={(v) => setStatusFilter(v as StatusFilter)}
+            options={[
+              { value: 'todos', label: 'todo status' },
+              { value: 'abertas', label: 'abertas' },
+              { value: 'concluidas', label: 'concluídas' }
+            ]}
+          />
+          <Select
+            ariaLabel="Ordenar"
+            className="w-[150px]"
+            value={sortMode}
+            onChange={(v) => setSortMode(v as SortMode)}
+            options={[
+              { value: 'manual', label: 'ordem manual' },
+              { value: 'prazo', label: 'por prazo' },
+              { value: 'prioridade', label: 'por prioridade' }
+            ]}
+          />
         </div>
 
         <div className="kanban-scroll flex min-h-0 flex-1 items-stretch gap-4 overflow-x-auto overflow-y-hidden pb-2">

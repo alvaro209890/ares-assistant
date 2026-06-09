@@ -1,8 +1,11 @@
 import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useAres } from '../lib/store'
+import Select from '../components/Select'
 import type { MemoryCategory, MemoryFact } from '../../shared/types'
 import { MEMORY_CATEGORIES, MEMORY_CATEGORY_LABEL } from '../../shared/types'
+
+const CATEGORY_OPTIONS = MEMORY_CATEGORIES.map((c) => ({ value: c, label: MEMORY_CATEGORY_LABEL[c] }))
 
 const CAT_CLASS: Record<MemoryCategory, string> = {
   perfil: 'border-cyan-300/35 text-cyan-200',
@@ -87,13 +90,13 @@ export default function Memory(): JSX.Element {
             onChange={(e) => setFact(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && submitFact()}
           />
-          <select className="input-select w-[150px] border-cyan-300/45 bg-black/40 shadow-[0_0_0_1px_rgba(56,225,255,0.04)] hover:border-cyan-200/70 hover:bg-cyan-400/10 focus:border-cyan-200/80 focus:shadow-[0_0_14px_rgba(56,225,255,0.18)]" value={newCat} onChange={(e) => setNewCat(e.target.value as MemoryCategory)}>
-            {MEMORY_CATEGORIES.map((c) => (
-              <option key={c} value={c}>
-                {MEMORY_CATEGORY_LABEL[c]}
-              </option>
-            ))}
-          </select>
+          <Select
+            ariaLabel="Categoria da nova memória"
+            className="w-[150px] border-cyan-300/45 hover:border-cyan-200/70 focus:border-cyan-200/80"
+            value={newCat}
+            onChange={(v) => setNewCat(v as MemoryCategory)}
+            options={CATEGORY_OPTIONS}
+          />
           <button onClick={submitFact} disabled={!fact.trim()} className="btn-ghost disabled:opacity-40">
             ADICIONAR
           </button>
@@ -122,14 +125,13 @@ export default function Memory(): JSX.Element {
 
         <div className="mt-4 flex items-center gap-2">
           <span className="text-[11px] text-cyan-200/45">Filtrar:</span>
-          <select className="input-select w-[170px] border-cyan-300/45 bg-black/40 py-1 shadow-[0_0_0_1px_rgba(56,225,255,0.04)] hover:border-cyan-200/70 hover:bg-cyan-400/10 focus:border-cyan-200/80 focus:shadow-[0_0_14px_rgba(56,225,255,0.18)]" value={filter} onChange={(e) => setFilter(e.target.value as MemoryCategory | 'todas')}>
-            <option value="todas">todas categorias</option>
-            {MEMORY_CATEGORIES.map((c) => (
-              <option key={c} value={c}>
-                {MEMORY_CATEGORY_LABEL[c]}
-              </option>
-            ))}
-          </select>
+          <Select
+            ariaLabel="Filtrar por categoria"
+            className="w-[170px] border-cyan-300/45 py-1 hover:border-cyan-200/70 focus:border-cyan-200/80"
+            value={filter}
+            onChange={(v) => setFilter(v as MemoryCategory | 'todas')}
+            options={[{ value: 'todas', label: 'todas categorias' }, ...CATEGORY_OPTIONS]}
+          />
         </div>
 
         <div className="mt-3 min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
@@ -156,18 +158,13 @@ export default function Memory(): JSX.Element {
 
 function CategoryPill({ fact, onCategory }: { fact: MemoryFact; onCategory: (c: MemoryCategory) => void }): JSX.Element {
   return (
-    <select
+    <Select
+      ariaLabel="Categoria"
       value={fact.category}
-      onChange={(e) => onCategory(e.target.value as MemoryCategory)}
-      className={`input-select inline-block w-auto min-w-[96px] rounded-full border bg-black/35 py-0.5 pl-2.5 pr-7 text-[10px] outline-none shadow-[0_0_0_1px_rgba(56,225,255,0.04)] transition-all duration-150 hover:border-cyan-200/70 hover:bg-cyan-400/10 hover:brightness-125 hover:shadow-[0_0_10px_rgba(56,225,255,0.14)] focus:border-cyan-200/80 focus:shadow-[0_0_12px_rgba(56,225,255,0.2)] ${CAT_CLASS[fact.category]}`}
-      title="Categoria"
-    >
-      {MEMORY_CATEGORIES.map((c) => (
-        <option key={c} value={c}>
-          {MEMORY_CATEGORY_LABEL[c]}
-        </option>
-      ))}
-    </select>
+      onChange={(v) => onCategory(v as MemoryCategory)}
+      options={CATEGORY_OPTIONS}
+      className={`inline-flex w-auto min-w-[110px] rounded-full !py-0.5 !pl-2.5 !pr-2 text-[10px] hover:border-cyan-200/70 focus:border-cyan-200/80 ${CAT_CLASS[fact.category]}`}
+    />
   )
 }
 

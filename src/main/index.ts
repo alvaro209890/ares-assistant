@@ -16,6 +16,7 @@ import { getProvider } from '../shared/providers'
 import { startReminders } from './notify'
 import { synthesize, listPiperVoices, isPiperReady, ensurePiper } from './piper'
 import { shutdownPiperPool } from './piperEngine'
+import { initLogger, logger, getRecentLogs } from './logger'
 import { getWeather, getWeatherAt, getNews, reverseGeocode } from './tools'
 import {
   loadMemory,
@@ -93,6 +94,8 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  initLogger(app.getPath('userData'))
+  logger.info('app', `Ares ${app.getVersion()} iniciado — ${process.platform} ${process.arch}, electron ${process.versions.electron}`)
   ensureConfig()
 
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => {
@@ -122,7 +125,9 @@ app.whenReady().then(() => {
   setAutostart(cfg0.ui.autostart)
   startReminders(() => mainWindow)
   // Garante o Piper (voz neural) em background; até ficar pronto, usa-se a Web Speech.
-  ensurePiper().catch(() => {})
+  ensurePiper()
+    .then((ok) => logger.info('piper', ok ? 'voz neural pronta' : 'Piper indisponível (usando Web Speech)'))
+    .catch((e) => logger.warn('piper', 'falha ao preparar o Piper', e))
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -238,10 +243,18 @@ function registerIpc(): void {
 
   // TTS Piper (voz neural) -> WAV
   ipcMain.handle('tts:synthesize', async (_e, text: string, opts: { voice?: string; rate?: number }) => {
-    const buf = await synthesize(text, opts)
-    return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer
+    try {
+      const buf = await synthesize(text, opts)
+      return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer
+    } catch (e) {
+      logger.warn('tts', 'síntese Piper falhou (renderer cai para Web Speech)', e)
+      throw e
+    }
   })
   ipcMain.handle('tts:status', () => ({ ready: isPiperReady(), voices: listPiperVoices(), platform: process.platform }))
+
+  // Logs recentes para a aba Sistema/Diagnóstico
+  ipcMain.handle('logs:recent', (_e, limit?: number) => getRecentLogs(typeof limit === 'number' ? limit : 200))
 
   // Widgets / consultas diretas
   ipcMain.handle('weather:get', (_e, city: string) => getWeather(city))

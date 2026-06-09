@@ -16,6 +16,7 @@ import { spawn, type ChildProcess } from 'child_process'
 import { existsSync, readFileSync, rmSync } from 'fs'
 import { join, basename } from 'path'
 import { tmpdir } from 'os'
+import { logger } from './logger'
 
 export interface PiperSynthParams {
   bin: string
@@ -155,6 +156,7 @@ function spawnWarm(params: PiperSynthParams): WarmProc {
     }
   })
   proc.on('error', (e) => {
+    logger.warn('piper-pool', 'processo Piper quente falhou (caindo para one-shot)', e)
     failAll(w, e instanceof Error ? e : new Error(String(e)))
     killWarm(w)
   })

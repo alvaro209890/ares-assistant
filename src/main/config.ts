@@ -4,6 +4,7 @@ import { join, dirname } from 'path'
 import { homedir } from 'os'
 import type { AppConfig, DeepPartial } from '../shared/types'
 import { detectProviderId } from '../shared/providers'
+import { logger } from './logger'
 
 // Pastas padrão que variam por sistema/idioma. Windows normalmente usa
 // Documents/Pictures; Linux pt-BR costuma usar Documentos/Imagens.
@@ -231,8 +232,8 @@ export function readConfig(): AppConfig {
   let stored: Partial<AppConfig> = {}
   try {
     if (existsSync(path)) stored = JSON.parse(readFileSync(path, 'utf8'))
-  } catch {
-    /* arquivo corrompido: cai nos padrões */
+  } catch (e) {
+    logger.warn('config', 'config.json inválido/corrompido — usando padrões', e)
   }
   return deepMerge(DEFAULT_CONFIG, stored)
 }

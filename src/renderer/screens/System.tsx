@@ -33,12 +33,18 @@ function Bar({ label, percent }: { label: string; percent: number }): JSX.Elemen
 export default function System(): JSX.Element {
   const { metrics, config } = useAres()
   const [diag, setDiag] = useState<DiagnosticsResult | null>(null)
+  const [logs, setLogs] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
 
   const refresh = async () => {
     setLoading(true)
     try {
-      setDiag(await window.ares.diagnostics.get())
+      const [d, l] = await Promise.all([
+        window.ares.diagnostics.get(),
+        window.ares.logs?.recent(150) ?? Promise.resolve([])
+      ])
+      setDiag(d)
+      setLogs(l)
     } finally {
       setLoading(false)
     }
@@ -167,11 +173,44 @@ export default function System(): JSX.Element {
                 ))}
               </div>
             </Panel>
+
+            <div className="lg:col-span-2">
+              <LogPanel lines={logs} />
+            </div>
           </div>
         )}
       </div>
     </motion.div>
   )
+}
+
+function LogPanel({ lines }: { lines: string[] }): JSX.Element {
+  return (
+    <section className="glass rounded-2xl p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-xs title-track text-cyan-300/60">REGISTRO DO SISTEMA</h3>
+        <span className="text-[11px] text-cyan-200/40">{lines.length} linha(s) · ares.log</span>
+      </div>
+      {lines.length === 0 ? (
+        <span className="text-[12px] text-cyan-200/45">Sem registros nesta sessão.</span>
+      ) : (
+        <div className="max-h-64 overflow-y-auto overscroll-contain rounded-lg border border-cyan-300/10 bg-black/40 p-2 font-mono text-[11px] leading-relaxed">
+          {lines.map((line, i) => (
+            <div key={i} className={`whitespace-pre-wrap break-words ${logColor(line)}`}>
+              {line}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function logColor(line: string): string {
+  if (/\[ERROR\]/.test(line)) return 'text-red-300/90'
+  if (/\[WARN\]/.test(line)) return 'text-amber-300/85'
+  if (/\[INFO\]/.test(line)) return 'text-cyan-200/70'
+  return 'text-cyan-200/40'
 }
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }): JSX.Element {

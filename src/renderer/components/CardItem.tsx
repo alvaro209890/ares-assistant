@@ -3,6 +3,14 @@ import { Draggable } from '@hello-pangea/dnd'
 import { motion } from 'framer-motion'
 import type { Card, CardColor, CardLink, Priority, Recurrence, Subtask } from '../../shared/types'
 import { uid } from '../lib/actions'
+import Select from './Select'
+
+const RECURRENCE_OPTIONS = [
+  { value: 'none', label: 'não repetir' },
+  { value: 'daily', label: 'diário' },
+  { value: 'weekly', label: 'semanal' },
+  { value: 'monthly', label: 'mensal' }
+]
 
 const REC_LABEL: Record<Recurrence, string> = { none: '', daily: 'diário', weekly: 'semanal', monthly: 'mensal' }
 
@@ -134,13 +142,13 @@ export default function CardItem({ card, index, onSave, onDelete, onToggle }: Pr
                   </label>
                 </div>
                 <div className="flex items-center gap-2">
-                  <select className="input flex-1" value={priority} onChange={(e) => setPriority(e.target.value as Priority)}>
-                    {PRIORITIES.map((p) => (
-                      <option key={p} value={p}>
-                        prioridade {p}
-                      </option>
-                    ))}
-                  </select>
+                  <Select
+                    ariaLabel="Prioridade"
+                    className="flex-1"
+                    value={priority}
+                    onChange={(v) => setPriority(v as Priority)}
+                    options={PRIORITIES.map((p) => ({ value: p, label: `prioridade ${p}` }))}
+                  />
                   <div className="flex gap-1">
                     {COLORS.map((c) => (
                       <button
@@ -164,12 +172,14 @@ export default function CardItem({ card, index, onSave, onDelete, onToggle }: Pr
                   </label>
                   <label className="text-[11px] text-cyan-200/60">
                     Repetir
-                    <select className="input mt-1" value={recurrence} onChange={(e) => setRecurrence(e.target.value as Recurrence)}>
-                      <option value="none">não repetir</option>
-                      <option value="daily">diário</option>
-                      <option value="weekly">semanal</option>
-                      <option value="monthly">mensal</option>
-                    </select>
+                    <div className="mt-1">
+                      <Select
+                        ariaLabel="Repetir"
+                        value={recurrence}
+                        onChange={(v) => setRecurrence(v as Recurrence)}
+                        options={RECURRENCE_OPTIONS}
+                      />
+                    </div>
                   </label>
                 </div>
 

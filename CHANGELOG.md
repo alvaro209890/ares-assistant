@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.25.0 - 2026-06-09
+
+- **Seletores modernos e bonitos**: todos os menus suspensos (provedor de IA, modelo, motor/voz, categorias de memória, filtros do Kanban, prazos, estados, recorrência etc.) deixaram de usar o `<select>` nativo — que abria com um painel **branco e fora do tema** no Linux/Electron. Agora usam um componente próprio no tema HUD escuro (ciano), com animação, marca de seleção, rolagem, navegação por teclado e renderização em "portal" (não é mais cortado por painéis nem cai no widget branco do sistema).
+- **Registro do sistema (logs)**: o Ares passou a ter um log estruturado em `ares.log` (na pasta de dados) e um painel **"Registro do sistema"** na aba Sistema/Diagnóstico, mostrando as últimas linhas coloridas por nível. Falhas que antes sumiam em silêncio (download/síntese do Piper, chave do STT, config corrompida) agora ficam visíveis — fica muito mais fácil entender "por que a voz não funcionou".
+
 ## 0.24.0 - 2026-06-09
 
 Foco: deixar a voz **muito melhor e mais fluida** no Linux e no Windows, sem novas dependências.
