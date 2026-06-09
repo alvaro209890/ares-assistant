@@ -158,6 +158,8 @@ As ferramentas de codigo tambem usam orcamento de tempo em varreduras de pasta. 
 - `build/installer.nsh`: customizacoes NSIS (upgrade no mesmo diretorio, preservando os dados do usuario).
 - `.github/workflows/build-installers.yml`: gera instaladores Linux e Windows.
 
+O cerebro (`runTurn` em `agent.ts`) e coberto por `tests/agent.test.ts`, que mocka o `electron` (userData -> tmp) e a camada do LLM (`ninerouter`) para testar a orquestracao de ponta a ponta sem rede: aplicacao de mutacoes, memoryFallback, validacao de acoes, fluxo de duas fases (consulta -> resposta) e o portao de confirmacao destrutiva (segura -> confirma -> executa).
+
 ## Verificacao
 
 Antes de publicar:
