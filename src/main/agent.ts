@@ -68,6 +68,9 @@ import {
   runCodeCommand,
   runCodeGit,
   runCodeTerminal,
+  runTests,
+  runLint,
+  runFormat,
   scaffoldProject,
   searchCode,
   summarizeCodeWorkspace,
@@ -183,6 +186,9 @@ FERRAMENTAS DE CONSULTA (dê uma fala curta tipo "Deixe-me verificar." e AGUARDE
 - codigo.scaffold {nome, tipo_projeto?(site|pagina|node), path?}   (CRIA um projeto novo a partir de template — use para "crie um site/página/projeto"; precisa de "Permitir aplicar patches")
 - codigo.criar {path?, arquivo, conteudo, sobrescrever?(bool)}   (cria/escreve um arquivo no projeto; precisa de "Permitir aplicar patches")
 - codigo.diagnostico {path?}   (verifica a saúde do projeto: roda typecheck/lint/test disponíveis e permitidos e resume; use proativamente após mudanças)
+- codigo.testar {path?}   (RODA OS TESTES do projeto — detecta vitest/jest/pytest/go ou o script "test" — e resume quantos passaram/falharam; use quando o usuário disser "roda os testes", "testa o projeto", "os testes passam?")
+- codigo.lint {path?}   (RODA O LINT do projeto — eslint/ruff ou o script "lint" — e conta os problemas; use para "passa o lint", "tem erro de lint?", "verifica o estilo")
+- codigo.formatar {path?}   (FORMATA o projeto — prettier/ruff/gofmt ou o script "format"; use para "formata o código", "arruma a indentação". Altera arquivos: só rode quando o usuário pedir explicitamente)
 - codigo.projeto {objetivo, path?, passos?}   (CODER AUTÔNOMO: dado um objetivo, ele planeja, escreve os arquivos, roda checagens seguras e itera sozinho até concluir; precisa de "Permitir aplicar patches". Use para "construa/faça um app/site/programa que faça X" quando envolver vários arquivos ou lógica)
 - codigo.patch.preview {path?, diff?, patches?}   (valida e resume patch antes de aplicar; use sempre antes de aplicação)
 - codigo.patch.aplicar {path?, diff?, patches?}   (aplica patch apenas se habilitado e já confirmado pelo usuário)
@@ -617,6 +623,12 @@ async function runQuery(
           tipo: a.tipo,
           resultado: await diagnoseProject(cfg, { root: String(a.path || a.raiz || a.workspace || ''), signal })
         }
+      case 'codigo.testar':
+        return { tipo: a.tipo, resultado: await runTests(cfg, { root: String(a.path || a.raiz || a.workspace || ''), signal }) }
+      case 'codigo.lint':
+        return { tipo: a.tipo, resultado: await runLint(cfg, { root: String(a.path || a.raiz || a.workspace || ''), signal }) }
+      case 'codigo.formatar':
+        return { tipo: a.tipo, resultado: await runFormat(cfg, { root: String(a.path || a.raiz || a.workspace || ''), signal }) }
       case 'codigo.projeto':
         return {
           tipo: a.tipo,

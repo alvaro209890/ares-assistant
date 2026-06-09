@@ -41,6 +41,9 @@ export const QUERY_TOOLS = new Set([
   'codigo.scaffold',
   'codigo.criar',
   'codigo.diagnostico',
+  'codigo.testar',
+  'codigo.lint',
+  'codigo.formatar',
   'codigo.projeto',
   'codigo.patch.preview',
   'codigo.patch.aplicar'

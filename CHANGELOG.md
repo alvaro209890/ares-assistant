@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.27.0 - 2026-06-09
+
+- **Novas skills de programação e teste** (modo programador / por voz):
+  - **`codigo.testar`** — roda os testes do projeto detectando automaticamente o runner (script `test` do package.json, ou vitest/jest/pytest/go) e responde de forma falável quantos **passaram/falharam** (ex.: "Todos os 204 testes passaram", "2 testes falharam de 189"). Gatilhos de voz: "roda os testes", "os testes passam?".
+  - **`codigo.lint`** — roda o linter (script `lint`, ou eslint/ruff) e conta os **problemas**. "passa o lint?", "tem erro de estilo?".
+  - **`codigo.formatar`** — aplica o formatador (script `format`, ou prettier/ruff/gofmt). Altera arquivos, então só roda quando pedido explicitamente.
+- A detecção do runner e o parsing do resultado são puros e testáveis (`src/main/devtools.ts`); a execução é assíncrona, com timeout e cancelável por Esc, como as demais ferramentas de código. 15 testes novos (204 no total).
+
 ## 0.26.0 - 2026-06-09
 
 - **Troca de modelo de IA na tela principal**: uma barra sobre a orbe permite trocar provedor (OpenRouter, DeepSeek, ChatGPT, Groq, Local), modelo e nível de raciocínio sem entrar nas configurações.

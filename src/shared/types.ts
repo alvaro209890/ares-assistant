@@ -405,6 +405,24 @@ export interface CodeProjectIndex {
   git?: CodeWorkspaceSummary['git']
 }
 
+// Resultado das skills de qualidade (rodar testes, lint, formatação). Falável.
+export interface DevToolResult {
+  root: string
+  kind: 'test' | 'lint' | 'format'
+  command: string
+  detected: boolean // achou um runner/script para essa tarefa no projeto?
+  ran: boolean
+  ok: boolean
+  code: number | null
+  passed?: number // testes
+  failed?: number // testes
+  total?: number // testes
+  problems?: number // lint (erros + avisos)
+  summary: string // resumo curto e falável
+  stdoutTail: string // últimas linhas (para a UI/log, não para a fala)
+  hint?: string // dica quando nada foi detectado
+}
+
 export interface CodeScaffoldResult {
   root: string
   template: string

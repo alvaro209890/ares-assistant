@@ -18,10 +18,19 @@ import type {
   CodeWorkspaceSummary,
   CodeWriteResult,
   CommandClassification,
+  DevToolResult,
   ProjectHealth
 } from '../shared/types'
 import { normalizeTemplate, slug, templateFiles } from './scaffold'
 import { spawnAsync } from './exec'
+import {
+  detectTestCommand,
+  detectLintCommand,
+  detectFormatCommand,
+  parseTestCounts,
+  parseLintCount,
+  describeDevResult
+} from './devtools'
 
 const IGNORE_NAMES = new Set([
   '.git',
@@ -1062,4 +1071,95 @@ export async function diagnoseProject(
   const ran = checks.filter((c) => c.ran)
   const ok = ran.length > 0 ? ran.every((c) => c.ok) : true
   return { root, name, ok, checks, hints, health: assessDiagnosisHealth(checks) }
+}
+
+// ---------------------------------------------------------------------------
+// Skills de qualidade: testar / lintar / formatar.
+// Detecção pura em devtools.ts; aqui é só resolver o workspace, rodar o runner
+// detectado (comando FIXO/curado, sem shell) e devolver um resultado falável.
+// ---------------------------------------------------------------------------
+
+const TAIL_LINES = 8
+
+function tailOf(text: string): string {
+  return text.split(/\r?\n/).filter(Boolean).slice(-TAIL_LINES).join('\n').slice(0, 1200)
+}
+
+/** Núcleo comum das três skills: detecta o comando, roda e monta o DevToolResult. */
+async function runDevTool(
+  cfg: AppConfig,
+  kind: DevToolResult['kind'],
+  detect: (p: { scripts?: Record<string, string>; packageManager?: string; files: string[] }) => { command: string; runner: string } | null,
+  noneHint: string,
+  opts: { root?: string; signal?: AbortSignal }
+): Promise<DevToolResult> {
+  const summary = summarizeCodeWorkspace(cfg, opts.root)
+  const root = summary.root
+  const base: DevToolResult = {
+    root,
+    kind,
+    command: '',
+    detected: false,
+    ran: false,
+    ok: false,
+    code: null,
+    summary: noneHint,
+    stdoutTail: '',
+    hint: noneHint
+  }
+  if (!summary.exists) return { ...base, summary: 'workspace não encontrado', hint: 'workspace não encontrado' }
+
+  const detected = detect({ scripts: summary.scripts, packageManager: summary.packageManager, files: summary.files })
+  if (!detected) return base
+
+  const parts = splitCommand(detected.command)
+  if (!parts.length) return { ...base, command: detected.command }
+
+  const res = await spawnAsync(parts[0], parts.slice(1), { cwd: root, timeoutMs: execTimeout(cfg), signal: opts.signal })
+  const ok = !res.timedOut && !res.aborted && res.code === 0
+  const combined = `${res.stdout}\n${res.stderr}`
+
+  const out: DevToolResult = {
+    root,
+    kind,
+    command: detected.command,
+    detected: true,
+    ran: !res.timedOut,
+    ok,
+    code: res.code,
+    summary: '',
+    stdoutTail: tailOf(res.stdout || res.stderr)
+  }
+
+  if (kind === 'test') {
+    const counts = parseTestCounts(combined)
+    out.passed = counts.passed
+    out.failed = counts.failed
+    out.total = counts.total
+    out.summary = describeDevResult({ kind, ok, timedOut: res.timedOut, aborted: res.aborted, counts })
+  } else if (kind === 'lint') {
+    const problems = parseLintCount(combined)
+    out.problems = problems
+    // eslint/ruff saem com código !=0 quando há problemas — considere "rodou ok" se contamos os problemas.
+    if (typeof problems === 'number') out.ok = problems === 0 && (res.code === 0 || res.code === 1)
+    out.summary = describeDevResult({ kind, ok: out.ok, timedOut: res.timedOut, aborted: res.aborted, problems })
+  } else {
+    out.summary = describeDevResult({ kind, ok, timedOut: res.timedOut, aborted: res.aborted })
+  }
+  return out
+}
+
+/** Skill `codigo.testar`: roda os testes do projeto e resume passou/falhou. */
+export function runTests(cfg: AppConfig, opts: { root?: string; signal?: AbortSignal } = {}): Promise<DevToolResult> {
+  return runDevTool(cfg, 'test', detectTestCommand, 'nenhum runner de testes detectado (sem script "test" nem vitest/jest/pytest/go)', opts)
+}
+
+/** Skill `codigo.lint`: roda o linter do projeto e conta os problemas. */
+export function runLint(cfg: AppConfig, opts: { root?: string; signal?: AbortSignal } = {}): Promise<DevToolResult> {
+  return runDevTool(cfg, 'lint', detectLintCommand, 'nenhum linter detectado (sem script "lint" nem eslint/ruff)', opts)
+}
+
+/** Skill `codigo.formatar`: aplica o formatador do projeto. */
+export function runFormat(cfg: AppConfig, opts: { root?: string; signal?: AbortSignal } = {}): Promise<DevToolResult> {
+  return runDevTool(cfg, 'format', detectFormatCommand, 'nenhum formatador detectado (sem script "format" nem prettier/ruff/gofmt)', opts)
 }
