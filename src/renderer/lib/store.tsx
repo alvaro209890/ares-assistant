@@ -1033,14 +1033,17 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   const openPalette = useCallback((b: boolean) => setPaletteOpen(b), [])
   const stopSpeaking = useCallback(() => {
     clearSpeechQueue()
+    // Também aborta qualquer comando/build/coder em execução nesta sessão.
+    const sid = currentSessionRef.current
+    if (sid) void window.ares.code?.cancel(sid)
     if (!busyRef.current) setAresState('idle')
   }, [])
   const clearError = useCallback(() => setError(null), [])
 
-  // Esc interrompe a fala do Ares a qualquer momento (barge-in manual).
+  // Esc interrompe a fala E qualquer execução em andamento (parar build travado).
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape' && aresStateRef.current === 'speaking') stopSpeaking()
+      if (e.key === 'Escape' && (aresStateRef.current === 'speaking' || busyRef.current)) stopSpeaking()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

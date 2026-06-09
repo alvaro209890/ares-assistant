@@ -110,6 +110,12 @@ No Windows, o terminal nativo usa PowerShell. No Linux e macOS, usa Bash. Comand
 - **Memoria de sessao curta**: o ultimo arquivo editado e o ultimo comando de terminal bem-sucedido sao persistidos (`session-context.json`) e injetados no prompt, para o Ares retomar o trabalho sem pedir o caminho de novo. Veja `setLastEditedFile`/`setLastTerminalCommand`/`sessionContextSummary` em `src/main/data.ts`.
 - **Pilulas de contexto (estilo de codigo)**: preferencias de codificacao guardadas na memoria (ex.: "sempre use aspas simples", "prefira funcoes nomeadas") sao filtradas e injetadas na secao de Programacao do prompt, para o Ares respeitar o estilo do usuario ao escrever/editar. Veja `src/main/preferences.ts` e `codingPreferencesSummary`.
 
+### Execucao nao-bloqueante e cancelamento
+
+Toda execucao de comando do modo programador (`codigo.comando`, `codigo.terminal`, `codigo.git`, `codigo.diagnostico` e o coder autonomo) agora roda de forma **assincrona** via `src/main/exec.ts` (`spawnAsync`), e nao mais com `spawnSync`. Isso resolve o congelamento do processo principal do Electron durante builds/instalacoes longas: o event loop fica livre, a voz e a proatividade continuam vivas e as ferramentas de consulta em paralelo nao sao mais bloqueadas por um terminal.
+
+O `spawnAsync` aplica timeout (mata o processo com SIGTERM e, se preciso, SIGKILL), limita a captura por fluxo, suporta `onChunk` (saida em tempo real, base para uma futura UI de terminal ao vivo) e aceita um `AbortSignal`. Cada turno cria um `AbortController` registrado por sessao em `src/main/running.ts`; **pressionar `Esc` interrompe** nao so a fala como qualquer comando/build/coder em andamento (IPC `code:cancel` -> `cancelSession`). Comandos interrompidos voltam com `ok: false` e a mensagem "Comando interrompido pelo usuario.". A classificacao de seguranca (`allowed`/`confirm`/`blocked`) e inalterada.
+
 ### Voz no Modo Programador
 
 Quando a entrada vem do microfone, o agente adiciona uma interpretacao auxiliar para termos comuns de desenvolvimento: "barra" vira `/`, "ponto ts" vira `.ts`, "traço" vira `-`, "underline" vira `_`, "npm rum" vira `npm run` e "git estado" vira `git status`. O dicionario tambem cobre termos tecnicos ditados: "funcao seta" vira `arrow function`, "assincrono com await" vira `async await`, "tente e capture" vira `try catch` e "funcao de retorno" vira `callback`. A resposta final de ferramentas `codigo.*` nao e transmitida em streaming bruto; ela e gerada, filtrada e so entao falada para evitar que o Ares leia codigo, JSON, diffs ou logs longos. A fala deve ficar em ate duas frases com o arquivo principal, o que mudou, se a validacao passou e qual autorizacao falta.
@@ -139,6 +145,8 @@ As ferramentas de codigo tambem usam orcamento de tempo em varreduras de pasta. 
 
 - `src/main/agent.ts`: prompt do agente, roteamento de acoes e execucao das ferramentas.
 - `src/main/code.ts`: motor nativo de programacao, patches, terminal, scaffold e diagnostico.
+- `src/main/exec.ts`: execucao de processos assincrona (spawnAsync) com timeout, streaming e AbortSignal.
+- `src/main/running.ts`: registro de execucoes canceláveis por sessao (cancelamento via Esc / IPC).
 - `src/main/coder.ts`: executor autonomo para tarefas de codigo em varias etapas.
 - `src/main/voiceCode.ts`: interpretacao e sanitizacao de respostas de programacao por voz (inclui causa raiz de erros).
 - `src/main/piper.ts`: voz neural Piper multiplataforma (download do binario + sintese em Linux e Windows).

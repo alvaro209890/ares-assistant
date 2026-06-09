@@ -21,6 +21,7 @@ import type {
   ProjectHealth
 } from '../shared/types'
 import { normalizeTemplate, slug, templateFiles } from './scaffold'
+import { spawnAsync } from './exec'
 
 const IGNORE_NAMES = new Set([
   '.git',
@@ -67,6 +68,11 @@ const CODE_SCAN_TIMEOUT_MS = 2500
 
 function codeConfig(cfg: AppConfig): AppConfig['integrations']['code'] {
   return cfg.integrations.code
+}
+
+/** Timeout de execução (ms), limitado entre 1s e 10min. */
+function execTimeout(cfg: AppConfig): number {
+  return Math.max(1000, Math.min(Number(codeConfig(cfg).commandTimeoutMs) || 120000, 10 * 60_000))
 }
 
 function ensureEnabled(cfg: AppConfig): void {
@@ -452,7 +458,11 @@ function isCommandAllowed(cfg: AppConfig, command: string): boolean {
   })
 }
 
-export function runCodeCommand(cfg: AppConfig, opts: { root?: string; command: string }): CodeCommandResult {
+export function runCodeCommand(
+  cfg: AppConfig,
+  opts: { root?: string; command: string; signal?: AbortSignal }
+): Promise<CodeCommandResult> {
+  // Guardas SÍNCRONAS (lançam antes de retornar a Promise — os testes contam com isso).
   const root = resolveCodeWorkspace(cfg, opts.root)
   const command = String(opts.command || '').trim().replace(/\s+/g, ' ')
   if (!isCommandAllowed(cfg, command)) throw new Error(`Comando não permitido para programação: ${command}`)
@@ -460,25 +470,21 @@ export function runCodeCommand(cfg: AppConfig, opts: { root?: string; command: s
   if (!parts.length) throw new Error('Comando vazio.')
 
   const started = Date.now()
-  const res = spawnSync(parts[0], parts.slice(1), {
-    cwd: root,
-    encoding: 'utf8',
-    timeout: Math.max(1000, Math.min(Number(codeConfig(cfg).commandTimeoutMs) || 120000, 10 * 60_000)),
-    maxBuffer: 1024 * 1024 * 4
-  })
-  const timedOut = !!res.error && /timed|timeout/i.test(String(res.error.message || res.error))
-
-  return {
-    root,
-    command,
-    ok: !timedOut && res.status === 0,
-    code: res.status,
-    stdout: timedOut ? '' : String(res.stdout || '').slice(0, 12000),
-    stderr: timedOut
-      ? timeoutSummary(command)
-      : (res.error ? String(res.error.message || res.error) + '\n' : '') + String(res.stderr || '').slice(0, 12000),
-    durationMs: Date.now() - started
-  }
+  return spawnAsync(parts[0], parts.slice(1), { cwd: root, timeoutMs: execTimeout(cfg), signal: opts.signal }).then(
+    (res) => ({
+      root,
+      command,
+      ok: !res.timedOut && !res.aborted && res.code === 0,
+      code: res.code,
+      stdout: res.timedOut ? '' : res.stdout.slice(0, 12000),
+      stderr: res.aborted
+        ? 'Comando interrompido pelo usuário.'
+        : res.timedOut
+          ? timeoutSummary(command)
+          : res.stderr.slice(0, 12000),
+      durationMs: Date.now() - started
+    })
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -595,8 +601,9 @@ function platformShell(command: string): { file: string; args: string[] } {
 
 export function runCodeTerminal(
   cfg: AppConfig,
-  opts: { root?: string; command: string; approved?: boolean }
-): CodeTerminalResult {
+  opts: { root?: string; command: string; approved?: boolean; signal?: AbortSignal }
+): Promise<CodeTerminalResult> {
+  // Guardas SÍNCRONAS (lançam antes de retornar a Promise).
   if (codeConfig(cfg).terminalEnabled === false) throw new Error('Terminal desativado nas Configurações.')
   const root = resolveCodeWorkspace(cfg, opts.root)
   const command = normalizeCommand(opts.command)
@@ -609,67 +616,57 @@ export function runCodeTerminal(
 
   const autoApprove = codeConfig(cfg).terminalAutoApprove === true
   if (cls.tier === 'confirm' && !opts.approved && !autoApprove) {
-    return { ...empty, requiresApproval: true }
+    return Promise.resolve({ ...empty, requiresApproval: true })
   }
 
   const started = Date.now()
   const shell = platformShell(command)
-  const res = spawnSync(shell.file, shell.args, {
-    cwd: root,
-    encoding: 'utf8',
-    timeout: Math.max(1000, Math.min(Number(codeConfig(cfg).commandTimeoutMs) || 120000, 10 * 60_000)),
-    maxBuffer: 1024 * 1024 * 8
-  })
-  const timedOut = !!res.error && /timed|timeout/i.test(String(res.error.message || res.error))
-
-  return {
+  return spawnAsync(shell.file, shell.args, { cwd: root, timeoutMs: execTimeout(cfg), signal: opts.signal }).then((res) => ({
     ...empty,
     requiresApproval: false,
     ran: true,
-    ok: !timedOut && res.status === 0,
-    code: res.status,
-    stdout: timedOut ? '' : String(res.stdout || '').slice(0, 16000),
-    stderr: timedOut
-      ? timeoutSummary(command)
-      : (res.error ? String(res.error.message || res.error) + '\n' : '') + String(res.stderr || '').slice(0, 16000),
+    ok: !res.timedOut && !res.aborted && res.code === 0,
+    code: res.code,
+    stdout: res.timedOut ? '' : res.stdout.slice(0, 16000),
+    stderr: res.aborted
+      ? 'Comando interrompido pelo usuário.'
+      : res.timedOut
+        ? timeoutSummary(command)
+        : res.stderr.slice(0, 16000),
     durationMs: Date.now() - started
-  }
+  }))
 }
 
-function gitResult(cfg: AppConfig, root: string, args: string[]): CodeCommandResult {
+function gitResult(cfg: AppConfig, root: string, args: string[], signal?: AbortSignal): Promise<CodeCommandResult> {
   const command = `git ${args.join(' ')}`
   const started = Date.now()
-  const res = spawnSync('git', ['-C', root, ...args], {
-    encoding: 'utf8',
-    timeout: Math.max(1000, Math.min(Number(codeConfig(cfg).commandTimeoutMs) || 120000, 10 * 60_000)),
-    maxBuffer: 1024 * 1024 * 4
-  })
-  const timedOut = !!res.error && /timed|timeout/i.test(String(res.error.message || res.error))
-  return {
+  return spawnAsync('git', ['-C', root, ...args], { timeoutMs: execTimeout(cfg), signal }).then((res) => ({
     root,
     command,
-    ok: !timedOut && res.status === 0,
-    code: res.status,
-    stdout: timedOut ? '' : String(res.stdout || '').slice(0, 16000),
-    stderr: timedOut
-      ? timeoutSummary(command)
-      : (res.error ? String(res.error.message || res.error) + '\n' : '') + String(res.stderr || '').slice(0, 16000),
+    ok: !res.timedOut && !res.aborted && res.code === 0,
+    code: res.code,
+    stdout: res.timedOut ? '' : res.stdout.slice(0, 16000),
+    stderr: res.aborted
+      ? 'Comando interrompido pelo usuário.'
+      : res.timedOut
+        ? timeoutSummary(command)
+        : res.stderr.slice(0, 16000),
     durationMs: Date.now() - started
-  }
+  }))
 }
 
 export function runCodeGit(
   cfg: AppConfig,
-  opts: { root?: string; operation: string; file?: string }
-): CodeCommandResult {
+  opts: { root?: string; operation: string; file?: string; signal?: AbortSignal }
+): Promise<CodeCommandResult> {
   const root = resolveCodeWorkspace(cfg, opts.root)
   const op = String(opts.operation || '').trim()
   const file = opts.file ? relativeDisplayPath(root, resolveCodeFile(cfg, root, opts.file)) : ''
   if (file && (file.startsWith('..') || isAbsolute(file))) throw new Error(`Arquivo fora do workspace: ${opts.file}`)
-  if (op === 'status') return gitResult(cfg, root, ['status', '--short'])
-  if (op === 'diffStat') return gitResult(cfg, root, file ? ['diff', '--stat', '--', file] : ['diff', '--stat'])
-  if (op === 'diff') return gitResult(cfg, root, file ? ['diff', '--', file] : ['diff'])
-  if (op === 'log') return gitResult(cfg, root, ['log', '--oneline', '-10'])
+  if (op === 'status') return gitResult(cfg, root, ['status', '--short'], opts.signal)
+  if (op === 'diffStat') return gitResult(cfg, root, file ? ['diff', '--stat', '--', file] : ['diff', '--stat'], opts.signal)
+  if (op === 'diff') return gitResult(cfg, root, file ? ['diff', '--', file] : ['diff'], opts.signal)
+  if (op === 'log') return gitResult(cfg, root, ['log', '--oneline', '-10'], opts.signal)
   throw new Error(`Operação Git não permitida: ${op}`)
 }
 
@@ -961,7 +958,10 @@ export function planDiagnosis(
 }
 
 /** Diagnostica a saúde do projeto: roda as checagens disponíveis e permitidas. */
-export function diagnoseProject(cfg: AppConfig, opts: { root?: string } = {}): CodeDiagnosis {
+export async function diagnoseProject(
+  cfg: AppConfig,
+  opts: { root?: string; signal?: AbortSignal } = {}
+): Promise<CodeDiagnosis> {
   const summary = summarizeCodeWorkspace(cfg, opts.root)
   const root = summary.root
   const name = summary.name
@@ -975,7 +975,7 @@ export function diagnoseProject(cfg: AppConfig, opts: { root?: string } = {}): C
       hints.push(`adicione "${step.command}" à allowlist para checar ${step.name}`)
       continue
     }
-    const res = runCodeCommand(cfg, { root, command: step.command })
+    const res = await runCodeCommand(cfg, { root, command: step.command, signal: opts.signal })
     const tail = (res.ok ? res.stdout : res.stderr || res.stdout).split(/\r?\n/).filter(Boolean).slice(-3).join(' | ')
     checks.push({ name: step.name, command: step.command, ran: true, ok: res.ok, code: res.code, summary: tail.slice(0, 240) })
   }

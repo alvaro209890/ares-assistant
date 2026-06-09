@@ -137,25 +137,25 @@ describe('ferramentas locais de programação', () => {
     expect(() => readCodeFile(config(), { file: '../fora.ts' })).toThrow(/fora do workspace|fora das raízes/)
   })
 
-  it('executa apenas comandos permitidos por allowlist', () => {
-    const ok = runCodeCommand(config(), { command: 'node --version' })
+  it('executa apenas comandos permitidos por allowlist', async () => {
+    const ok = await runCodeCommand(config(), { command: 'node --version' })
 
     expect(ok.ok).toBe(true)
     expect(ok.stdout).toContain('v')
     expect(() => runCodeCommand(config(), { command: 'rm -rf .' })).toThrow(/não permitido/)
   })
 
-  it('retorna resumo curto quando comando de codigo expira', () => {
+  it('retorna resumo curto quando comando de codigo expira', async () => {
     const command = 'node -e "setTimeout(function(){}, 1000)"'
-    const r = runCodeCommand(config({ allowedCommands: [command], commandTimeoutMs: 50 }), { command })
+    const r = await runCodeCommand(config({ allowedCommands: [command], commandTimeoutMs: 50 }), { command })
 
     expect(r.ok).toBe(false)
     expect(r.stderr).toContain('Timeout ao executar')
     expect(r.stdout).toBe('')
   })
 
-  it('consulta Git local sem alterar o repositório', () => {
-    const status = runCodeGit(config(), { operation: 'status' })
+  it('consulta Git local sem alterar o repositório', async () => {
+    const status = await runCodeGit(config(), { operation: 'status' })
 
     expect(status.command).toBe('git status --short')
     expect(status.ok).toBe(true)
@@ -199,8 +199,8 @@ describe('terminal com autorização', () => {
     expect(classifyCommand(config(), 'mkfs.ext4 /dev/sda1').tier).toBe('blocked')
   })
 
-  it('roda comando seguro direto, sem pedir autorização', () => {
-    const r = runCodeTerminal(config(), { command: 'echo ares-terminal-ok' })
+  it('roda comando seguro direto, sem pedir autorização', async () => {
+    const r = await runCodeTerminal(config(), { command: 'echo ares-terminal-ok' })
 
     expect(r.requiresApproval).toBe(false)
     expect(r.ran).toBe(true)
@@ -209,23 +209,23 @@ describe('terminal com autorização', () => {
     expect(r.stdout).toContain('ares-terminal-ok')
   })
 
-  it('exige autorização para comando fora da allowlist e roda após aprovar', () => {
+  it('exige autorização para comando fora da allowlist e roda após aprovar', async () => {
     const cmd = process.platform === 'win32' ? 'hostname' : 'printf autorizado'
-    const proposta = runCodeTerminal(config(), { command: cmd })
+    const proposta = await runCodeTerminal(config(), { command: cmd })
 
     expect(proposta.tier).toBe('confirm')
     expect(proposta.requiresApproval).toBe(true)
     expect(proposta.ran).toBe(false)
 
-    const aprovado = runCodeTerminal(config(), { command: cmd, approved: true })
+    const aprovado = await runCodeTerminal(config(), { command: cmd, approved: true })
     expect(aprovado.requiresApproval).toBe(false)
     expect(aprovado.ran).toBe(true)
     expect(aprovado.stdout.trim().length).toBeGreaterThan(0)
   })
 
-  it('roda direto quando terminalAutoApprove está ligado', () => {
+  it('roda direto quando terminalAutoApprove está ligado', async () => {
     const cmd = process.platform === 'win32' ? 'hostname' : 'printf auto'
-    const r = runCodeTerminal(config({ terminalAutoApprove: true }), { command: cmd })
+    const r = await runCodeTerminal(config({ terminalAutoApprove: true }), { command: cmd })
 
     expect(r.requiresApproval).toBe(false)
     expect(r.ran).toBe(true)
@@ -295,12 +295,12 @@ describe('criar / scaffold / diagnóstico', () => {
     expect(byName.lint.allowed).toBe(false) // não está na allowlist
   })
 
-  it('diagnostica um projeto sem package.json com elegância', () => {
+  it('diagnostica um projeto sem package.json com elegância', async () => {
     const empty = mkdtempSync(join(tmpdir(), 'ares-diag-'))
     const cfg = config()
     cfg.integrations.code.workspaceRoot = empty
     cfg.integrations.code.allowedRoots = [empty]
-    const diag = diagnoseProject(cfg)
+    const diag = await diagnoseProject(cfg)
     expect(diag.checks).toHaveLength(0)
     expect(diag.ok).toBe(true)
     expect(diag.health.ok).toBe(true)

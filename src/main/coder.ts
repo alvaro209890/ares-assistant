@@ -134,7 +134,12 @@ function tail(s: string, lines = 4): string {
 }
 
 /** Aplica um passo: escreve os arquivos e roda só os comandos seguros. IO testável. */
-export function applyCoderStep(cfg: AppConfig, root: string, step: CoderStep): CoderStepResult {
+export async function applyCoderStep(
+  cfg: AppConfig,
+  root: string,
+  step: CoderStep,
+  signal?: AbortSignal
+): Promise<CoderStepResult> {
   const written: string[] = []
   const skipped: string[] = []
   for (const f of step.files) {
@@ -154,7 +159,7 @@ export function applyCoderStep(cfg: AppConfig, root: string, step: CoderStep): C
       continue
     }
     try {
-      const r = runCodeTerminal(cfg, { root, command })
+      const r = await runCodeTerminal(cfg, { root, command, signal })
       ran.push({
         command,
         ok: r.ran && r.ok,
@@ -190,7 +195,7 @@ function buildCoderPrompt(objective: string, fileTree: string[], lastResult: str
 /** Executa a tarefa de forma autônoma: planeja → escreve → roda → itera. */
 export async function runCoderTask(
   cfg: AppConfig,
-  opts: { objetivo: string; root?: string; passos?: number }
+  opts: { objetivo: string; root?: string; passos?: number; signal?: AbortSignal }
 ): Promise<CoderResult> {
   const objective = String(opts.objetivo || '').trim()
   if (!objective) throw new Error('Diga o objetivo do projeto.')
@@ -220,7 +225,7 @@ export async function runCoderTask(
       break
     }
     const step = parseCoderStep(raw)
-    const applied = applyCoderStep(cfg, root, step)
+    const applied = await applyCoderStep(cfg, root, step, opts.signal)
     transcript.push({ ...applied, summary: step.summary || step.thought || '(sem resumo)', done: step.done })
     lastResult = JSON.stringify(applied)
     if (step.done || (step.files.length === 0 && step.run.length === 0)) {

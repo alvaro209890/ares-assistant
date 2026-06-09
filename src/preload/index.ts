@@ -81,6 +81,10 @@ const api = {
       return () => ipcRenderer.removeListener('chat:delta', listener)
     }
   },
+  code: {
+    // Cancela comandos/coder em execução na sessão. Retorna quantos foram abortados.
+    cancel: (sessionId: string): Promise<number> => ipcRenderer.invoke('code:cancel', sessionId)
+  },
   briefing: {
     get: (): Promise<BriefingData> => ipcRenderer.invoke('briefing:get')
   },

@@ -4,6 +4,7 @@ import { ensureConfig, readConfig, updateConfig } from './config'
 import { loadBoard, saveBoard } from './tasks'
 import { transcribe } from './grog'
 import { runTurn, extractFacts } from './agent'
+import { cancelSession } from './running'
 import { buildBriefing } from './briefing'
 import { getDiagnostics } from './diagnostics'
 import { initOverlay, toggleOverlay, setOverlayState, focusMain, requestListen } from './overlay'
@@ -197,6 +198,8 @@ function registerIpc(): void {
       if (!event.sender.isDestroyed()) event.sender.send('chat:delta', { chunk, phase })
     })
   })
+  // Cancela comandos/coder em execução na sessão (ex.: parar um build travado pelo Esc).
+  ipcMain.handle('code:cancel', (_e, sessionId: string): number => cancelSession(sessionId))
 
   // Briefing do dia + diagnóstico do sistema
   ipcMain.handle('briefing:get', async () => buildBriefing(readConfig()))

@@ -57,8 +57,8 @@ describe('coder — applyCoderStep', () => {
   })
   afterEach(() => rmSync(root, { recursive: true, force: true }))
 
-  it('escreve arquivos no projeto e recusa caminhos fora', () => {
-    const res = applyCoderStep(cfg(), root, {
+  it('escreve arquivos no projeto e recusa caminhos fora', async () => {
+    const res = await applyCoderStep(cfg(), root, {
       files: [
         { path: 'src/app.js', content: 'console.log(1)' },
         { path: '../fora.txt', content: 'x' }
@@ -73,8 +73,8 @@ describe('coder — applyCoderStep', () => {
     expect(res.skipped.join(' ')).toMatch(/fora/)
   })
 
-  it('roda só comandos seguros e pula o que precisa de autorização', () => {
-    const res = applyCoderStep(cfg(), root, {
+  it('roda só comandos seguros e pula o que precisa de autorização', async () => {
+    const res = await applyCoderStep(cfg(), root, {
       files: [],
       run: ['echo ola', 'npm install left-pad'],
       done: true,
@@ -87,10 +87,10 @@ describe('coder — applyCoderStep', () => {
     expect(npm?.ran).toBe(false) // confirm-tier não roda sozinho
   })
 
-  it('não escreve quando a permissão está desligada', () => {
+  it('não escreve quando a permissão está desligada', async () => {
     const c = cfg()
     c.integrations.code.allowPatchApply = false
-    const res = applyCoderStep(c, root, { files: [{ path: 'x.txt', content: 'y' }], run: [], done: true, summary: '' })
+    const res = await applyCoderStep(c, root, { files: [{ path: 'x.txt', content: 'y' }], run: [], done: true, summary: '' })
     expect(res.written).toHaveLength(0)
     expect(res.skipped.length).toBeGreaterThan(0)
   })

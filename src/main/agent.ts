@@ -72,6 +72,7 @@ import {
   writeCodeFile
 } from './code'
 import { clearPendingCode, getPendingCode, setPendingCode } from './pending'
+import { registerRun } from './running'
 import { hasCodeAction, sanitizeVoiceCodeFala, toolResultsPrompt, voiceAwareUserContent } from './voiceCode'
 
 const norm = (s: unknown) => String(s ?? '').toLowerCase().trim()
@@ -293,7 +294,13 @@ function announceLongTask(onDelta: DeltaFn | undefined, cfg: AppConfig, command:
   onDelta(' Iniciando a tarefa, senhor. Um momento.', 1)
 }
 
-async function runQuery(a: Acao, cfg: AppConfig, sessionId: string, onDelta?: DeltaFn): Promise<unknown> {
+async function runQuery(
+  a: Acao,
+  cfg: AppConfig,
+  sessionId: string,
+  onDelta?: DeltaFn,
+  signal?: AbortSignal
+): Promise<unknown> {
   const integrations = cfg.integrations
   try {
     switch (a.tipo) {
@@ -397,9 +404,10 @@ async function runQuery(a: Acao, cfg: AppConfig, sessionId: string, onDelta?: De
       case 'codigo.comando':
         return {
           tipo: a.tipo,
-          resultado: runCodeCommand(cfg, {
+          resultado: await runCodeCommand(cfg, {
             root: String(a.path || a.raiz || a.workspace || ''),
-            command: String(a.comando || a.command || '')
+            command: String(a.comando || a.command || ''),
+            signal
           })
         }
       case 'codigo.terminal': {
@@ -408,7 +416,7 @@ async function runQuery(a: Acao, cfg: AppConfig, sessionId: string, onDelta?: De
         const approved = a.confirmado === true || a.autorizado === true || a.confirm === true || a.approved === true
         // Só anuncia se o comando for de fato rodar agora (autorizado ou já seguro).
         announceLongTask(onDelta, cfg, command, approved || classifyCommand(cfg, command).tier === 'allowed')
-        const result = runCodeTerminal(cfg, { root, command, approved })
+        const result = await runCodeTerminal(cfg, { root, command, approved, signal })
         if (result.requiresApproval) {
           setPendingCode(sessionId, { kind: 'terminal', command: result.command, root, reason: result.reason })
         } else if (result.ran) {
@@ -421,7 +429,7 @@ async function runQuery(a: Acao, cfg: AppConfig, sessionId: string, onDelta?: De
         const pend = getPendingCode(sessionId)
         if (!pend) return { tipo: a.tipo, erro: 'Não há nenhum comando pendente de autorização.' }
         announceLongTask(onDelta, cfg, pend.command, true)
-        const result = runCodeTerminal(cfg, { root: pend.root, command: pend.command, approved: true })
+        const result = await runCodeTerminal(cfg, { root: pend.root, command: pend.command, approved: true, signal })
         if (result.ran) {
           clearPendingCode(sessionId)
           if (result.ok) setLastTerminalCommand(result.command, result.root)
@@ -436,10 +444,11 @@ async function runQuery(a: Acao, cfg: AppConfig, sessionId: string, onDelta?: De
       case 'codigo.git':
         return {
           tipo: a.tipo,
-          resultado: runCodeGit(cfg, {
+          resultado: await runCodeGit(cfg, {
             root: String(a.path || a.raiz || a.workspace || ''),
             operation: String(a.operacao || a.operation || 'status'),
-            file: a.arquivo || a.file ? String(a.arquivo || a.file) : undefined
+            file: a.arquivo || a.file ? String(a.arquivo || a.file) : undefined,
+            signal
           })
         }
       case 'codigo.indexar':
@@ -471,14 +480,18 @@ async function runQuery(a: Acao, cfg: AppConfig, sessionId: string, onDelta?: De
         return { tipo: a.tipo, resultado }
       }
       case 'codigo.diagnostico':
-        return { tipo: a.tipo, resultado: diagnoseProject(cfg, { root: String(a.path || a.raiz || a.workspace || '') }) }
+        return {
+          tipo: a.tipo,
+          resultado: await diagnoseProject(cfg, { root: String(a.path || a.raiz || a.workspace || ''), signal })
+        }
       case 'codigo.projeto':
         return {
           tipo: a.tipo,
           resultado: await runCoderTask(cfg, {
             objetivo: String(a.objetivo || a.tarefa || a.descricao || a.texto || ''),
             root: String(a.path || a.raiz || a.destino || a.onde || a.nome || ''),
-            passos: Number(a.passos || a.steps || 0) || undefined
+            passos: Number(a.passos || a.steps || 0) || undefined,
+            signal
           })
         }
       case 'codigo.patch.preview':
@@ -691,6 +704,11 @@ export async function runTurn(
   onDelta?: DeltaFn
 ): Promise<AgentTurnResult> {
   const cfg = readConfig()
+  // Controlador de cancelamento do turno: permite ao usuário (Esc/IPC code:cancel) abortar
+  // um comando/coder em execução sem travar o app. Registrado por sessão.
+  const controller = new AbortController()
+  const unregisterRun = registerRun(sessionId, controller)
+  const signal = controller.signal
   const session = getSession(sessionId)
   const recent = (session?.messages || []).slice(-12)
   const sys = buildSystemPrompt({
@@ -719,7 +737,7 @@ export async function runTurn(
   if (queries.length) {
     // Ferramentas de consulta rodam em PARALELO (são, em geral, independentes:
     // clima, notícias, web, código). Promise.all preserva a ordem dos resultados.
-    const results = await Promise.all(queries.map((q) => runQuery(q, cfg, sessionId, onDelta)))
+    const results = await Promise.all(queries.map((q) => runQuery(q, cfg, sessionId, onDelta, signal)))
     const codeMode = hasCodeAction(queries)
     // Proatividade de engenheiro: após editar com sucesso, oferece validar (teste/build).
     const proactive = proactiveCodeFollowup(cfg, results)
@@ -782,6 +800,7 @@ export async function runTurn(
   // a resposta atual nem a liberação para o próximo comando. Roda em segundo plano.
   void summarizeIfNeeded(sessionId)
 
+  unregisterRun()
   return {
     fala,
     board,
