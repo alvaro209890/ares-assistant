@@ -30,7 +30,7 @@ export interface ConvMsg {
   pending?: boolean
 }
 
-type Screen = 'assistant' | 'tasks' | 'calendar' | 'reminders' | 'lists' | 'memory' | 'system'
+type Screen = 'assistant' | 'tasks' | 'calendar' | 'reminders' | 'lists' | 'memory' | 'models' | 'system'
 
 interface AresStore {
   ready: boolean
@@ -490,6 +490,11 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
         setLists(result.lists)
         setQuickNotes(result.quickNotes)
         setReminders(result.reminders)
+        // Mudança de cérebro por voz (ia.raciocinio/ia.modelo) reflete nos seletores na hora.
+        if (result.config) {
+          configRef.current = result.config
+          setConfig(result.config)
+        }
         setConversation((prev) =>
           prev.map((m) => (m.id === assistantId ? { ...m, content: result.fala, pending: false } : m))
         )

@@ -4,6 +4,7 @@ import { ensureConfig, readConfig, updateConfig } from './config'
 import { loadBoard, saveBoard } from './tasks'
 import { transcribe } from './grog'
 import { runTurn, extractFacts } from './agent'
+import { chatJSON } from './ninerouter'
 import { cancelSession } from './running'
 import { buildBriefing } from './briefing'
 import { getDiagnostics } from './diagnostics'
@@ -16,7 +17,7 @@ import { getProvider } from '../shared/providers'
 import { startReminders } from './notify'
 import { synthesize, listPiperVoices, isPiperReady, ensurePiper } from './piper'
 import { shutdownPiperPool } from './piperEngine'
-import { initLogger, logger, getRecentLogs } from './logger'
+import { initLogger, logger, getRecentLogs, errToMessage } from './logger'
 import { getWeather, getWeatherAt, getNews, reverseGeocode } from './tools'
 import {
   loadMemory,
@@ -51,6 +52,7 @@ import type {
   Checklist,
   DeepPartial,
   MemoryCategory,
+  ReasoningLevel,
   Recurrence,
   Reminder,
   UserLocation
@@ -311,6 +313,31 @@ function registerIpc(): void {
       return { ok: false, detail: e?.name === 'AbortError' ? 'sem resposta (timeout)' : 'offline / inacessível' }
     }
   })
+
+  // Testa um nível de raciocínio específico no provedor/modelo atual: faz uma chamada
+  // mínima com aquele reasoning_effort e mede a latência. Usado pelo botão "Testar
+  // todos os níveis" na aba de Modelos. Não altera a config salva.
+  ipcMain.handle(
+    'brain:testReasoning',
+    async (_e, level: ReasoningLevel): Promise<{ ok: boolean; level: ReasoningLevel; ms: number; detail: string }> => {
+      const base = readConfig()
+      const cfg: AppConfig = { ...base, nineRouter: { ...base.nineRouter, reasoning: level } }
+      const started = Date.now()
+      try {
+        const out = await chatJSON(
+          cfg,
+          [{ role: 'user', content: 'Responda apenas com a palavra OK.' }],
+          false
+        )
+        const ms = Date.now() - started
+        const ok = typeof out === 'string' && out.trim().length > 0
+        return { ok, level, ms, detail: ok ? `${out.trim().slice(0, 24)} · ${ms} ms` : 'resposta vazia' }
+      } catch (e) {
+        logger.warn('brain', `teste de raciocínio "${level}" falhou`, e)
+        return { ok: false, level, ms: Date.now() - started, detail: errToMessage(e).slice(0, 80) }
+      }
+    }
+  )
 
   // Login OAuth de provedor (hoje: OpenRouter). Em caso de sucesso, grava a chave
   // e aponta o cérebro para o provedor, devolvendo a config já atualizada.

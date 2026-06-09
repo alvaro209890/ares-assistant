@@ -13,6 +13,7 @@ import Calendar from './screens/Calendar'
 import Reminders from './screens/Reminders'
 import Lists from './screens/Lists'
 import Memory from './screens/Memory'
+import Models from './screens/Models'
 import System from './screens/System'
 
 export default function App(): JSX.Element {
@@ -35,6 +36,7 @@ export default function App(): JSX.Element {
               {screen === 'reminders' && <Reminders key="r" />}
               {screen === 'lists' && <Lists key="l" />}
               {screen === 'memory' && <Memory key="m" />}
+              {screen === 'models' && <Models key="ia" />}
               {screen === 'system' && <System key="s" />}
             </AnimatePresence>
           </main>

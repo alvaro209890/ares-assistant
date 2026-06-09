@@ -5,8 +5,12 @@ export type DeepPartial<T> = {
   [P in keyof T]?: T[P] extends object ? DeepPartial<T[P]> : T[P]
 }
 
+// Nível de esforço de raciocínio dos modelos que o suportam (DeepSeek V4, GPT-5.5).
+// Mapeado para reasoning_effort low/medium/high na chamada da API.
+export type ReasoningLevel = 'baixo' | 'medio' | 'alto'
+
 export interface AppConfig {
-  nineRouter: { baseUrl: string; apiKey: string; model: string }
+  nineRouter: { baseUrl: string; apiKey: string; model: string; reasoning: ReasoningLevel }
   grog: { baseUrl: string; apiKey: string; sttModel: string }
   tts: {
     enabled: boolean // false = Ares no mudo
@@ -302,6 +306,7 @@ export interface AgentTurnResult {
   reminders: Reminder[]
   notes: string[] // log curto das ações aplicadas (para toast)
   changedBoard: boolean
+  config?: AppConfig // presente só quando o turno alterou a config (ex.: troca de modelo/raciocínio por voz)
 }
 
 // --- Programação / código ---

@@ -1,7 +1,9 @@
 import type { Acao, AgentTurnResult, AppConfig, Board, CalendarEvent, ChatMessage, MemoryCategory, MemoryFact, UserLocation } from '../shared/types'
 import { MEMORY_CATEGORIES } from '../shared/types'
-import { readConfig } from './config'
+import { readConfig, updateConfig } from './config'
 import { chatJSON, streamChat } from './ninerouter'
+import { detectProviderId, getProvider, providerSupportsReasoning } from '../shared/providers'
+import { REASONING_LABEL, coerceReasoning, resolveReasoning } from '../shared/reasoning'
 import { parseEnvelope, QUERY_TOOLS, validateAction, extractFalaPrefix } from '../shared/protocol'
 import { applyBoardAction } from './board'
 import { loadBoard, saveBoard, boardSummary } from './tasks'
@@ -166,6 +168,8 @@ FERRAMENTAS DE CONSULTA (dê uma fala curta tipo "Deixe-me verificar." e AGUARDE
 - sistema.captura {}   (tira uma captura de tela e salva em arquivo — "tire um print da tela")
 - sistema.midia {acao(playpause|play|pause|next|previous|stop)}   (controla a música/vídeo tocando — "pausa", "próxima", "toca")
 - sistema.brilho {acao(set|up|down), nivel?(0-100)}   (ajusta o brilho da tela — "clareia a tela", "brilho em 50", "escurece")
+- ia.raciocinio {nivel?(baixo|medio|alto), direcao?(aumentar|diminuir)}   (ajusta o SEU nível de raciocínio/profundidade — "diminua seu raciocínio", "raciocínio no máximo", "aumente o esforço". Use nivel para valor absoluto OU direcao para relativo. Confirme na fala o novo nível.)
+- ia.modelo {provedor?(openrouter|deepseek|chatgpt|local), modelo?}   (troca o modelo/provedor de IA por voz — "use o DeepSeek Pro", "troca pro ChatGPT", "muda pro flash". modelo aceita nome aproximado: "flash", "pro", "gpt", "5.5". Confirme na fala o que passou a usar.)
 - desfazer {}   (desfaz a ÚLTIMA alteração de dados — tarefa/lista/nota/lembrete/evento/memória; use quando o usuário disser "desfaz", "cancela isso", "volta atrás")
 - codigo.workspace {path?}   (resume um projeto/workspace local: stack, scripts, árvore, git, linguagens)
 - codigo.buscar {path?, consulta, filtro?}   (busca texto/símbolo no código; use antes de explicar funções ou localizar implementação)
@@ -238,6 +242,125 @@ function dateAnchors(now: Date): string {
   ].join('\n')
 }
 
+/** Rótulo amigável do provedor atual (para a fala/contexto). */
+function providerLabel(baseUrl: string): string {
+  const id = detectProviderId(baseUrl)
+  return getProvider(id)?.label || 'personalizado'
+}
+
+/** Nome amigável do modelo atual a partir da lista do provedor (ou o id cru). */
+function modelLabel(cfg: AppConfig): string {
+  const preset = getProvider(detectProviderId(cfg.nineRouter.baseUrl))
+  const found = preset?.models?.find((m) => m.value === cfg.nineRouter.model)
+  return found?.label || cfg.nineRouter.model
+}
+
+/** Descrição curta do cérebro atual para o system prompt. */
+function brainSummary(cfg: AppConfig): string {
+  const lvl = coerceReasoning(cfg.nineRouter.reasoning)
+  const supports = providerSupportsReasoning(cfg.nineRouter.baseUrl)
+  const reasoning = supports ? `, raciocínio: ${REASONING_LABEL[lvl]}` : ' (sem ajuste de raciocínio)'
+  return `Provedor: ${providerLabel(cfg.nineRouter.baseUrl)}; modelo: ${modelLabel(cfg)}${reasoning}.`
+}
+
+/**
+ * Aplica a ação de voz "ia.raciocinio". Resolve nível absoluto ou relativo e persiste.
+ * Devolve um resultado falável; não lança.
+ */
+function applyReasoningAction(cfg: AppConfig, a: Acao): { resultado?: unknown; erro?: string } {
+  if (!providerSupportsReasoning(cfg.nineRouter.baseUrl)) {
+    return { erro: `O modelo atual (${modelLabel(cfg)}) não tem ajuste de raciocínio.` }
+  }
+  const current = coerceReasoning(cfg.nineRouter.reasoning)
+  const next = resolveReasoning(current, {
+    nivel: a.nivel != null ? String(a.nivel) : undefined,
+    direcao: a.direcao != null ? String(a.direcao) : undefined
+  })
+  if (!next) return { erro: 'Não entendi o nível de raciocínio. Diga baixo, médio, alto, ou aumentar/diminuir.' }
+  updateConfig({ nineRouter: { ...cfg.nineRouter, reasoning: next } })
+  return {
+    resultado: {
+      nivelAnterior: REASONING_LABEL[current],
+      nivel: REASONING_LABEL[next],
+      mudou: next !== current
+    }
+  }
+}
+
+/** Mapeia um nome falado de provedor para o id do preset. */
+function matchProviderId(name: string): string | null {
+  const n = name.toLowerCase()
+  if (/open\s?router|roteador/.test(n)) return 'openrouter'
+  if (/deep\s?seek/.test(n)) return 'deepseek'
+  if (/chat\s?gpt|gpt|openai|o ?pen ?ai/.test(n)) return 'openai'
+  if (/local|9\s?router|nine|caseiro/.test(n)) return 'local'
+  return null
+}
+
+/** Acha um modelo no preset por correspondência aproximada de nome/valor. */
+function matchModelValue(preset: ReturnType<typeof getProvider>, query: string): string | null {
+  if (!preset?.models?.length) return null
+  const q = query.toLowerCase().trim()
+  if (!q) return null
+  const norm = (s: string): string => s.toLowerCase()
+  // 1) bate por palavra-chave conhecida.
+  const wants = (kw: string): boolean => q.includes(kw)
+  for (const m of preset.models) {
+    const hay = norm(`${m.label} ${m.value}`)
+    if (wants('flash') && hay.includes('flash')) return m.value
+    if (wants('pro') && hay.includes('pro')) return m.value
+    if ((wants('5.5') || wants('gpt')) && (hay.includes('gpt') || hay.includes('5.5'))) return m.value
+  }
+  // 2) substring direta no rótulo/valor.
+  const direct = preset.models.find((m) => norm(`${m.label} ${m.value}`).includes(q))
+  return direct?.value || null
+}
+
+/**
+ * Aplica a ação de voz "ia.modelo": troca provedor e/ou modelo. Persiste e devolve
+ * um resultado falável. Ao trocar de provedor sem modelo dito, usa o modelo padrão dele.
+ */
+function applyModelAction(cfg: AppConfig, a: Acao): { resultado?: unknown; erro?: string } {
+  let baseUrl = cfg.nineRouter.baseUrl
+  let apiKey = cfg.nineRouter.apiKey
+  let model = cfg.nineRouter.model
+
+  const provName = a.provedor != null ? String(a.provedor) : ''
+  if (provName) {
+    const id = matchProviderId(provName)
+    const preset = id ? getProvider(id) : undefined
+    if (!preset) return { erro: `Não conheço o provedor "${provName}".` }
+    if (preset.baseUrl !== baseUrl) {
+      baseUrl = preset.baseUrl
+      apiKey = '' // provedor novo: a chave anterior não vale.
+      model = preset.defaultModel
+    }
+  }
+
+  const preset = getProvider(detectProviderId(baseUrl))
+  const modelName = a.modelo != null ? String(a.modelo) : ''
+  if (modelName) {
+    const v = matchModelValue(preset, modelName)
+    if (!v) return { erro: `O provedor ${preset?.label || ''} não tem um modelo "${modelName}".` }
+    model = v
+  }
+
+  if (baseUrl === cfg.nineRouter.baseUrl && model === cfg.nineRouter.model) {
+    return { resultado: { provedor: providerLabel(baseUrl), modelo: modelLabel(cfg), mudou: false } }
+  }
+  const next = { ...cfg.nineRouter, baseUrl, apiKey, model }
+  updateConfig({ nineRouter: next })
+  const needsLogin = !!getProvider(detectProviderId(baseUrl))?.needsKey && !apiKey
+  return {
+    resultado: {
+      provedor: providerLabel(baseUrl),
+      modelo: modelLabel({ ...cfg, nineRouter: next }),
+      mudou: true,
+      precisaConectar: needsLogin // a UI/fala pode avisar que falta logar/colar chave
+    }
+  }
+}
+
 function buildSystemPrompt(ctx: {
   board: Board
   events: CalendarEvent[]
@@ -246,6 +369,7 @@ function buildSystemPrompt(ctx: {
   controlContext: string
   codingPrefs: string
   sessionContext: string
+  brain: string
   summary?: string
   voice: boolean
 }): string {
@@ -273,6 +397,7 @@ function buildSystemPrompt(ctx: {
     ctx.codingPrefs ? `## Preferências de código do usuário (respeite-as ao escrever/editar)\n${ctx.codingPrefs}` : '',
     ctx.sessionContext ? `## Memória de sessão (contexto recente de trabalho)\n${ctx.sessionContext}` : '',
     `## Controle do computador\n${ctx.controlContext}`,
+    `## Seu cérebro (modelo de IA)\n${ctx.brain}`,
     `## Sobre o usuário (memória de longo prazo)\n${memorySummary()}`,
     `## Tarefas atuais\n${boardSummary(ctx.board)}`,
     `## Próximos eventos\n${upcoming || '(nenhum)'}`,
@@ -372,6 +497,14 @@ async function runQuery(
           return { tipo: a.tipo, erro: 'Diga o nível do brilho (0 a 100) ou se é para clarear ou escurecer.' }
         }
         return { tipo: a.tipo, resultado: runBrightness(cfg, { action, level }) }
+      }
+      case 'ia.raciocinio': {
+        const r = applyReasoningAction(cfg, a)
+        return r.erro ? { tipo: a.tipo, erro: r.erro } : { tipo: a.tipo, resultado: r.resultado }
+      }
+      case 'ia.modelo': {
+        const r = applyModelAction(cfg, a)
+        return r.erro ? { tipo: a.tipo, erro: r.erro } : { tipo: a.tipo, resultado: r.resultado }
       }
       case 'desfazer': {
         const r = undoLast(userDataDir())
@@ -719,6 +852,7 @@ export async function runTurn(
     controlContext: controlPromptContext(cfg),
     codingPrefs: codingPreferencesSummary(),
     sessionContext: sessionContextSummary(),
+    brain: brainSummary(cfg),
     summary: session?.summary,
     voice
   })
@@ -801,6 +935,10 @@ export async function runTurn(
   void summarizeIfNeeded(sessionId)
 
   unregisterRun()
+  // Se alguma ação (ia.raciocinio/ia.modelo) alterou a config do cérebro durante o
+  // turno, devolve a config nova para o renderer refletir nos seletores na hora.
+  const cfgAfter = readConfig()
+  const brainChanged = JSON.stringify(cfgAfter.nineRouter) !== JSON.stringify(cfg.nineRouter)
   return {
     fala,
     board,
@@ -810,7 +948,8 @@ export async function runTurn(
     quickNotes: loadNotes(),
     reminders: loadReminders(),
     notes: allNotes,
-    changedBoard
+    changedBoard,
+    ...(brainChanged ? { config: cfgAfter } : {})
   }
 }
 

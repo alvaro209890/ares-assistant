@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useAres } from '../lib/store'
 
-type Screen = 'assistant' | 'tasks' | 'calendar' | 'reminders' | 'lists' | 'memory' | 'system'
+type Screen = 'assistant' | 'tasks' | 'calendar' | 'reminders' | 'lists' | 'memory' | 'models' | 'system'
 
 const tabs: { id: Screen; label: string; hint: string; icon: JSX.Element }[] = [
   { id: 'assistant', label: 'Assistente', hint: 'Alt+1', icon: <AssistantIcon /> },
@@ -11,7 +11,8 @@ const tabs: { id: Screen; label: string; hint: string; icon: JSX.Element }[] = [
   { id: 'reminders', label: 'Lembretes', hint: 'Alt+4', icon: <BellIcon /> },
   { id: 'lists', label: 'Listas', hint: 'Alt+5', icon: <ListIcon /> },
   { id: 'memory', label: 'Memória', hint: 'Alt+6', icon: <MemoryIcon /> },
-  { id: 'system', label: 'Sistema', hint: 'Alt+7', icon: <SystemIcon /> }
+  { id: 'models', label: 'Modelos de IA', hint: 'Alt+7', icon: <ChipIcon /> },
+  { id: 'system', label: 'Sistema', hint: 'Alt+8', icon: <SystemIcon /> }
 ]
 
 export default function TopBar(): JSX.Element {
@@ -186,6 +187,15 @@ function SystemIcon(): JSX.Element {
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
       <path d="M12 2a3 3 0 0 1 3 3v1.2a6 6 0 0 1 1.8 1l1-.6 2 3.4-1 .6a6 6 0 0 1 0 2l1 .6-2 3.4-1-.6a6 6 0 0 1-1.8 1V19a3 3 0 0 1-6 0v-1.2a6 6 0 0 1-1.8-1l-1 .6-2-3.4 1-.6a6 6 0 0 1 0-2l-1-.6 2-3.4 1 .6a6 6 0 0 1 1.8-1V5a3 3 0 0 1 3-3z" strokeLinejoin="round" />
       <circle cx="12" cy="12" r="2.4" />
+    </svg>
+  )
+}
+
+function ChipIcon(): JSX.Element {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+      <rect x="7" y="7" width="10" height="10" rx="1.5" />
+      <path d="M10 10h4v4h-4zM9 3v2M15 3v2M9 19v2M15 19v2M3 9h2M3 15h2M19 9h2M19 15h2" strokeLinecap="round" />
     </svg>
   )
 }

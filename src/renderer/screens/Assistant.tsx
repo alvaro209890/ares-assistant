@@ -6,6 +6,7 @@ import StateIndicator from '../components/StateIndicator'
 import Conversation from '../components/Conversation'
 import ConversationList from '../components/ConversationList'
 import Controls from '../components/Controls'
+import ModelBar from '../components/ModelBar'
 
 const sameDay = (iso: string, ref = new Date()) => {
   const d = new Date(iso)
@@ -43,8 +44,10 @@ export default function Assistant(): JSX.Element {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="grid h-full min-h-[760px] gap-4 p-5 lg:grid-cols-[minmax(0,1fr)_400px]"
+      className="flex h-full min-h-[760px] flex-col gap-3 p-5"
     >
+      <ModelBar />
+      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_400px]">
       <section className="ares-orb-stage glass relative min-h-[620px] min-w-0 overflow-hidden rounded-2xl">
         <div className="ares-stage-grid" />
         <div className="ares-stage-vignette" />
@@ -153,6 +156,7 @@ export default function Assistant(): JSX.Element {
           )}
         </div>
       </aside>
+      </div>
     </motion.div>
   )
 }

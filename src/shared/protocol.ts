@@ -26,6 +26,8 @@ export const QUERY_TOOLS = new Set([
   'sistema.brilho',
   'sistema.bloquear',
   'sistema.captura',
+  'ia.raciocinio',
+  'ia.modelo',
   'desfazer',
   'codigo.workspace',
   'codigo.buscar',

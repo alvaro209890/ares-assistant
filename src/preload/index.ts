@@ -14,6 +14,7 @@ import type {
   MemoryFact,
   NewsItem,
   Note,
+  ReasoningLevel,
   Recurrence,
   Reminder,
   ReverseGeocodeResult,
@@ -144,6 +145,10 @@ const api = {
     setGlobalShortcut: (enabled: boolean): Promise<AppConfig> => ipcRenderer.invoke('system:setGlobalShortcut', enabled),
     setAutostart: (enabled: boolean): Promise<AppConfig> => ipcRenderer.invoke('system:setAutostart', enabled),
     testBrain: (): Promise<{ ok: boolean; detail: string }> => ipcRenderer.invoke('brain:test'),
+    testReasoning: (
+      level: ReasoningLevel
+    ): Promise<{ ok: boolean; level: ReasoningLevel; ms: number; detail: string }> =>
+      ipcRenderer.invoke('brain:testReasoning', level),
     // Bandeja "Briefing do dia" pede para abrir o briefing na janela principal.
     onBriefing: (cb: () => void): (() => void) => {
       const listener = (): void => cb()

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.26.0 - 2026-06-09
+
+- **Troca de modelo de IA na tela principal**: uma barra sobre a orbe permite trocar provedor (OpenRouter, DeepSeek, ChatGPT, Groq, Local), modelo e nível de raciocínio sem entrar nas configurações.
+- **Nova aba "Modelos de IA"**: tela dedicada para escolher e **conectar** o cérebro — login OAuth do OpenRouter ou chave própria, seleção de modelo, ajuste de raciocínio e um botão **"Testar todos os níveis"** que faz uma chamada real em baixo/médio/alto e mostra a latência de cada um.
+- **Nível de raciocínio que funciona de verdade**: baixo/médio/alto viram `reasoning_effort` low/medium/high na chamada da API (DeepSeek V4 Flash/Pro e GPT-5.5). Se o provedor não aceitar o campo, o Ares repete a chamada sem ele (sem quebrar). Groq, que não raciocina, não recebe o campo.
+- **Ajuste de raciocínio e modelo por voz**: "diminua o seu nível de raciocínio para baixo", "raciocínio no máximo", "aumente o esforço", "use o DeepSeek Pro", "troca pro ChatGPT" — o Ares aplica e confirma falando. Os seletores na tela refletem a mudança na hora.
+- **Conexão padrão via OAuth (OpenRouter), não mais 9 Router**: o cérebro padrão passou a ser o OpenRouter por login (o mesmo fluxo dos instaladores) — uma conta dá acesso a GPT-5.5 e DeepSeek V4. DeepSeek e ChatGPT continuam disponíveis com chave própria; o 9 Router local virou opção "avançada/auto-hospedada".
+- **ChatGPT restrito ao GPT-5.5**: o provedor ChatGPT oferece somente o GPT-5.5.
+
 ## 0.25.0 - 2026-06-09
 
 - **Seletores modernos e bonitos**: todos os menus suspensos (provedor de IA, modelo, motor/voz, categorias de memória, filtros do Kanban, prazos, estados, recorrência etc.) deixaram de usar o `<select>` nativo — que abria com um painel **branco e fora do tema** no Linux/Electron. Agora usam um componente próprio no tema HUD escuro (ciano), com animação, marca de seleção, rolagem, navegação por teclado e renderização em "portal" (não é mais cortado por painéis nem cai no widget branco do sistema).

@@ -37,7 +37,7 @@ function writeProjectFile(file: string, content: string): void {
 
 function config(patch: Partial<AppConfig['integrations']['code']> = {}): AppConfig {
   return {
-    nineRouter: { baseUrl: 'http://localhost:20128/v1', apiKey: '', model: 'cx/gpt-5.5' },
+    nineRouter: { baseUrl: 'http://localhost:20128/v1', apiKey: '', model: 'cx/gpt-5.5', reasoning: 'medio' },
     grog: { baseUrl: 'https://api.groq.com/openai/v1', apiKey: '', sttModel: 'whisper-large-v3-turbo' },
     tts: { enabled: true, engine: 'auto', piperVoice: 'pt_BR-faber-medium', webVoiceURI: '', rate: 1, pitch: 1, volume: 1 },
     integrations: {

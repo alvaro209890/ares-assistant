@@ -49,9 +49,13 @@ const CONFIG_RESET_VERSION = '0.20.0'
 
 const DEFAULT_CONFIG: AppConfig = {
   nineRouter: {
-    baseUrl: 'http://localhost:20128/v1',
-    apiKey: '', // localhost não exige chave; deixe vazio.
-    model: 'cx/gpt-5.5'
+    // Cérebro padrão: OpenRouter via login OAuth (botão "Entrar com OpenRouter").
+    // Não usamos mais o 9 Router local por padrão — quem quiser auto-hospedar
+    // escolhe o provedor "Local (avançado)" nas configurações.
+    baseUrl: 'https://openrouter.ai/api/v1',
+    apiKey: '', // preenchida automaticamente pelo login OAuth.
+    model: 'openai/gpt-5.5',
+    reasoning: 'medio' // baixo | medio | alto (reasoning_effort low/medium/high)
   },
   grog: {
     baseUrl: 'https://api.groq.com/openai/v1',
