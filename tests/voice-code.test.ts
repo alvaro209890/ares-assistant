@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { sanitizeVoiceCodeFala, toolResultsPrompt, voiceCodeInterpretation, voiceAwareUserContent } from '../src/main/voiceCode'
+import {
+  rootCauseError,
+  sanitizeVoiceCodeFala,
+  toolResultsPrompt,
+  voiceCodeInterpretation,
+  voiceAwareUserContent
+} from '../src/main/voiceCode'
 
 describe('voz no modo programador', () => {
   it('interpreta caminhos e extensoes ditados por voz', () => {
@@ -12,6 +18,13 @@ describe('voz no modo programador', () => {
   it('interpreta comandos comuns de terminal ditados por voz', () => {
     expect(voiceCodeInterpretation('rode npm rum verify no projeto')).toBe('rode npm run verify no projeto')
     expect(voiceCodeInterpretation('confira guit estado')).toBe('confira git status')
+  })
+
+  it('interpreta termos técnicos ditados (arrow function, async await, try catch, callback)', () => {
+    expect(voiceCodeInterpretation('transforme a função em função seta no código')).toContain('arrow function')
+    expect(voiceCodeInterpretation('use assíncrono com await nessa função')).toContain('async await')
+    expect(voiceCodeInterpretation('envolva em tente e capture a função')).toContain('try catch')
+    expect(voiceCodeInterpretation('passe uma função de retorno para a função')).toContain('callback')
   })
 
   it('nao cria interpretacao auxiliar para fala comum sem contexto de codigo', () => {
@@ -89,5 +102,40 @@ describe('voz no modo programador', () => {
     ]
     const prompt = toolResultsPrompt(bigResult, false, true)
     expect(prompt).toContain('a'.repeat(5000))
+  })
+
+  it('extrai a causa raiz do erro ignorando o stack trace', () => {
+    const stderr = [
+      'node:internal/modules/cjs/loader:1148',
+      '  throw err;',
+      'Error: Cannot find module "left-pad"',
+      '    at Module._resolveFilename (node:internal/modules/cjs/loader:1145:15)',
+      '    at Module._load (node:internal/modules/cjs/loader:986:27)',
+      '    at /home/acer/projeto/index.js:1:1'
+    ].join('\n')
+
+    expect(rootCauseError(stderr)).toBe('Error: Cannot find module "left-pad"')
+  })
+
+  it('cai para a primeira linha relevante quando não há rótulo de erro', () => {
+    expect(rootCauseError('comando concluído com avisos\n  detalhe técnico irrelevante')).toBe(
+      'comando concluído com avisos'
+    )
+    expect(rootCauseError('')).toBe('')
+  })
+
+  it('em voz+codigo o stderr vira só a causa raiz, sem o rastreamento', () => {
+    const result = [
+      {
+        tipo: 'codigo.terminal',
+        resultado: {
+          ok: false,
+          stderr: 'Error: ENOENT: no such file or directory\n    at Object.openSync (node:fs:600:3)\n    at /x/y.js:2:1'
+        }
+      }
+    ]
+    const prompt = toolResultsPrompt(result, true, true)
+    expect(prompt).toContain('ENOENT: no such file or directory')
+    expect(prompt).not.toContain('Object.openSync')
   })
 })

@@ -320,6 +320,14 @@ export interface CodeWorkspaceSummary {
   files: string[]
   ignored: string[]
   hints: string[]
+  health?: ProjectHealth // avaliação estrutural rápida (sem rodar comandos)
+}
+
+// Saúde do projeto reportada de forma falável (estilo briefing JARVIS).
+export interface ProjectHealth {
+  ok: boolean
+  label: string // resumo curto e falável ("tudo em ordem", "atenção: …")
+  signals: string[] // pistas que levaram ao veredito
 }
 
 export interface CodeSearchMatch {
@@ -422,6 +430,7 @@ export interface CodeDiagnosis {
   ok: boolean
   checks: CodeDiagnosisCheck[]
   hints: string[]
+  health: ProjectHealth // veredito falável após rodar as checagens disponíveis
 }
 
 // --- Controle do computador (desktop actions, estilo JARVIS) ---

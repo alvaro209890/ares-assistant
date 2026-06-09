@@ -3,6 +3,7 @@ import { spawn } from 'child_process'
 import { existsSync, readdirSync, mkdirSync, writeFileSync, rmSync, chmodSync } from 'fs'
 import { join, dirname } from 'path'
 import { tmpdir } from 'os'
+import { PIPER_SENTENCE_SILENCE, computeLengthScale, detectTone, prepareText } from './speech'
 
 // Voz neural local via Piper (https://github.com/rhasspy/piper).
 // Binário + vozes ficam em userData/piper. É o motor padrão no Linux E no Windows
@@ -62,24 +63,6 @@ function resolveVoice(voice?: string): string {
   return first ? join(dir, `${first}.onnx`) : ''
 }
 
-/**
- * Pre-processa o texto para reduzir pausas excessivas em virgulas/pontuacao.
- * O Piper pausa bastante em virgulas; removemos essas pausas internas e mantemos
- * pontuacao forte para preservar respiracao natural entre frases.
- */
-function prepareText(text: string): string {
-  return text
-    .replace(/\b(senhor|senhora)\s*[,;:]\s*/gi, '$1. ')
-    .replace(/\s*[,;]\s*/g, ' ')
-    .replace(/\.{3,}|…/g, '. ')
-    .replace(/\s*[—–]\s*/g, ' ')
-    .replace(/\s*:\s*/g, ' ')
-    .replace(/\s+([.!?])/g, '$1')
-    .replace(/([.!?]){2,}/g, '$1')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
 /** Sintetiza texto -> WAV via stdout (sem arquivo temporário, menor latência). */
 export function synthesize(text: string, opts: { voice?: string; rate?: number } = {}): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -87,8 +70,10 @@ export function synthesize(text: string, opts: { voice?: string; rate?: number }
     const model = resolveVoice(opts.voice)
     if (!existsSync(bin) || !model) return reject(new Error('Piper indisponível.'))
 
-    const rate = Math.min(1.6, Math.max(0.5, opts.rate ?? 1.08))
-    const lengthScale = (1 / rate).toFixed(3)
+    // Ritmo dinâmico (estilo JARVIS): o tom é inferido do próprio conteúdo — erro fica
+    // mais direto/rápido, sucesso mais calmo/elegante. O texto cru entra na detecção;
+    // o prepareText cuida da pronúncia (siglas técnicas) e das pausas.
+    const lengthScale = computeLengthScale(opts.rate, detectTone(text)).toFixed(3)
 
     const binDir = dirname(bin)
     const env = {
@@ -104,7 +89,7 @@ export function synthesize(text: string, opts: { voice?: string; rate?: number }
         '--length_scale',
         lengthScale,
         '--sentence_silence',
-        '0.035',
+        PIPER_SENTENCE_SILENCE,
         '--output-raw'
       ],
       { env, cwd: binDir }

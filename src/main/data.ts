@@ -15,6 +15,7 @@ import type {
   Recurrence
 } from '../shared/types'
 import { MEMORY_CATEGORIES, MEMORY_CATEGORY_LABEL } from '../shared/types'
+import { formatCodingPreferences } from './preferences'
 
 // Persistência local (userData) de: memória de longo prazo, calendário e sessões de
 // conversa. Tudo em JSON simples, sobrevive a fechar/abrir o app.
@@ -196,6 +197,54 @@ export function memorySummary(maxChars = 1400): string {
     out += (out ? '\n' : '') + block
   }
   return out || '(nada registrado)'
+}
+
+/**
+ * "Pílulas de Contexto": resumo das preferências de CODIFICAÇÃO do usuário (aspas,
+ * funções nomeadas, indentação…), derivadas da memória de longo prazo. Injetado na
+ * seção de Programação do prompt para o Ares respeitar o estilo do usuário.
+ */
+export function codingPreferencesSummary(): string {
+  return formatCodingPreferences(loadMemory())
+}
+
+// ---------------- Memória de Sessão Curta ----------------
+// Contexto operacional volátil porém persistido: o último arquivo editado e o último
+// comando de terminal bem-sucedido. Permite ao Ares retomar o fio ("rodo o teste
+// naquele arquivo?") sem o usuário repetir o caminho.
+export interface ShortSessionContext {
+  lastEditedFile?: string
+  lastEditedRoot?: string
+  lastTerminalCommand?: string
+  lastTerminalRoot?: string
+  updatedAt?: number
+}
+
+export function getSessionContext(): ShortSessionContext {
+  return readJSON<ShortSessionContext>('session-context.json', {})
+}
+function writeSessionContext(patch: Partial<ShortSessionContext>): ShortSessionContext {
+  const next = { ...getSessionContext(), ...patch, updatedAt: Date.now() }
+  writeJSON('session-context.json', next)
+  return next
+}
+/** Registra o último arquivo criado/editado (com a raiz do workspace, se houver). */
+export function setLastEditedFile(file: string, root?: string): void {
+  const f = String(file || '').trim()
+  if (f) writeSessionContext({ lastEditedFile: f, lastEditedRoot: root })
+}
+/** Registra o último comando de terminal que rodou com sucesso. */
+export function setLastTerminalCommand(command: string, root?: string): void {
+  const c = String(command || '').trim()
+  if (c) writeSessionContext({ lastTerminalCommand: c, lastTerminalRoot: root })
+}
+/** Resumo curto da memória de sessão para o prompt (vazio se nada relevante). */
+export function sessionContextSummary(): string {
+  const ctx = getSessionContext()
+  const lines: string[] = []
+  if (ctx.lastEditedFile) lines.push(`Último arquivo editado: ${ctx.lastEditedFile}`)
+  if (ctx.lastTerminalCommand) lines.push(`Último comando de terminal OK: ${ctx.lastTerminalCommand}`)
+  return lines.join('\n')
 }
 
 // ---------------- Calendário ----------------

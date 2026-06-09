@@ -9,7 +9,9 @@ Ares e um assistente desktop em Electron, React e TypeScript, feito para uso loc
 - **Responde por voz tambem ao texto**: mensagens digitadas no chat sao faladas quando o TTS esta ligado, nao so os comandos de microfone.
 - **Modelos DeepSeek**: somente `deepseek-v4-flash` e `deepseek-v4-pro` ficam disponiveis.
 - **Modo Programador nativo**: busca codigo, le arquivos com linhas, cria arquivos, aplica patches, gera scaffold, roda diagnostico e usa terminal local com autorizacao.
-- **Edicao por voz no codigo**: entende caminhos ditados como "src barra main ponto ts" e evita ler codigo, diffs ou logs em voz alta. Resultados grandes sao truncados para voz e comandos lentos retornam resumo curto.
+- **Edicao por voz no codigo**: entende caminhos ditados como "src barra main ponto ts" e termos tecnicos ("funcao seta" -> arrow function, "tente e capture" -> try catch); evita ler codigo, diffs ou logs em voz alta. Resultados grandes sao truncados para voz e comandos lentos retornam resumo curto.
+- **Voz mais viva (JARVIS)**: siglas tecnicas pronunciadas certo (API, JSON, TS, JS), fala mais continua e ritmo que muda com o conteudo (erro direto e rapido, sucesso calmo e elegante).
+- **Engenheiro proativo**: apos editar/aplicar patch sugere validar com o teste/build do projeto, reporta a saude do projeto, avisa "iniciando a tarefa, senhor" em comandos longos, lembra do ultimo arquivo/comando e respeita as preferencias de codigo do usuario.
 - **Interface HUD refinada**: selects da memoria usam seta SVG, foco com glow cyan e hover claro; o seletor de provedor mostra icones por IA e chave de API com toggle de visibilidade.
 - **Atualizar por cima preserva os dados**: instalar uma versao nova sobre a antiga (Windows) mantem config, chaves, cidade, localizacao, tarefas, memoria e sessoes.
 - **Dados locais**: tarefas, memoria, agenda, listas, notas e lembretes ficam no `userData` do Electron.
@@ -100,15 +102,27 @@ O Ares nao depende de servico externo para editar codigo. As ferramentas nativas
 
 No Windows, o terminal nativo usa PowerShell. No Linux e macOS, usa Bash. Comandos destrutivos ou de elevacao continuam bloqueados mesmo com confirmacao.
 
+### Proatividade de engenheiro (estilo JARVIS)
+
+- **Validacao automatica**: ao concluir um `codigo.criar`, `codigo.scaffold` ou `codigo.patch.aplicar` com sucesso, o Ares detecta o script de validacao do `package.json` (preferindo `test`, depois `build`/`typecheck`/`verify`) e oferece roda-lo numa frase curta. Veja `proactiveValidationCommand` em `src/main/code.ts`.
+- **Saude do projeto**: `codigo.workspace` agora traz um campo `health` com avaliacao estrutural rapida (alteracoes sem commit, ausencia de teste/lockfile), sem rodar comandos; `codigo.diagnostico` reporta a saude apos rodar typecheck/lint/test (`tudo verde` ou `atencao: ... falharam`). Funcoes `structuralHealth` e `assessDiagnosisHealth`.
+- **Tarefas longas**: antes de bloquear em um comando demorado (instalar/build/test), o Ares fala "Iniciando a tarefa, senhor. Um momento." para nao deixar o usuario no vacuo. A deteccao e `isLongRunningCommand`; o aviso so ocorre quando o comando vai de fato rodar (autorizado ou seguro).
+- **Memoria de sessao curta**: o ultimo arquivo editado e o ultimo comando de terminal bem-sucedido sao persistidos (`session-context.json`) e injetados no prompt, para o Ares retomar o trabalho sem pedir o caminho de novo. Veja `setLastEditedFile`/`setLastTerminalCommand`/`sessionContextSummary` em `src/main/data.ts`.
+- **Pilulas de contexto (estilo de codigo)**: preferencias de codificacao guardadas na memoria (ex.: "sempre use aspas simples", "prefira funcoes nomeadas") sao filtradas e injetadas na secao de Programacao do prompt, para o Ares respeitar o estilo do usuario ao escrever/editar. Veja `src/main/preferences.ts` e `codingPreferencesSummary`.
+
 ### Voz no Modo Programador
 
-Quando a entrada vem do microfone, o agente adiciona uma interpretacao auxiliar para termos comuns de desenvolvimento: "barra" vira `/`, "ponto ts" vira `.ts`, "traço" vira `-`, "underline" vira `_`, "npm rum" vira `npm run` e "git estado" vira `git status`. A resposta final de ferramentas `codigo.*` nao e transmitida em streaming bruto; ela e gerada, filtrada e so entao falada para evitar que o Ares leia codigo, JSON, diffs ou logs longos. A fala deve ficar em ate duas frases com o arquivo principal, o que mudou, se a validacao passou e qual autorizacao falta.
+Quando a entrada vem do microfone, o agente adiciona uma interpretacao auxiliar para termos comuns de desenvolvimento: "barra" vira `/`, "ponto ts" vira `.ts`, "traço" vira `-`, "underline" vira `_`, "npm rum" vira `npm run` e "git estado" vira `git status`. O dicionario tambem cobre termos tecnicos ditados: "funcao seta" vira `arrow function`, "assincrono com await" vira `async await`, "tente e capture" vira `try catch` e "funcao de retorno" vira `callback`. A resposta final de ferramentas `codigo.*` nao e transmitida em streaming bruto; ela e gerada, filtrada e so entao falada para evitar que o Ares leia codigo, JSON, diffs ou logs longos. A fala deve ficar em ate duas frases com o arquivo principal, o que mudou, se a validacao passou e qual autorizacao falta.
+
+Ao reportar erros de terminal, o Ares fala apenas a **causa raiz** (a primeira linha que descreve o problema), ignorando o stack trace e os code frames. Veja `rootCauseError` em `src/main/voiceCode.ts`.
 
 O modo de voz tambem limita explicitamente resultados de ferramentas de codigo antes de enviar ao LLM. Conteudos como `content`, `stdout`, `stderr`, diffs e listas grandes recebem o marcador `[...resultado truncado para voz...]`. A sintese Piper tem retry curto com orcamento total de 8s; se falhar ou demorar, o Ares cai para Web Speech automaticamente. Ao iniciar uma nova fala ou detectar barge-in, a fala anterior e cancelada junto com a fila pendente para evitar sobreposicao.
 
 O TTS tem watchdogs para evitar silencio preso: o processo Piper e encerrado em timeout, a reproducao do WAV tem limite de duracao e o Web Speech tenta de novo quando nao dispara `onstart`. No Windows, o modo `auto` tenta Web Speech primeiro para usar vozes mais naturais do sistema; se falhar, Piper entra como reserva. No Linux, Piper continua sendo a primeira tentativa. Se o streaming nao enviar deltas de fala, o Ares ainda enfileira a resposta final (`result.fala`) para nao ficar mudo.
 
 A fala tambem passa por normalizacao de pontuacao antes da sintese: virgulas, ponto-e-virgula e travessoes viram pausas suaves, dois-pontos viram fim curto de frase, reticencias sao reduzidas e textos longos sem pontuacao sao quebrados por tamanho para a voz acompanhar a resposta.
+
+A sintese neural (Piper) agora e mais expressiva e fluida (`src/main/speech.ts`): siglas tecnicas em CAIXA ALTA sao pronunciadas corretamente (`API` -> "a pe i", `JSON` -> "jeison", `TS`/`JS` soletrados), o silencio entre frases caiu para `0.025` (fala mais continua) e o ritmo varia com o **conteudo** — respostas de erro saem mais rapidas e diretas, confirmacoes de sucesso saem mais calmas e elegantes (`detectTone` + `computeLengthScale`). Tudo isso fica em modulo puro e testado, independente do Electron.
 
 As ferramentas de codigo tambem usam orcamento de tempo em varreduras de pasta. Quando uma pasta e grande demais, `codigo.workspace` e `codigo.buscar` devolvem resultado parcial com aviso, em vez de segurar o processo principal e atrasar a voz.
 
@@ -126,8 +140,10 @@ As ferramentas de codigo tambem usam orcamento de tempo em varreduras de pasta. 
 - `src/main/agent.ts`: prompt do agente, roteamento de acoes e execucao das ferramentas.
 - `src/main/code.ts`: motor nativo de programacao, patches, terminal, scaffold e diagnostico.
 - `src/main/coder.ts`: executor autonomo para tarefas de codigo em varias etapas.
-- `src/main/voiceCode.ts`: interpretacao e sanitizacao de respostas de programacao por voz.
+- `src/main/voiceCode.ts`: interpretacao e sanitizacao de respostas de programacao por voz (inclui causa raiz de erros).
 - `src/main/piper.ts`: voz neural Piper multiplataforma (download do binario + sintese em Linux e Windows).
+- `src/main/speech.ts`: pre-processamento de fala puro e testavel (siglas tecnicas, tom dinamico, length_scale).
+- `src/main/preferences.ts`: extracao das preferencias de codificacao do usuario (pilulas de contexto).
 - `src/main/config.ts`: defaults e merge nao-destrutivo da configuracao (preserva dados em upgrades).
 - `src/renderer`: interface React.
 - `src/preload`: API IPC tipada exposta ao renderer.

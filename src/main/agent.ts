@@ -29,7 +29,11 @@ import {
   removeReminderByText,
   remindersSummary,
   loadReminders,
-  userDataDir
+  userDataDir,
+  codingPreferencesSummary,
+  sessionContextSummary,
+  setLastEditedFile,
+  setLastTerminalCommand
 } from './data'
 import { getWeather, getWeatherAt, getNews, webSearch, calcExpression, convertCurrency, convertUnit, readPage } from './tools'
 import { getSystemMetrics, readClipboard, writeClipboard } from './system'
@@ -52,9 +56,12 @@ import { buildBriefing, briefingToSpeech } from './briefing'
 import {
   applyCodePatch,
   buildCodeIndex,
+  classifyCommand,
   codePromptContext,
   diagnoseProject,
+  isLongRunningCommand,
   previewCodePatch,
+  proactiveValidationCommand,
   readCodeFile,
   runCodeCommand,
   runCodeGit,
@@ -186,7 +193,10 @@ MODO PROGRAMADOR:
 - Ao rodar comandos, reporte o código de saída e só o essencial do stdout/stderr; não leia saídas longas inteiras em voz.
 - Para estado do repo, use codigo.git em vez de inventar status/diff.
 - CRIAR PROJETOS: para um modelo simples e conhecido ("crie um site/página em branco"), use codigo.scaffold. Para algo com lógica ou vários arquivos ("faça um app de lista de tarefas", "construa uma calculadora", "um jogo da velha"), use codigo.projeto (CODER AUTÔNOMO), que constrói tudo sozinho. Se o usuário indicar onde (ex.: um caminho), passe o path. Depois diga em uma frase como abrir/rodar.
-- PROATIVIDADE EM CÓDIGO: aja como engenheiro proativo — depois de criar/editar, ofereça e, quando fizer sentido, rode codigo.diagnostico ou codigo.comando para validar e relate o resultado (passou/falhou + o essencial). Aponte riscos e o próximo passo, sem esperar o usuário pedir.
+- PROATIVIDADE EM CÓDIGO: aja como engenheiro proativo — depois de criar/editar, ofereça e, quando fizer sentido, rode codigo.diagnostico ou codigo.comando para validar e relate o resultado (passou/falhou + o essencial). Aponte riscos e o próximo passo, sem esperar o usuário pedir. Se o CONTEXTO das ferramentas trouxer uma sugestão de validação (ex.: "validar com npm test"), ofereça-a numa frase curta.
+- ESTILO DO USUÁRIO: respeite as "Preferências de código do usuário" do CONTEXTO ao escrever/editar (aspas, funções nomeadas, indentação, etc.). Use a "Memória de sessão" para retomar o trabalho (último arquivo/comando) sem pedir o caminho de novo.
+- SAÚDE DO PROJETO: ao resumir/diagnosticar um projeto, reporte a saúde (campo "health": testes/lint passando ou não, alterações sem commit) em uma frase, como num briefing.
+- TAREFAS LONGAS: em comandos demorados (instalar/build/test) o sistema já avisa "iniciando a tarefa, senhor" — não repita esse aviso, vá direto ao resultado quando ele voltar.
 - Escrita real (codigo.scaffold/codigo.criar) exige "Permitir aplicar patches" ligado; se vier erro de desativado, explique como ligar.
 - Sem path explícito, use o workspace padrão de programação. Se o pedido depender de um repo específico e o contexto não deixar claro, peça o path.
 - Explique respostas de código com referências de arquivo/linha quando a ferramenta devolver linhas.
@@ -233,6 +243,8 @@ function buildSystemPrompt(ctx: {
   location: UserLocation
   codeContext: string
   controlContext: string
+  codingPrefs: string
+  sessionContext: string
   summary?: string
   voice: boolean
 }): string {
@@ -257,6 +269,8 @@ function buildSystemPrompt(ctx: {
     `## DATAS\n${dateAnchors(now)}`,
     `## Localização aproximada do usuário\n${loc}`,
     `## Programação\n${ctx.codeContext}`,
+    ctx.codingPrefs ? `## Preferências de código do usuário (respeite-as ao escrever/editar)\n${ctx.codingPrefs}` : '',
+    ctx.sessionContext ? `## Memória de sessão (contexto recente de trabalho)\n${ctx.sessionContext}` : '',
     `## Controle do computador\n${ctx.controlContext}`,
     `## Sobre o usuário (memória de longo prazo)\n${memorySummary()}`,
     `## Tarefas atuais\n${boardSummary(ctx.board)}`,
@@ -269,7 +283,17 @@ function buildSystemPrompt(ctx: {
     .join('\n\n')
 }
 
-async function runQuery(a: Acao, cfg: AppConfig, sessionId: string): Promise<unknown> {
+/**
+ * Avisa em voz "iniciando a tarefa, senhor" ANTES de bloquear num comando de longa
+ * duração (build/install/test), para não deixar o usuário no vácuo. Só fala quando o
+ * comando realmente vai rodar (já autorizado ou seguro) — nunca antes de pedir o "sim".
+ */
+function announceLongTask(onDelta: DeltaFn | undefined, cfg: AppConfig, command: string, willRun: boolean): void {
+  if (!onDelta || !willRun || !isLongRunningCommand(command)) return
+  onDelta(' Iniciando a tarefa, senhor. Um momento.', 1)
+}
+
+async function runQuery(a: Acao, cfg: AppConfig, sessionId: string, onDelta?: DeltaFn): Promise<unknown> {
   const integrations = cfg.integrations
   try {
     switch (a.tipo) {
@@ -380,20 +404,28 @@ async function runQuery(a: Acao, cfg: AppConfig, sessionId: string): Promise<unk
         }
       case 'codigo.terminal': {
         const root = String(a.path || a.raiz || a.workspace || '')
+        const command = String(a.comando || a.command || '')
         const approved = a.confirmado === true || a.autorizado === true || a.confirm === true || a.approved === true
-        const result = runCodeTerminal(cfg, { root, command: String(a.comando || a.command || ''), approved })
+        // Só anuncia se o comando for de fato rodar agora (autorizado ou já seguro).
+        announceLongTask(onDelta, cfg, command, approved || classifyCommand(cfg, command).tier === 'allowed')
+        const result = runCodeTerminal(cfg, { root, command, approved })
         if (result.requiresApproval) {
           setPendingCode(sessionId, { kind: 'terminal', command: result.command, root, reason: result.reason })
         } else if (result.ran) {
           clearPendingCode(sessionId)
+          if (result.ok) setLastTerminalCommand(result.command, result.root)
         }
         return { tipo: a.tipo, resultado: result }
       }
       case 'codigo.confirmar': {
         const pend = getPendingCode(sessionId)
         if (!pend) return { tipo: a.tipo, erro: 'Não há nenhum comando pendente de autorização.' }
+        announceLongTask(onDelta, cfg, pend.command, true)
         const result = runCodeTerminal(cfg, { root: pend.root, command: pend.command, approved: true })
-        if (result.ran) clearPendingCode(sessionId)
+        if (result.ran) {
+          clearPendingCode(sessionId)
+          if (result.ok) setLastTerminalCommand(result.command, result.root)
+        }
         return { tipo: a.tipo, resultado: result }
       }
       case 'codigo.cancelar': {
@@ -418,26 +450,26 @@ async function runQuery(a: Acao, cfg: AppConfig, sessionId: string): Promise<unk
             refresh: a.refresh === true || a.atualizar === true
           })
         }
-      case 'codigo.scaffold':
-        return {
-          tipo: a.tipo,
-          resultado: scaffoldProject(cfg, {
-            tipo: String(a.tipo_projeto || a.template || a.modelo || a.kind || 'site'),
-            nome: String(a.nome || a.name || a.projeto || ''),
-            path: String(a.path || a.raiz || a.destino || a.onde || ''),
-            force: a.force === true || a.forcar === true
-          })
-        }
-      case 'codigo.criar':
-        return {
-          tipo: a.tipo,
-          resultado: writeCodeFile(cfg, {
-            root: String(a.path || a.raiz || a.workspace || ''),
-            file: String(a.arquivo || a.file || ''),
-            content: String(a.conteudo ?? a.content ?? a.texto ?? ''),
-            overwrite: a.sobrescrever === true || a.overwrite === true
-          })
-        }
+      case 'codigo.scaffold': {
+        const resultado = scaffoldProject(cfg, {
+          tipo: String(a.tipo_projeto || a.template || a.modelo || a.kind || 'site'),
+          nome: String(a.nome || a.name || a.projeto || ''),
+          path: String(a.path || a.raiz || a.destino || a.onde || ''),
+          force: a.force === true || a.forcar === true
+        })
+        if (resultado.created[0]) setLastEditedFile(resultado.created[0], resultado.root)
+        return { tipo: a.tipo, resultado }
+      }
+      case 'codigo.criar': {
+        const resultado = writeCodeFile(cfg, {
+          root: String(a.path || a.raiz || a.workspace || ''),
+          file: String(a.arquivo || a.file || ''),
+          content: String(a.conteudo ?? a.content ?? a.texto ?? ''),
+          overwrite: a.sobrescrever === true || a.overwrite === true
+        })
+        setLastEditedFile(resultado.file, String(a.path || a.raiz || a.workspace || '') || undefined)
+        return { tipo: a.tipo, resultado }
+      }
       case 'codigo.diagnostico':
         return { tipo: a.tipo, resultado: diagnoseProject(cfg, { root: String(a.path || a.raiz || a.workspace || '') }) }
       case 'codigo.projeto':
@@ -458,15 +490,15 @@ async function runQuery(a: Acao, cfg: AppConfig, sessionId: string): Promise<unk
             patches: a.patches
           })
         }
-      case 'codigo.patch.aplicar':
-        return {
-          tipo: a.tipo,
-          resultado: applyCodePatch(cfg, {
-            root: String(a.path || a.raiz || a.workspace || ''),
-            diff: a.diff,
-            patches: a.patches
-          })
-        }
+      case 'codigo.patch.aplicar': {
+        const resultado = applyCodePatch(cfg, {
+          root: String(a.path || a.raiz || a.workspace || ''),
+          diff: a.diff,
+          patches: a.patches
+        })
+        if (resultado.applied && resultado.files[0]) setLastEditedFile(resultado.files[0], resultado.root)
+        return { tipo: a.tipo, resultado }
+      }
       case 'briefing.consultar': {
         const b = await buildBriefing(cfg)
         return {
@@ -490,6 +522,36 @@ async function runQuery(a: Acao, cfg: AppConfig, sessionId: string): Promise<unk
     return { tipo: a.tipo, erro: e instanceof Error ? e.message : String(e) }
   }
   return { tipo: a.tipo, erro: 'ferramenta desconhecida' }
+}
+
+/**
+ * Após um patch/criação de arquivo bem-sucedido, monta uma sugestão proativa de
+ * validação (rodar o teste/build detectado no package.json). Retorna a instrução para
+ * o LLM oferecer isso na fala e uma nota curta para o toast. Null se não se aplicar.
+ */
+function proactiveCodeFollowup(
+  cfg: AppConfig,
+  results: unknown[]
+): { instruction: string; note: string } | null {
+  const ok = results.find((r) => {
+    const o = r as { tipo?: string; resultado?: { applied?: boolean; created?: unknown[] } }
+    if (o?.tipo === 'codigo.patch.aplicar') return o.resultado?.applied === true
+    if (o?.tipo === 'codigo.criar') return true
+    if (o?.tipo === 'codigo.scaffold') return Array.isArray(o.resultado?.created) && o.resultado!.created!.length > 0
+    return false
+  }) as { resultado?: { root?: string } } | undefined
+  if (!ok) return null
+  try {
+    const summary = summarizeCodeWorkspace(cfg, ok.resultado?.root || '')
+    const command = proactiveValidationCommand(summary.scripts, summary.packageManager || 'npm')
+    if (!command) return null
+    return {
+      instruction: `PROATIVIDADE: a alteração foi aplicada. Ofereça rodar "${command}" para validar (uma frase curta) e, se o usuário aceitar, use codigo.comando/codigo.terminal.`,
+      note: `sugestão: validar com ${command}`
+    }
+  } catch {
+    return null
+  }
 }
 
 function applyMutations(acoes: Acao[]): { board: Board; notes: string[]; changedBoard: boolean } {
@@ -637,6 +699,8 @@ export async function runTurn(
     location: cfg.integrations.location,
     codeContext: codePromptContext(cfg),
     controlContext: controlPromptContext(cfg),
+    codingPrefs: codingPreferencesSummary(),
+    sessionContext: sessionContextSummary(),
     summary: session?.summary,
     voice
   })
@@ -655,14 +719,17 @@ export async function runTurn(
   if (queries.length) {
     // Ferramentas de consulta rodam em PARALELO (são, em geral, independentes:
     // clima, notícias, web, código). Promise.all preserva a ordem dos resultados.
-    const results = await Promise.all(queries.map((q) => runQuery(q, cfg, sessionId)))
+    const results = await Promise.all(queries.map((q) => runQuery(q, cfg, sessionId, onDelta)))
     const codeMode = hasCodeAction(queries)
+    // Proatividade de engenheiro: após editar com sucesso, oferece validar (teste/build).
+    const proactive = proactiveCodeFollowup(cfg, results)
+    if (proactive) allNotes.push(proactive.note)
     const followup: ChatMessage[] = [
       ...messages,
       { role: 'assistant', content: env.fala || '...' },
       {
         role: 'system',
-        content: toolResultsPrompt(results, voice, codeMode)
+        content: toolResultsPrompt(results, voice, codeMode) + (proactive ? `\n${proactive.instruction}` : '')
       }
     ]
     // Fase 2 (resposta final após as ferramentas): novo streaming, fase 2 = reset no cliente.

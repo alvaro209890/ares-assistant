@@ -17,7 +17,8 @@ import type {
   CodeTerminalResult,
   CodeWorkspaceSummary,
   CodeWriteResult,
-  CommandClassification
+  CommandClassification,
+  ProjectHealth
 } from '../shared/types'
 import { normalizeTemplate, slug, templateFiles } from './scaffold'
 
@@ -157,6 +158,73 @@ function languageFor(file: string): string {
   return LANGUAGE_BY_EXT[extname(file).toLowerCase()] || 'Outros'
 }
 
+// Comandos que costumam demorar (instalar, compilar, empacotar, testar suites). Usado
+// para o Ares avisar "iniciando a tarefa, senhor" ANTES de bloquear na execução, em vez
+// de deixar o usuário no vácuo esperando.
+const LONG_RUNNING_RE =
+  /\b(install|ci|build|compile|bundle|rebuild|test|tsc|typecheck|webpack|rollup|electron-builder|docker\s+(build|compose)|make|cargo\s+(build|test|run)|go\s+(build|test)|gradlew?|mvn|pip\s+install|poetry\s+install|composer\s+install)\b/i
+
+/** Heurística: o comando provavelmente é de longa duração (build/install/test)? */
+export function isLongRunningCommand(command: string): boolean {
+  const c = String(command || '').trim().toLowerCase()
+  if (!c) return false
+  // "npm i" / "yarn add" / "pnpm install" e afins
+  if (/\b(npm|pnpm|yarn|bun)\b\s+(install|add|ci|i|update|up|dedupe)\b/.test(c)) return true
+  return LONG_RUNNING_RE.test(c)
+}
+
+/**
+ * Após editar/aplicar um patch, qual comando de validação oferecer proativamente.
+ * Prioriza teste; na ausência, build/typecheck/lint. Retorna null se nada se aplicar.
+ */
+export function proactiveValidationCommand(
+  scripts: Record<string, string> | undefined,
+  packageManager = 'npm'
+): string | null {
+  if (!scripts) return null
+  const pm = packageManager || 'npm'
+  if (scripts.test) return `${pm} test`
+  for (const name of ['build', 'typecheck', 'lint', 'verify'] as const) {
+    if (scripts[name]) return `${pm} run ${name}`
+  }
+  return null
+}
+
+/** Saúde estrutural (rápida, SEM rodar comandos) a partir de sinais já coletados. */
+export function structuralHealth(input: {
+  dirty: boolean
+  hasPackage: boolean
+  hasTestScript: boolean
+  hasLockfile: boolean
+  timedOut: boolean
+}): ProjectHealth {
+  const signals: string[] = []
+  if (input.dirty) signals.push('há alterações sem commit')
+  if (input.hasPackage && !input.hasTestScript) signals.push('sem script de teste configurado')
+  if (input.hasPackage && !input.hasLockfile) signals.push('sem lockfile — dependências podem variar')
+  if (input.timedOut) signals.push('análise parcial: projeto grande')
+  const label = signals.length ? `pontos de atenção: ${signals.join('; ')}` : 'estrutura em ordem'
+  return { ok: signals.length === 0, label, signals }
+}
+
+/** Saúde após o diagnóstico real (typecheck/lint/test executados). Falável. */
+export function assessDiagnosisHealth(checks: CodeDiagnosisCheck[]): ProjectHealth {
+  const ran = checks.filter((c) => c.ran)
+  const failed = ran.filter((c) => !c.ok)
+  if (!ran.length) {
+    return { ok: true, label: 'sem checagens automáticas disponíveis', signals: [] }
+  }
+  if (!failed.length) {
+    return { ok: true, label: `tudo verde: ${ran.map((c) => c.name).join(', ')} passaram`, signals: [] }
+  }
+  const names = failed.map((c) => c.name)
+  return {
+    ok: false,
+    label: `atenção: ${names.join(' e ')} ${names.length > 1 ? 'falharam' : 'falhou'} (${failed.length} de ${ran.length})`,
+    signals: names
+  }
+}
+
 function isLikelyText(path: string, maxBytes: number): boolean {
   try {
     const st = statSync(path)
@@ -243,6 +311,15 @@ export function summarizeCodeWorkspace(cfg: AppConfig, requested = ''): CodeWork
   if (files.some((f) => f.endsWith('electron.vite.config.ts'))) hints.push('Electron + Vite detectado')
   if (timedOut) hints.push('analise parcial: limite de tempo atingido para manter a voz responsiva')
 
+  const hasPackage = files.some((f) => f === 'package.json')
+  const health = structuralHealth({
+    dirty: !!status,
+    hasPackage,
+    hasTestScript: !!pkg.scripts?.test,
+    hasLockfile: files.some((f) => /(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb)$/.test(f)),
+    timedOut
+  })
+
   return {
     root,
     name,
@@ -252,7 +329,8 @@ export function summarizeCodeWorkspace(cfg: AppConfig, requested = ''): CodeWork
     languages,
     files,
     ignored: ignored.slice(0, 80),
-    hints
+    hints,
+    health
   }
 }
 
@@ -907,5 +985,5 @@ export function diagnoseProject(cfg: AppConfig, opts: { root?: string } = {}): C
 
   const ran = checks.filter((c) => c.ran)
   const ok = ran.length > 0 ? ran.every((c) => c.ok) : true
-  return { root, name, ok, checks, hints }
+  return { root, name, ok, checks, hints, health: assessDiagnosisHealth(checks) }
 }

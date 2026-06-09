@@ -6,17 +6,21 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { AppConfig } from '../src/shared/types'
 import {
   applyCodePatch,
+  assessDiagnosisHealth,
   buildCodeIndex,
   classifyCommand,
   diagnoseProject,
+  isLongRunningCommand,
   planDiagnosis,
   previewCodePatch,
+  proactiveValidationCommand,
   readCodeFile,
   runCodeCommand,
   runCodeGit,
   runCodeTerminal,
   scaffoldProject,
   searchCode,
+  structuralHealth,
   summarizeCodeWorkspace,
   writeCodeFile
 } from '../src/main/code'
@@ -299,7 +303,65 @@ describe('criar / scaffold / diagnóstico', () => {
     const diag = diagnoseProject(cfg)
     expect(diag.checks).toHaveLength(0)
     expect(diag.ok).toBe(true)
+    expect(diag.health.ok).toBe(true)
     expect(diag.hints.join(' ')).toMatch(/package\.json/)
     rmSync(empty, { recursive: true, force: true })
+  })
+})
+
+describe('modo programador JARVIS — proatividade e saúde', () => {
+  it('reconhece comandos de longa duração (build/install/test)', () => {
+    expect(isLongRunningCommand('npm install')).toBe(true)
+    expect(isLongRunningCommand('npm i left-pad')).toBe(true)
+    expect(isLongRunningCommand('yarn add react')).toBe(true)
+    expect(isLongRunningCommand('npm run build')).toBe(true)
+    expect(isLongRunningCommand('npm test')).toBe(true)
+    expect(isLongRunningCommand('docker build .')).toBe(true)
+    expect(isLongRunningCommand('git status')).toBe(false)
+    expect(isLongRunningCommand('ls -la')).toBe(false)
+    expect(isLongRunningCommand('')).toBe(false)
+  })
+
+  it('sugere a validação certa após editar (teste > build > typecheck)', () => {
+    expect(proactiveValidationCommand({ test: 'vitest', build: 'vite build' }, 'npm')).toBe('npm test')
+    expect(proactiveValidationCommand({ build: 'vite build' }, 'npm')).toBe('npm run build')
+    expect(proactiveValidationCommand({ typecheck: 'tsc' }, 'pnpm')).toBe('pnpm run typecheck')
+    expect(proactiveValidationCommand(undefined, 'npm')).toBeNull()
+    expect(proactiveValidationCommand({ start: 'node .' }, 'npm')).toBeNull()
+  })
+
+  it('avalia a saúde estrutural sem rodar comandos', () => {
+    const limpo = structuralHealth({ dirty: false, hasPackage: true, hasTestScript: true, hasLockfile: true, timedOut: false })
+    expect(limpo.ok).toBe(true)
+    expect(limpo.label).toMatch(/em ordem/)
+
+    const sujo = structuralHealth({ dirty: true, hasPackage: true, hasTestScript: false, hasLockfile: true, timedOut: false })
+    expect(sujo.ok).toBe(false)
+    expect(sujo.signals).toContain('há alterações sem commit')
+    expect(sujo.signals).toContain('sem script de teste configurado')
+  })
+
+  it('resume a saúde após o diagnóstico de forma falável', () => {
+    expect(assessDiagnosisHealth([]).label).toMatch(/sem checagens/)
+
+    const verde = assessDiagnosisHealth([
+      { name: 'typecheck', command: 'npm run typecheck', ran: true, ok: true, code: 0, summary: '' },
+      { name: 'test', command: 'npm test', ran: true, ok: true, code: 0, summary: '' }
+    ])
+    expect(verde.ok).toBe(true)
+    expect(verde.label).toMatch(/tudo verde/)
+
+    const vermelho = assessDiagnosisHealth([
+      { name: 'typecheck', command: 'npm run typecheck', ran: true, ok: true, code: 0, summary: '' },
+      { name: 'test', command: 'npm test', ran: true, ok: false, code: 1, summary: '2 falhas' }
+    ])
+    expect(vermelho.ok).toBe(false)
+    expect(vermelho.label).toMatch(/atenção.*test/)
+  })
+
+  it('expõe a saúde estrutural no resumo do workspace', () => {
+    const summary = summarizeCodeWorkspace(config())
+    expect(summary.health).toBeDefined()
+    expect(typeof summary.health?.label).toBe('string')
   })
 })
