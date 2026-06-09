@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.24.0 - 2026-06-09
+
+Foco: deixar a voz **muito melhor e mais fluida** no Linux e no Windows, sem novas dependências.
+
+- **Piper neural agora é o padrão também no Windows**: antes o Windows usava a voz robótica do SAPI primeiro e só caía no Piper por falha — agora a voz neural pt-BR (estilo JARVIS) é a primeira tentativa nos dois sistemas, com a Web Speech como reserva (o macOS, sem binário do Piper, segue na Web Speech).
+- **Números e símbolos falados por extenso (pt-BR)**: moeda (`R$ 1.250,90` → "mil duzentos e cinquenta reais e noventa centavos"), porcentagem (`50%` → "cinquenta por cento"), hora (`14:30` → "quatorze e trinta"), versão (`v0.24` → "versão zero ponto vinte e quatro"), ordinais (`1º` → "primeiro") e símbolos isolados (`&`, `+`, `=`, `@`, `25 °C`). A fala deixa de soletrar dígitos de forma estranha.
+- **Fala menos apressada**: as vírgulas voltaram a ser pausas naturais (antes eram removidas, atropelando as frases) e o silêncio entre frases ficou um pouco maior (uma respiração curta).
+- **Mais expressiva**: além do ritmo, a textura da voz varia com o conteúdo — respostas de erro saem mais secas e diretas; confirmações de sucesso, mais calorosas.
+- **Resposta quase instantânea e contínua**: o Ares mantém o motor de voz "quente" (modelo já carregado) entre as falas e adianta a síntese da próxima frase enquanto a atual toca, eliminando os silêncios entre frases. Se algo falhar, cai automaticamente para o modo anterior, sem travar.
+
 ## 0.20.1 - 2026-06-08
 
 - **Clima com cidade + estado**: a busca aceitava só o nome puro da cidade, então "Querência, MT" (formato salvo pelo onboarding) dava "Não encontrei a cidade". Agora separa cidade e UF/estado, expande a sigla (MT → Mato Grosso) e usa a região para desambiguar cidades homônimas (ex.: Querência-MT × Querência-RS). Cobertura por testes unitários.
