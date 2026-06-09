@@ -98,15 +98,18 @@ describe('tts', () => {
     expect(speakCalls).toEqual(['teste curto'])
   })
 
-  it('em auto no Windows tenta Web Speech antes do Piper', async () => {
+  it('em auto no Windows usa o Piper primeiro (voz neural)', async () => {
     const { speakCalls } = installSpeechMock()
+    const { playCalls } = installAudioMock()
+    window.ares.tts.synthesize = vi.fn(async () => new ArrayBuffer(44100))
 
-    const done = speak('fala direta', { engine: 'auto' })
+    const done = speak('fala neural', { engine: 'auto' })
     await vi.advanceTimersByTimeAsync(20)
     await done
 
-    expect(window.ares.tts.synthesize).not.toHaveBeenCalled()
-    expect(speakCalls).toEqual(['fala direta'])
+    expect(window.ares.tts.synthesize).toHaveBeenCalledTimes(1)
+    expect(playCalls).toEqual(['blob:mock-wav'])
+    expect(speakCalls).toEqual([]) // Web Speech não foi necessário
   })
 
   it('fala a fila em ordem sem sobrepor frases no fallback web', async () => {
@@ -137,21 +140,18 @@ describe('tts', () => {
     expect(onEnd).toHaveBeenCalledTimes(1)
   })
 
-  it('cai para Piper quando Web Speech falha em modo auto', async () => {
-    const { speakCalls } = installSpeechMock({ autoStart: false })
-    const { playCalls } = installAudioMock()
-    window.ares.tts.synthesize = vi.fn(async () => new ArrayBuffer(44100))
+  it('cai para Web Speech quando o Piper falha em modo auto', async () => {
+    const { speakCalls } = installSpeechMock()
+    installAudioMock()
+    window.ares.tts.synthesize = vi.fn(() => Promise.reject(new Error('piper indisponível')))
 
-    const done = speak('usar fallback neural', { engine: 'auto' })
-    await vi.advanceTimersByTimeAsync(2600)
-    await vi.advanceTimersByTimeAsync(140)
-    await vi.advanceTimersByTimeAsync(2600)
-    await vi.advanceTimersByTimeAsync(20)
+    const done = speak('fallback web', { engine: 'auto' })
+    await vi.advanceTimersByTimeAsync(500) // esgota as tentativas do Piper (com retry)
+    await vi.advanceTimersByTimeAsync(20) // onend do Web Speech
     await done
 
-    expect(speakCalls).toEqual(['usar fallback neural', 'usar fallback neural'])
-    expect(window.ares.tts.synthesize).toHaveBeenCalledTimes(1)
-    expect(playCalls).toEqual(['blob:mock-wav'])
+    expect(window.ares.tts.synthesize).toHaveBeenCalledTimes(2) // PIPER_MAX_RETRIES
+    expect(speakCalls).toEqual(['fallback web'])
   })
 
   it('nao quebra fala em dois-pontos ou ponto-e-virgula', () => {
@@ -162,10 +162,15 @@ describe('tts', () => {
     expect(split.rest).toBe(' Tudo certo')
   })
 
-  it('normaliza pontuacao antes da fala', () => {
+  it('limpa markdown/ruído mas PRESERVA vírgulas e números para a prosódia', () => {
     installSpeechMock()
 
-    expect(normalizeSpeechText('Ares: pronto, senhor; sistemas online...')).toBe('Ares. pronto senhor sistemas online.')
+    // vírgulas, dois-pontos e ponto-e-vírgula são preservados (a fala ganha pausas naturais);
+    // números crus passam intactos para a normalização no processo principal.
+    expect(normalizeSpeechText('Ares: pronto, senhor; sistemas online...')).toBe(
+      'Ares: pronto, senhor; sistemas online.'
+    )
+    expect(normalizeSpeechText('total R$ 1.250,90')).toBe('total R$ 1.250,90')
   })
 
   it('quebra texto longo sem pontuacao para nao atrasar a voz', () => {

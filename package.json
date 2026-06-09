@@ -1,6 +1,6 @@
 {
   "name": "ares-assistant",
-  "version": "0.23.0",
+  "version": "0.24.0",
   "description": "ARES — Assistente de IA pessoal estilo JARVIS (app desktop Electron)",
   "author": "acer",
   "license": "MIT",

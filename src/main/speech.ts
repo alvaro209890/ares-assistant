@@ -5,8 +5,12 @@
 // pausas curtas entre frases e ritmo que varia com o conteúdo (erro = direto e rápido,
 // sucesso = calmo e elegante).
 
-/** Silêncio entre frases (s). Curto, para uma fala contínua e menos robótica. */
-export const PIPER_SENTENCE_SILENCE = '0.025'
+/**
+ * Silêncio entre frases (s). Uma respiração curta — natural sem ficar lento. Com as
+ * vírgulas agora preservadas (ver prepareText), as pausas internas voltam a existir, então
+ * este valor cobre apenas a separação entre frases.
+ */
+export const PIPER_SENTENCE_SILENCE = '0.15'
 
 // Nomes das letras em pt-BR, para soletrar siglas que o Piper não pronuncia bem.
 const LETTER_PT: Record<string, string> = {
@@ -82,20 +86,214 @@ export function computeLengthScale(rate: number | undefined, tone: SpeechTone = 
   return clamp(ls, 0.45, 2.2)
 }
 
+// ---------------------------------------------------------------------------
+// Normalização de números e símbolos para pt-BR.
+// O Piper (e voz neural em geral) lê números e símbolos de forma pobre/ambígua.
+// Escrevê-los por extenso é a maior alavanca de qualidade percebida e independe do
+// modelo. Tudo aqui é puro e testável. Convenção pt-BR: ponto = milhar, vírgula = decimal.
+// ---------------------------------------------------------------------------
+
+const UNITS = [
+  'zero', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove',
+  'dez', 'onze', 'doze', 'treze', 'quatorze', 'quinze', 'dezesseis', 'dezessete',
+  'dezoito', 'dezenove'
+]
+const TENS = ['', '', 'vinte', 'trinta', 'quarenta', 'cinquenta', 'sessenta', 'setenta', 'oitenta', 'noventa']
+const HUNDREDS = [
+  '', 'cento', 'duzentos', 'trezentos', 'quatrocentos', 'quinhentos', 'seiscentos',
+  'setecentos', 'oitocentos', 'novecentos'
+]
+const ORDINALS_M = [
+  '', 'primeiro', 'segundo', 'terceiro', 'quarto', 'quinto', 'sexto', 'sétimo', 'oitavo',
+  'nono', 'décimo'
+]
+const ORDINALS_F = [
+  '', 'primeira', 'segunda', 'terceira', 'quarta', 'quinta', 'sexta', 'sétima', 'oitava',
+  'nona', 'décima'
+]
+
+function under1000(n: number): string {
+  if (n === 0) return ''
+  if (n === 100) return 'cem'
+  const parts: string[] = []
+  const h = Math.floor(n / 100)
+  const rem = n % 100
+  if (h) parts.push(HUNDREDS[h])
+  if (rem) {
+    if (rem < 20) parts.push(UNITS[rem])
+    else {
+      const t = Math.floor(rem / 10)
+      const u = rem % 10
+      parts.push(u ? `${TENS[t]} e ${UNITS[u]}` : TENS[t])
+    }
+  }
+  return parts.join(' e ')
+}
+
+/** Inteiro 0..999999 por extenso (pt-BR). Acima disso devolve null (mantém os dígitos). */
+export function intToPtBR(n: number): string | null {
+  if (!Number.isFinite(n) || n < 0 || Math.floor(n) !== n) return null
+  if (n === 0) return 'zero'
+  if (n >= 1000000) return null
+  const thousands = Math.floor(n / 1000)
+  const rest = n % 1000
+  if (!thousands) return under1000(rest)
+  const thousandsPart = thousands === 1 ? 'mil' : `${under1000(thousands)} mil`
+  if (!rest) return thousandsPart
+  const connector = rest < 100 || rest % 100 === 0 ? ' e ' : ' '
+  return `${thousandsPart}${connector}${under1000(rest)}`
+}
+
+/** Lê dígitos um a um (para frações longas e códigos). */
+function digitsPtBR(digits: string): string {
+  return digits.split('').map((d) => UNITS[Number(d)] ?? d).join(' ')
+}
+
+function decimalTailPtBR(frac: string): string {
+  // 1 dígito → palavra ("cinco"); 2+ → dígito a dígito (evita "três vírgula catorze"
+  // ambíguo com "um quatro"). Mantém zeros à esquerda audíveis ("zero cinco").
+  if (frac.length === 1) return UNITS[Number(frac)] ?? frac
+  return digitsPtBR(frac)
+}
+
+function moneyPtBR(intPart: string, centavos: string | undefined): string {
+  const reais = Number(intPart.replace(/\./g, ''))
+  const reaisWords = intToPtBR(reais)
+  if (reaisWords == null) return ''
+  const unit = reais === 1 ? 'real' : 'reais'
+  let out = `${reaisWords} ${unit}`
+  if (centavos && centavos !== '00') {
+    const c = Number(centavos)
+    const cWords = intToPtBR(c)
+    if (cWords != null) out += ` e ${cWords} ${c === 1 ? 'centavo' : 'centavos'}`
+  }
+  return out
+}
+
 /**
- * Pré-processa o texto para reduzir pausas excessivas em vírgulas/pontuação e
- * pronunciar siglas técnicas. O Piper pausa bastante em vírgulas; removemos essas
- * pausas internas e mantemos pontuação forte para preservar a respiração entre frases.
+ * Normaliza números e construções numéricas comuns para pt-BR falado. A ordem importa:
+ * moeda/versão/hora antes do decimal genérico, e o inteiro simples por último.
+ */
+export function normalizePtNumbers(text: string): string {
+  let t = String(text || '')
+  // Moeda: R$ 1.250,90
+  t = t.replace(/R\$\s?(\d{1,3}(?:\.\d{3})*|\d+)(?:,(\d{2}))?/g, (m, int: string, cents?: string) => {
+    const words = moneyPtBR(int, cents)
+    return words || m
+  })
+  // Versão com 'v': v0.24 / v1.2.3 (inequívoco).
+  t = t.replace(/\bv(\d+(?:\.\d+)+)\b/gi, (_m, ver: string) => `versão ${versionToPtBR(ver)}`)
+  // Versão sem 'v' (2+ pontos), EXCETO agrupamento de milhar (todos os grupos de 3 dígitos,
+  // ex.: 1.250.000), que é deixado para a regra de milhar/inteiro.
+  t = t.replace(/\b\d+(?:\.\d+){2,}\b/g, (m) => (/^\d{1,3}(?:\.\d{3})+$/.test(m) ? m : versionToPtBR(m)))
+  // Hora: 14:30 / 09:05
+  t = t.replace(/\b([01]?\d|2[0-3]):([0-5]\d)\b/g, (m, h: string, min: string) => {
+    const hWords = intToPtBR(Number(h))
+    if (hWords == null) return m
+    if (min === '00') return `${hWords} ${Number(h) === 1 ? 'hora' : 'horas'}`
+    const mWords = intToPtBR(Number(min))
+    return mWords == null ? m : `${hWords} e ${mWords}`
+  })
+  // Porcentagem: 10% / 3,5%
+  t = t.replace(/(\d{1,3}(?:\.\d{3})*|\d+)(?:,(\d+))?\s?%/g, (m, int: string, frac?: string) => {
+    const base = numberPhrase(int, frac)
+    return base ? `${base} por cento` : m
+  })
+  // Ordinais 1º..10º / 1ª..10ª (acima de 10 mantém o token original)
+  t = t.replace(/\b(\d{1,2})\s?([ºª°])/g, (m, num: string, sym: string) => {
+    const idx = Number(num)
+    if (idx < 1 || idx > 10) return m
+    return sym === 'ª' ? ORDINALS_F[idx] : ORDINALS_M[idx]
+  })
+  // Decimal genérico: 3,5 / 1.250,90
+  t = t.replace(/\b(\d{1,3}(?:\.\d{3})*|\d+),(\d+)\b/g, (m, int: string, frac: string) => {
+    const intWords = intToPtBR(Number(int.replace(/\./g, '')))
+    if (intWords == null) return m
+    return `${intWords} vírgula ${decimalTailPtBR(frac)}`
+  })
+  // Inteiro com milhar: 1.000 / 12.500
+  t = t.replace(/\b\d{1,3}(?:\.\d{3})+\b/g, (m) => {
+    const words = intToPtBR(Number(m.replace(/\./g, '')))
+    return words || m
+  })
+  // Inteiro simples (até 6 dígitos; acima mantém os dígitos para não virar locução enorme).
+  t = t.replace(/\b\d+\b/g, (m) => {
+    if (m.length > 6) return m
+    const words = intToPtBR(Number(m))
+    return words || m
+  })
+  return t
+}
+
+/** Lê uma string de versão (já sem 'v') como segmentos por extenso unidos por "ponto". */
+function versionToPtBR(ver: string): string {
+  return ver
+    .split('.')
+    .map((seg) => intToPtBR(Number(seg)) ?? digitsPtBR(seg))
+    .join(' ponto ')
+}
+
+/** Frase para um número possivelmente decimal (usado em %). */
+function numberPhrase(intPart: string, frac?: string): string {
+  const intWords = intToPtBR(Number(intPart.replace(/\./g, '')))
+  if (intWords == null) return ''
+  return frac ? `${intWords} vírgula ${decimalTailPtBR(frac)}` : intWords
+}
+
+/** Símbolos isolados (cercados por espaços) por extenso. Conservador de propósito. */
+export function normalizeSymbols(text: string): string {
+  return String(text || '')
+    .replace(/(\d)\s?°\s?C\b/g, '$1 graus')
+    .replace(/\s&\s/g, ' e ')
+    .replace(/\s\+\s/g, ' mais ')
+    .replace(/\s=\s/g, ' igual a ')
+    .replace(/\s@\s/g, ' arroba ')
+}
+
+/**
+ * Pré-processa o texto para a síntese: normaliza números/símbolos, pronuncia siglas
+ * técnicas e ajusta a pontuação. As vírgulas são PRESERVADAS (viram pausa curta natural no
+ * Piper) — antes eram apagadas, o que deixava a fala apressada e monótona. Mantemos a
+ * pontuação forte para a respiração entre frases.
  */
 export function prepareText(text: string): string {
-  return expandTechAcronyms(text)
+  return expandTechAcronyms(normalizeSymbols(normalizePtNumbers(text)))
     .replace(/\b(senhor|senhora)\s*[,;:]\s*/gi, '$1. ')
-    .replace(/\s*[,;]\s*/g, ' ')
+    .replace(/\s*;\s*/g, ', ')
+    .replace(/\s*,\s*/g, ', ')
     .replace(/\.{3,}|…/g, '. ')
-    .replace(/\s*[—–]\s*/g, ' ')
-    .replace(/\s*:\s*/g, ' ')
-    .replace(/\s+([.!?])/g, '$1')
+    .replace(/\s*[—–]\s*/g, ', ')
+    .replace(/\s*:\s*/g, ', ')
+    .replace(/\s+([.!?,])/g, '$1')
     .replace(/([.!?]){2,}/g, '$1')
+    .replace(/,{2,}/g, ',')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+export interface SpeechNoise {
+  noiseScale: number
+  noiseW: number
+}
+
+/**
+ * Parâmetros de expressividade do Piper por tom. noise_scale controla a variação
+ * timbral; noise_w a variação de ritmo/duração. Pequenas variações por tom dão vida à
+ * fala (erro = mais seco/nítido; sucesso = mais caloroso) sem distorcer. Base = defaults
+ * do Piper (0.667 / 0.8).
+ */
+export function computeNoise(tone: SpeechTone = 'neutro'): SpeechNoise {
+  let noiseScale = 0.667
+  let noiseW = 0.8
+  if (tone === 'erro') {
+    noiseScale = 0.6
+    noiseW = 0.75
+  } else if (tone === 'sucesso') {
+    noiseScale = 0.7
+    noiseW = 0.86
+  }
+  return {
+    noiseScale: clamp(noiseScale, 0.55, 0.72),
+    noiseW: clamp(noiseW, 0.7, 0.9)
+  }
 }

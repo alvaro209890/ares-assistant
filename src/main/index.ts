@@ -15,6 +15,7 @@ import { openRouterOAuth } from './oauth'
 import { getProvider } from '../shared/providers'
 import { startReminders } from './notify'
 import { synthesize, listPiperVoices, isPiperReady, ensurePiper } from './piper'
+import { shutdownPiperPool } from './piperEngine'
 import { getWeather, getWeatherAt, getNews, reverseGeocode } from './tools'
 import {
   loadMemory,
@@ -134,6 +135,7 @@ app.on('window-all-closed', () => {
 
 app.on('will-quit', () => {
   destroyTray()
+  shutdownPiperPool()
 })
 
 function registerIpc(): void {

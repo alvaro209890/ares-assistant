@@ -11,6 +11,8 @@ let currentWebStop: (() => void) | null = null
 let piperStatusCache: { ready: boolean; voices: string[] } | null = null
 let piperStatusAge = 0
 let piperDisabledUntil = 0
+// Pipelining: enquanto uma frase toca, a próxima já é sintetizada (1 item adiantado).
+let prefetched: { key: string; promise: Promise<ArrayBuffer> } | null = null
 
 const PIPER_STATUS_TIMEOUT_MS = 1200
 const PIPER_ATTEMPT_TIMEOUT_MS = 3500
@@ -87,17 +89,18 @@ function timeoutError(label: string): Error {
 }
 
 export function normalizeSpeechText(input: string): string {
+  // PRESERVA vírgulas, dois-pontos e números: a normalização pesada (números por extenso,
+  // moeda, hora, versão, símbolos, pausas) é feita no processo principal por prepareText
+  // (src/main/speech.ts), que precisa do texto cru. Apagar vírgulas/pontos aqui mutilaria
+  // "R$ 1.250,90" e "14:30" antes deles chegarem lá. Aqui só limpamos markdown e ruído.
   return String(input || '')
     .replace(/```[\s\S]*?```/g, 'trecho de codigo omitido.')
     .replace(/`([^`]{1,100})`/g, '$1')
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")
-    .replace(/\s*[,;]\s*/g, ' ')
-    .replace(/\s*[:]\s*/g, '. ')
-    .replace(/\s*[—–]\s*/g, ' ')
     .replace(/\.{3,}|…/g, '. ')
     .replace(/([.!?]){2,}/g, '$1')
-    .replace(/\s+([.!?])/g, '$1')
+    .replace(/\s+([.!?,;:])/g, '$1')
     .replace(/\s+/g, ' ')
     .trim()
 }
@@ -249,12 +252,43 @@ async function synthesizeWithRetry(text: string, voice?: string, rate?: number):
   throw lastErr instanceof Error ? lastErr : new Error('Piper: todas as tentativas falharam.')
 }
 
+function prefetchKey(cleanText: string, opts: SpeakOptions): string {
+  return `${opts.piperVoice || ''}|${opts.rate ?? ''}|${cleanText}`
+}
+
+/** Dispara a síntese da próxima frase (Piper) durante a reprodução da atual. */
+function startPrefetch(text: string, opts: SpeakOptions): void {
+  if (!prefersPiper(opts) || Date.now() < piperDisabledUntil) return
+  const clean = normalizeSpeechText(text)
+  if (!clean) return
+  const key = prefetchKey(clean, opts)
+  if (prefetched?.key === key) return
+  const promise = synthesizeWithRetry(clean, opts.piperVoice, opts.rate)
+  promise.catch(() => {}) // evita unhandledRejection; o consumidor relança se precisar
+  prefetched = { key, promise }
+}
+
+/** Consome a síntese pré-buscada para este texto, se existir e bater a chave. */
+async function takePrefetched(cleanText: string, opts: SpeakOptions): Promise<ArrayBuffer | null> {
+  if (!prefetched || prefetched.key !== prefetchKey(cleanText, opts)) return null
+  const p = prefetched.promise
+  prefetched = null
+  try {
+    return await p
+  } catch {
+    return null
+  }
+}
+
 async function piperSpeak(text: string, opts: SpeakOptions, force = false): Promise<boolean> {
   try {
     if (!force && Date.now() < piperDisabledUntil) return false
     const status = await getPiperStatus()
     if (!status.ready || !status.voices.length) return false
-    const wav = opts._prefetchedWav ?? (await synthesizeWithRetry(text, opts.piperVoice, opts.rate))
+    const wav =
+      opts._prefetchedWav ??
+      (await takePrefetched(text, opts)) ??
+      (await synthesizeWithRetry(text, opts.piperVoice, opts.rate))
     const blob = new Blob([wav], { type: 'audio/wav' })
     const url = URL.createObjectURL(blob)
     const audio = new Audio(url)
@@ -307,7 +341,9 @@ async function piperSpeak(text: string, opts: SpeakOptions, force = false): Prom
 
 function prefersPiper(opts: SpeakOptions): boolean {
   const platform = window.ares.system.platform
-  return opts.engine === 'piper' || (opts.engine === 'auto' && platform === 'linux')
+  // Piper neural é o padrão no Linux E no Windows (muito mais natural que SAPI/Web Speech);
+  // o Web Speech fica como fallback. macOS não tem binário do Piper -> usa Web Speech.
+  return opts.engine === 'piper' || (opts.engine === 'auto' && (platform === 'linux' || platform === 'win32'))
 }
 
 async function speakInternal(text: string, opts: SpeakOptions, cancelBefore: boolean): Promise<void> {
@@ -336,6 +372,7 @@ async function speakInternal(text: string, opts: SpeakOptions, cancelBefore: boo
 
 export async function speak(text: string, opts: SpeakOptions = {}): Promise<void> {
   sentenceQueue = []
+  prefetched = null
   queueGeneration++
   await speakInternal(text, opts, true)
   resolveIdle()
@@ -366,6 +403,9 @@ async function drainQueue(): Promise<void> {
   const generation = queueGeneration
   while (sentenceQueue.length && generation === queueGeneration) {
     const { text, opts } = sentenceQueue.shift()!
+    // Adianta a síntese da próxima frase enquanto esta toca -> fala quase contínua.
+    const next = sentenceQueue[0]
+    if (next) startPrefetch(next.text, next.opts)
     await speakInternal(text, opts, false)
     if (generation !== queueGeneration) break
   }
@@ -388,6 +428,10 @@ export function whenSpeechQueueIdle(): Promise<void> {
 
 export function clearSpeechQueue(): void {
   sentenceQueue = []
+  prefetched = null
+  // Reset hard do subsistema de fala (barge-in / novo turno): zera também o "cooldown" do
+  // Piper para não carregar penalidade transitória de um turno anterior ao começar outro.
+  piperDisabledUntil = 0
   queueGeneration++
   cancelSpeech()
   draining = false

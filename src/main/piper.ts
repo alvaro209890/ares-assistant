@@ -3,7 +3,8 @@ import { spawn } from 'child_process'
 import { existsSync, readdirSync, mkdirSync, writeFileSync, rmSync, chmodSync } from 'fs'
 import { join, dirname } from 'path'
 import { tmpdir } from 'os'
-import { PIPER_SENTENCE_SILENCE, computeLengthScale, detectTone, prepareText } from './speech'
+import { PIPER_SENTENCE_SILENCE, computeLengthScale, computeNoise, detectTone, prepareText } from './speech'
+import { warmSynthesize, type PiperSynthParams } from './piperEngine'
 
 // Voz neural local via Piper (https://github.com/rhasspy/piper).
 // Binário + vozes ficam em userData/piper. É o motor padrão no Linux E no Windows
@@ -63,36 +64,63 @@ function resolveVoice(voice?: string): string {
   return first ? join(dir, `${first}.onnx`) : ''
 }
 
-/** Sintetiza texto -> WAV via stdout (sem arquivo temporário, menor latência). */
-export function synthesize(text: string, opts: { voice?: string; rate?: number } = {}): Promise<Buffer> {
+/** Variáveis de ambiente para o processo do Piper achar suas libs (Linux e Windows). */
+function piperEnv(binDir: string): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    LD_LIBRARY_PATH: `${binDir}:${process.env.LD_LIBRARY_PATH || ''}`,
+    PATH: `${binDir}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH || ''}`
+  }
+}
+
+/**
+ * Sintetiza texto -> WAV. Tenta primeiro o engine "quente" (processo persistente, modelo
+ * já carregado = latência mínima) e cai no modo um-processo-por-frase em qualquer falha.
+ *
+ * Ritmo e expressividade dinâmicos (estilo JARVIS): o tom é inferido do conteúdo — erro
+ * fica mais direto/seco, sucesso mais calmo/caloroso. prepareText cuida da pronúncia
+ * (números, siglas) e das pausas; é aplicado uma única vez aqui.
+ */
+export async function synthesize(text: string, opts: { voice?: string; rate?: number } = {}): Promise<Buffer> {
+  const bin = binPath()
+  const model = resolveVoice(opts.voice)
+  if (!existsSync(bin) || !model) throw new Error('Piper indisponível.')
+
+  const tone = detectTone(text)
+  const noise = computeNoise(tone)
+  const params: PiperSynthParams = {
+    bin,
+    model,
+    lengthScale: computeLengthScale(opts.rate, tone).toFixed(3),
+    noiseScale: noise.noiseScale.toFixed(3),
+    noiseW: noise.noiseW.toFixed(3),
+    sentenceSilence: PIPER_SENTENCE_SILENCE,
+    env: piperEnv(dirname(bin)),
+    cwd: dirname(bin)
+  }
+  const prepared = prepareText(text)
+
+  try {
+    return await warmSynthesize(params, prepared)
+  } catch {
+    return await synthesizeOneShot(params, prepared)
+  }
+}
+
+/** Caminho de reserva: um processo por frase, áudio cru via stdout. */
+function synthesizeOneShot(params: PiperSynthParams, prepared: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const bin = binPath()
-    const model = resolveVoice(opts.voice)
-    if (!existsSync(bin) || !model) return reject(new Error('Piper indisponível.'))
-
-    // Ritmo dinâmico (estilo JARVIS): o tom é inferido do próprio conteúdo — erro fica
-    // mais direto/rápido, sucesso mais calmo/elegante. O texto cru entra na detecção;
-    // o prepareText cuida da pronúncia (siglas técnicas) e das pausas.
-    const lengthScale = computeLengthScale(opts.rate, detectTone(text)).toFixed(3)
-
-    const binDir = dirname(bin)
-    const env = {
-      ...process.env,
-      LD_LIBRARY_PATH: `${binDir}:${process.env.LD_LIBRARY_PATH || ''}`,
-      PATH: `${binDir}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH || ''}`
-    }
     const child = spawn(
-      bin,
+      params.bin,
       [
-        '--model',
-        model,
-        '--length_scale',
-        lengthScale,
-        '--sentence_silence',
-        PIPER_SENTENCE_SILENCE,
+        '--model', params.model,
+        '--length_scale', params.lengthScale,
+        '--noise_scale', params.noiseScale,
+        '--noise_w', params.noiseW,
+        '--sentence_silence', params.sentenceSilence,
         '--output-raw'
       ],
-      { env, cwd: binDir }
+      { env: params.env, cwd: params.cwd }
     )
     const chunks: Buffer[] = []
     let done = false
@@ -118,7 +146,7 @@ export function synthesize(text: string, opts: { voice?: string; rate?: number }
       finish(() => resolve(rawToWav(raw, 22050, 1, 16)))
     })
     try {
-      child.stdin.write(prepareText(text))
+      child.stdin.write(prepared)
       child.stdin.end()
     } catch (e) {
       child.kill()

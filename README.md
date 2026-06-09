@@ -70,7 +70,7 @@ Campos importantes:
 | `grog.apiKey` | chave Groq obrigatoria para transcricao de voz |
 | `nineRouter.baseUrl` | endpoint OpenAI-compatible do cerebro |
 | `nineRouter.model` | modelo de texto selecionado |
-| `tts.engine` | `auto` (Web Speech primeiro no Windows, Piper primeiro no Linux, sempre com fallback), `piper` ou `web` |
+| `tts.engine` | `auto` (Piper neural primeiro no Linux e no Windows, Web Speech como fallback; macOS usa Web Speech), `piper` ou `web` |
 | `tts.piperVoice` | voz neural do Piper (padrao `pt_BR-faber-medium`) |
 | `tts.webVoiceURI` | voz do sistema usada no fallback Web Speech |
 | `integrations.location.city` | cidade definida no onboarding |
@@ -135,11 +135,17 @@ Ao reportar erros de terminal, o Ares fala apenas a **causa raiz** (a primeira l
 
 O modo de voz tambem limita explicitamente resultados de ferramentas de codigo antes de enviar ao LLM. Conteudos como `content`, `stdout`, `stderr`, diffs e listas grandes recebem o marcador `[...resultado truncado para voz...]`. A sintese Piper tem retry curto com orcamento total de 8s; se falhar ou demorar, o Ares cai para Web Speech automaticamente. Ao iniciar uma nova fala ou detectar barge-in, a fala anterior e cancelada junto com a fila pendente para evitar sobreposicao.
 
-O TTS tem watchdogs para evitar silencio preso: o processo Piper e encerrado em timeout, a reproducao do WAV tem limite de duracao e o Web Speech tenta de novo quando nao dispara `onstart`. No Windows, o modo `auto` tenta Web Speech primeiro para usar vozes mais naturais do sistema; se falhar, Piper entra como reserva. No Linux, Piper continua sendo a primeira tentativa. Se o streaming nao enviar deltas de fala, o Ares ainda enfileira a resposta final (`result.fala`) para nao ficar mudo.
+O TTS tem watchdogs para evitar silencio preso: o processo Piper e encerrado em timeout, a reproducao do WAV tem limite de duracao e o Web Speech tenta de novo quando nao dispara `onstart`. A partir da v0.24 o modo `auto` usa o **Piper neural como primeira tentativa tanto no Linux quanto no Windows** (a voz neural e muito mais natural que as vozes SAPI do sistema); o Web Speech entra como reserva, e o macOS, sem binario do Piper, continua usando Web Speech. Se o streaming nao enviar deltas de fala, o Ares ainda enfileira a resposta final (`result.fala`) para nao ficar mudo.
 
-A fala tambem passa por normalizacao de pontuacao antes da sintese: virgulas, ponto-e-virgula e travessoes viram pausas suaves, dois-pontos viram fim curto de frase, reticencias sao reduzidas e textos longos sem pontuacao sao quebrados por tamanho para a voz acompanhar a resposta.
+### Voz muito melhor (v0.24)
 
-A sintese neural (Piper) agora e mais expressiva e fluida (`src/main/speech.ts`): siglas tecnicas em CAIXA ALTA sao pronunciadas corretamente (`API` -> "a pe i", `JSON` -> "jeison", `TS`/`JS` soletrados), o silencio entre frases caiu para `0.025` (fala mais continua) e o ritmo varia com o **conteudo** — respostas de erro saem mais rapidas e diretas, confirmacoes de sucesso saem mais calmas e elegantes (`detectTone` + `computeLengthScale`). Tudo isso fica em modulo puro e testado, independente do Electron.
+Tres frentes elevam bastante a qualidade e a fluidez, mantendo Linux e Windows e sem novas dependencias:
+
+- **Prosodia pt-BR (`src/main/speech.ts`, puro/testado)**: numeros e construcoes comuns agora sao falados por extenso — moeda (`R$ 1.250,90` -> "mil duzentos e cinquenta reais e noventa centavos"), porcentagem (`50%` -> "cinquenta por cento"), hora (`14:30` -> "quatorze e trinta"), versao (`v0.24` -> "versao zero ponto vinte e quatro"), ordinais (`1o` -> "primeiro") e simbolos isolados (`&`, `+`, `=`, `@`, `25 °C`). As **virgulas voltaram a ser preservadas** como pausa natural (antes eram apagadas, deixando a fala apressada) e o silencio entre frases subiu para `0.15` (uma respiracao curta).
+- **Expressividade**: alem do ritmo (`length_scale`) variar com o tom, agora `noise_scale`/`noise_w` tambem variam por tom (`computeNoise`) — erro mais seco/nitido, sucesso mais caloroso — dentro de faixas seguras.
+- **Latencia/fluidez (`src/main/piperEngine.ts`)**: um **pool de processos Piper "quentes"** mantem o modelo carregado em memoria entre as falas, eliminando o custo de recarregar o ONNX a cada frase. Como `length_scale`/`noise_*` sao flags globais do processo no Piper, o pool e indexado por esses parametros (na pratica ate ~3 processos: erro/neutro/sucesso). Protocolo: `--json-input` com `output_file`, fim detectado pelo caminho que o Piper ecoa no stdout; ha timeout por locucao, eviction por ociosidade (90s) e **fallback automatico** para o modo um-processo-por-frase. No renderer, a **proxima frase ja e sintetizada enquanto a atual toca** (pipelining via `_prefetchedWav`), deixando a fala quase continua.
+
+A normalizacao pesada (numeros/simbolos/pausas) roda no processo principal em `prepareText`, que precisa do texto cru; por isso `normalizeSpeechText` no renderer agora so limpa markdown/ruido e **preserva virgulas e numeros**, em vez de mutila-los antes de chegarem la. Siglas tecnicas em CAIXA ALTA seguem pronunciadas corretamente (`API` -> "a pe i", `JSON` -> "jeison", `TS`/`JS` soletrados). Tudo em modulo puro e testado, independente do Electron.
 
 As ferramentas de codigo tambem usam orcamento de tempo em varreduras de pasta. Quando uma pasta e grande demais, `codigo.workspace` e `codigo.buscar` devolvem resultado parcial com aviso, em vez de segurar o processo principal e atrasar a voz.
 
@@ -148,7 +154,7 @@ As ferramentas de codigo tambem usam orcamento de tempo em varreduras de pasta. 
 - **Memoria**: os selects de categoria e filtro usam bordas cyan mais visiveis, hover claro, foco com glow suave e seta SVG customizada. As pilulas de categoria continuam inline e editaveis.
 - **Provedor de IA**: o cadastro mostra icones por provedor (`DeepSeek`, `Groq`, `OpenRouter`, `OpenAI`, `Local`) e borda colorida sutil conforme o provedor selecionado.
 - **Chave de API**: o campo tem icone de chave e botao para mostrar/ocultar a senha sem trocar de tela.
-- **Voz em programacao**: Piper tenta responder rapido, cai para Web Speech no timeout, reduz pausas em virgulas e cancela fala antiga quando entra uma nova resposta ou interrupcao.
+- **Voz em programacao**: Piper responde rapido (processo quente + frase seguinte ja sintetizada em paralelo), cai para Web Speech no timeout, preserva virgulas como pausa natural e cancela fala antiga quando entra uma nova resposta ou interrupcao.
 - **Escala compacta**: novas instalacoes abrem com texto em 92% e janela menor. Em instalacoes existentes, ajuste em **Configuracoes > Acessibilidade > Tamanho do texto**.
 - **Perfil de voz mais humano**: use `tts.rate` perto de `1.08` e `tts.pitch` perto de `0.78` para uma voz mais grave, fluida e menos robotica.
 
@@ -160,7 +166,9 @@ As ferramentas de codigo tambem usam orcamento de tempo em varreduras de pasta. 
 - `src/main/running.ts`: registro de execucoes canceláveis por sessao (cancelamento via Esc / IPC).
 - `src/main/coder.ts`: executor autonomo para tarefas de codigo em varias etapas.
 - `src/main/voiceCode.ts`: interpretacao e sanitizacao de respostas de programacao por voz (inclui causa raiz de erros).
-- `src/main/piper.ts`: voz neural Piper multiplataforma (download do binario + sintese em Linux e Windows).
+- `src/main/piper.ts`: voz neural Piper multiplataforma (download do binario + sintese em Linux e Windows; engine quente com fallback um-processo-por-frase).
+- `src/main/piperEngine.ts`: pool de processos Piper "quentes" (modelo carregado em memoria entre falas) indexado por parametros de prosodia.
+- `src/main/speech.ts`: pre-processamento puro da fala (normalizacao pt-BR de numeros/simbolos, pausas, tom dinamico e expressividade).
 - `src/main/speech.ts`: pre-processamento de fala puro e testavel (siglas tecnicas, tom dinamico, length_scale).
 - `src/main/preferences.ts`: extracao das preferencias de codificacao do usuario (pilulas de contexto).
 - `src/main/config.ts`: defaults e merge nao-destrutivo da configuracao (preserva dados em upgrades).
