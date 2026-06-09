@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import type {
+  AgentActivityEvent,
   AgentTurnResult,
   AppConfig,
   Board,
@@ -29,6 +30,16 @@ export interface ConvMsg {
   role: 'user' | 'assistant'
   content: string
   pending?: boolean
+  activities?: AgentActivityEvent[]
+}
+
+export function mergeActivityEvent(events: AgentActivityEvent[] = [], event: AgentActivityEvent): AgentActivityEvent[] {
+  if (event.status === 'output') return [...events, event].slice(-80)
+  const idx = events.findIndex((e) => e.id === event.id && e.status !== 'output')
+  if (idx === -1) return [...events, event].slice(-80)
+  const next = events.slice()
+  next[idx] = event
+  return next
 }
 
 export function finalSpeechFallback(
@@ -501,10 +512,18 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
           flush(false)
         }
       })
+      const offActivity = window.ares.chat.onActivity((activity) => {
+        setConversation((prev) =>
+          prev.map((m) =>
+            m.id === assistantId ? { ...m, activities: mergeActivityEvent(m.activities, activity) } : m
+          )
+        )
+      })
 
       try {
         const result = await window.ares.chat.ask(sid, userText, voice)
         off()
+        offActivity()
         flush(true) // fala o restante do buffer
         boardRef.current = result.board
         setBoardState(result.board)
@@ -538,6 +557,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
         busyRef.current = false
       } catch (e) {
         off()
+        offActivity()
         clearSpeechQueue()
         setConversation((prev) => prev.filter((m) => m.id !== assistantId))
         setError(errMsg(e))

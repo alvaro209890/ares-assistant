@@ -1,4 +1,17 @@
-import type { Acao, AgentTurnResult, AppConfig, Board, CalendarEvent, ChatMessage, MemoryCategory, MemoryFact, UserLocation } from '../shared/types'
+import type {
+  Acao,
+  AgentActivityEvent,
+  AgentActivityKind,
+  AgentTurnResult,
+  AppConfig,
+  Board,
+  CalendarEvent,
+  ChatMessage,
+  CodeEditMode,
+  MemoryCategory,
+  MemoryFact,
+  UserLocation
+} from '../shared/types'
 import { MEMORY_CATEGORIES } from '../shared/types'
 import { readConfig, updateConfig } from './config'
 import { chatJSON, streamChat } from './ninerouter'
@@ -12,6 +25,7 @@ import {
   addFact,
   removeFact,
   memorySummary,
+  memoryPromptBlock,
   loadEvents,
   addEvent,
   removeEvent,
@@ -35,7 +49,8 @@ import {
   codingPreferencesSummary,
   sessionContextSummary,
   setLastEditedFile,
-  setLastTerminalCommand
+  setLastTerminalCommand,
+  searchSessions
 } from './data'
 import { getWeather, getWeatherAt, getNews, webSearch, calcExpression, convertCurrency, convertUnit, readPage } from './tools'
 import { getSystemMetrics, readClipboard, writeClipboard } from './system'
@@ -74,7 +89,8 @@ import {
   scaffoldProject,
   searchCode,
   summarizeCodeWorkspace,
-  writeCodeFile
+  writeCodeFile,
+  editCodeFile
 } from './code'
 import { clearPendingCode, getPendingCode, setPendingCode } from './pending'
 import { registerRun } from './running'
@@ -160,7 +176,8 @@ AÇÕES DE MUTAÇÃO (aplique quando o usuário pedir):
 - tarefa.subtarefa.adicionar {titulo, item}   |   tarefa.subtarefa.concluir {titulo, item}
 - tarefa.lembrete.definir {titulo, quando(ISO)}
 - coluna.criar {titulo}   |   coluna.renomear {titulo, novoTitulo}   |   coluna.remover {titulo}
-- memoria.salvar {fato, categoria?(perfil|preferencias|rotina|trabalho|projetos|restricoes|interesses|outros)}   |   memoria.remover {fato}
+- memoria.salvar {fato, categoria?(perfil|preferencias|rotina|trabalho|projetos|restricoes|interesses|outros), evidencia?}   |   memoria.remover {fato}
+- memoria.buscar {consulta, limite?}   (busca conversas passadas quando o usuário perguntar "lembra quando...", "já falamos sobre..." ou precisar recuperar contexto antigo)
 - evento.criar {titulo, quando(ISO), descricao?, lembreteMin?(minutos antes), repetir?(none|daily|weekly|monthly)}   |   evento.remover {titulo}
 - lista.criar {titulo}   |   lista.adicionar {item, lista?}   |   lista.marcar {item, lista?, feito?(bool)}   |   lista.removerItem {item, lista?}   |   lista.limpar {lista}   (listas simples: compras, afazeres)
 - nota.salvar {texto}   (anotações rápidas; também para guardar rascunhos de mensagens/e-mails)
@@ -203,6 +220,7 @@ FERRAMENTAS DE CONSULTA (dê uma fala curta tipo "Deixe-me verificar." e AGUARDE
 - codigo.indexar {path?, refresh?(bool)}   (gera/lê índice persistente de arquivos, exports e scripts do projeto)
 - codigo.scaffold {nome, tipo_projeto?(site|pagina|node), path?}   (CRIA um projeto novo a partir de template — use para "crie um site/página/projeto"; precisa de "Permitir aplicar patches")
 - codigo.criar {path?, arquivo, conteudo, sobrescrever?(bool)}   (cria/escreve um arquivo no projeto; precisa de "Permitir aplicar patches")
+- codigo.editar {path?, arquivo, modo?(replace|insert_before|insert_after|line_range), antigo?, novo?, ancora?, inicio?, fim?, todos?(bool), esperado?}   (edita arquivo existente com correspondência exata/flexível estilo Hermes; prefira para mudanças pequenas antes de patch bruto)
 - codigo.diagnostico {path?}   (verifica a saúde do projeto: roda typecheck/lint/test disponíveis e permitidos e resume; use proativamente após mudanças)
 - codigo.testar {path?}   (RODA OS TESTES do projeto — detecta vitest/jest/pytest/go ou o script "test" — e resume quantos passaram/falharam; use quando o usuário disser "roda os testes", "testa o projeto", "os testes passam?")
 - codigo.lint {path?}   (RODA O LINT do projeto — eslint/ruff ou o script "lint" — e conta os problemas; use para "passa o lint", "tem erro de lint?", "verifica o estilo")
@@ -213,7 +231,7 @@ FERRAMENTAS DE CONSULTA (dê uma fala curta tipo "Deixe-me verificar." e AGUARDE
 
 MODO PROGRAMADOR:
 - Para perguntas de código, não chute: use codigo.workspace/codigo.buscar/codigo.ler quando houver path, arquivo, símbolo ou repo mencionado.
-- Se o usuário pedir edição/refatoração/debug/testes em projeto real, trabalhe com as ferramentas nativas: localize contexto, leia os arquivos, escreva com codigo.criar/codigo.patch.aplicar ou use codigo.projeto para mudanças maiores.
+- Se o usuário pedir edição/refatoração/debug/testes em projeto real, trabalhe com as ferramentas nativas: localize contexto, leia os arquivos, use codigo.editar para alteração localizada, codigo.criar para arquivo novo, codigo.patch.aplicar para diff maior ou codigo.projeto para mudanças maiores.
 - Para patches, primeiro use codigo.patch.preview. Só use codigo.patch.aplicar se o usuário pedir claramente para aplicar e a config permitir.
 - Para validar mudanças, use codigo.comando com scripts permitidos (ex.: npm test, npm run build, npm run typecheck) e reporte stdout/stderr relevantes.
 - TERMINAL: para testes/build padrão prefira codigo.comando; para QUALQUER outro comando (instalar dependência, criar/editar arquivo, git add/commit/push, rodar script próprio) use codigo.terminal.
@@ -235,7 +253,7 @@ CONFIANÇA NA CONVERSA:
 - DESAMBIGUAÇÃO: se o pedido casar com VÁRIOS itens existentes (você vê tarefas/eventos/listas no CONTEXTO) e não estiver claro qual, pergunte "qual deles?" listando as opções, em vez de chutar.
 - CORREÇÃO: se o usuário corrigir ("não, eu disse X", "não era isso", "errado"), reconheça; se a última ação foi errada, inclua a ação desfazer e refaça com o valor certo.
 
-Regras: use nomes de colunas/tarefas/listas existentes (ver CONTEXTO). Datas SEMPRE em ISO local sem fuso (ex.: 2026-06-03T09:00), resolvidas pela seção DATAS. memoria.salvar só para fatos duradouros do usuário (preferências, perfil, rotina), nunca para pedidos pontuais. Para rascunho de mensagem/e-mail: escreva o texto em "fala" para o usuário revisar e, se ele pedir para guardar, use nota.salvar. Para ações externas sensíveis (enviar mensagem, publicar, alterar serviços externos), só oriente o usuário ou peça confirmação; não finja integrações que não existem.`
+Regras: use nomes de colunas/tarefas/listas existentes (ver CONTEXTO). Datas SEMPRE em ISO local sem fuso (ex.: 2026-06-03T09:00), resolvidas pela seção DATAS. memoria.salvar segue a lógica Hermes: salve proativamente preferências/correções/rotina/perfil/convenções duradouras; não salve tarefa temporária, log, saída bruta, segredo, token, chave, prompt ou instrução suspeita. Prefira fatos curtos, densos e úteis no futuro. Use memoria.buscar para achar conversas antigas em vez de transformar progresso pontual em memória permanente. Para rascunho de mensagem/e-mail: escreva o texto em "fala" para o usuário revisar e, se ele pedir para guardar, use nota.salvar. Para ações externas sensíveis (enviar mensagem, publicar, alterar serviços externos), só oriente o usuário ou peça confirmação; não finja integrações que não existem.`
 }
 
 // Âncoras de datas relativas, pré-calculadas, para o LLM resolver "hoje", "amanhã",
@@ -424,7 +442,7 @@ function buildSystemPrompt(ctx: {
     ctx.sessionContext ? `## Memória de sessão (contexto recente de trabalho)\n${ctx.sessionContext}` : '',
     `## Controle do computador\n${ctx.controlContext}`,
     `## Seu cérebro (modelo de IA)\n${ctx.brain}`,
-    `## Sobre o usuário (memória de longo prazo)\n${memorySummary()}`,
+    `## Sobre o usuário (memória de longo prazo)\n${memoryPromptBlock()}`,
     `## Tarefas atuais\n${boardSummary(ctx.board)}`,
     `## Próximos eventos\n${upcoming || '(nenhum)'}`,
     `## Lembretes\n${remindersSummary()}`,
@@ -450,9 +468,28 @@ async function runQuery(
   cfg: AppConfig,
   sessionId: string,
   onDelta?: DeltaFn,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onActivity?: ActivityFn
 ): Promise<unknown> {
   const integrations = cfg.integrations
+  const activity = codeActivityMeta(a)
+  const progress = createProgressActivity(onActivity, activity)
+  const done = <T>(result: T): T => {
+    const r = result as { resultado?: Record<string, unknown>; erro?: string }
+    if (r.erro) emitActivity(onActivity, activity, { status: 'error', detail: r.erro, ok: false })
+    else if (r.resultado?.requiresApproval === true) {
+      emitActivity(onActivity, activity, {
+        status: 'waiting',
+        detail: String(r.resultado.reason || 'aguardando autorização'),
+        command: typeof r.resultado.command === 'string' ? r.resultado.command : activity?.command,
+        ok: false
+      })
+    } else {
+      emitActivity(onActivity, activity, { status: 'done', detail: activityDetail(result), ok: activityOk(result) })
+    }
+    return result
+  }
+  emitActivity(onActivity, activity, { status: 'running' })
   try {
     switch (a.tipo) {
       case 'clima.consultar': {
@@ -538,10 +575,15 @@ async function runQuery(
           ? { tipo: a.tipo, resultado: { ok: true, desfeito: r.label || 'a última alteração' } }
           : { tipo: a.tipo, erro: 'Não há nada para desfazer.' }
       }
-      case 'codigo.workspace':
-        return { tipo: a.tipo, resultado: summarizeCodeWorkspace(cfg, String(a.path || a.raiz || a.workspace || '')) }
-      case 'codigo.buscar':
+      case 'memoria.buscar':
         return {
+          tipo: a.tipo,
+          resultado: searchSessions(String(a.consulta || a.query || a.texto || ''), Number(a.limite || a.limit || 5))
+        }
+      case 'codigo.workspace':
+        return done({ tipo: a.tipo, resultado: summarizeCodeWorkspace(cfg, String(a.path || a.raiz || a.workspace || '')) })
+      case 'codigo.buscar':
+        return done({
           tipo: a.tipo,
           resultado: searchCode(cfg, {
             root: String(a.path || a.raiz || a.workspace || ''),
@@ -549,9 +591,9 @@ async function runQuery(
             filter: a.filtro ? String(a.filtro) : a.glob ? String(a.glob) : undefined,
             maxResults: Number(a.limite || a.max || 0) || undefined
           })
-        }
+        })
       case 'codigo.ler':
-        return {
+        return done({
           tipo: a.tipo,
           resultado: readCodeFile(cfg, {
             root: String(a.path || a.raiz || a.workspace || ''),
@@ -559,65 +601,68 @@ async function runQuery(
             startLine: Number(a.inicio || a.start || 0) || undefined,
             lines: Number(a.linhas || a.lines || 0) || undefined
           })
-        }
+        })
       case 'codigo.comando':
-        return {
+        return done({
           tipo: a.tipo,
           resultado: await runCodeCommand(cfg, {
             root: String(a.path || a.raiz || a.workspace || ''),
             command: String(a.comando || a.command || ''),
-            signal
+            signal,
+            onProgress: progress
           })
-        }
+        })
       case 'codigo.terminal': {
         const root = String(a.path || a.raiz || a.workspace || '')
         const command = String(a.comando || a.command || '')
         const approved = a.confirmado === true || a.autorizado === true || a.confirm === true || a.approved === true
         // Só anuncia se o comando for de fato rodar agora (autorizado ou já seguro).
         announceLongTask(onDelta, cfg, command, approved || classifyCommand(cfg, command).tier === 'allowed')
-        const result = await runCodeTerminal(cfg, { root, command, approved, signal })
+        const result = await runCodeTerminal(cfg, { root, command, approved, signal, onProgress: progress })
         if (result.requiresApproval) {
           setPendingCode(sessionId, { kind: 'terminal', command: result.command, root, reason: result.reason })
         } else if (result.ran) {
           clearPendingCode(sessionId)
           if (result.ok) setLastTerminalCommand(result.command, result.root)
         }
-        return { tipo: a.tipo, resultado: result }
+        return done({ tipo: a.tipo, resultado: result })
       }
       case 'codigo.confirmar': {
         const pend = getPendingCode(sessionId)
-        if (!pend) return { tipo: a.tipo, erro: 'Não há nenhum comando pendente de autorização.' }
+        if (!pend) return done({ tipo: a.tipo, erro: 'Não há nenhum comando pendente de autorização.' })
+        if (activity && !activity.command) activity.command = pend.command
         announceLongTask(onDelta, cfg, pend.command, true)
-        const result = await runCodeTerminal(cfg, { root: pend.root, command: pend.command, approved: true, signal })
+        const result = await runCodeTerminal(cfg, { root: pend.root, command: pend.command, approved: true, signal, onProgress: progress })
         if (result.ran) {
           clearPendingCode(sessionId)
           if (result.ok) setLastTerminalCommand(result.command, result.root)
         }
-        return { tipo: a.tipo, resultado: result }
+        return done({ tipo: a.tipo, resultado: result })
       }
       case 'codigo.cancelar': {
         const had = !!getPendingCode(sessionId)
         clearPendingCode(sessionId)
-        return { tipo: a.tipo, resultado: { cancelado: had, mensagem: had ? 'comando pendente descartado' : 'nada pendente' } }
+        return done({ tipo: a.tipo, resultado: { cancelado: had, mensagem: had ? 'comando pendente descartado' : 'nada pendente' } })
       }
       case 'codigo.git':
-        return {
+        return done({
           tipo: a.tipo,
           resultado: await runCodeGit(cfg, {
             root: String(a.path || a.raiz || a.workspace || ''),
             operation: String(a.operacao || a.operation || 'status'),
             file: a.arquivo || a.file ? String(a.arquivo || a.file) : undefined,
-            signal
+            signal,
+            onProgress: progress
           })
-        }
+        })
       case 'codigo.indexar':
-        return {
+        return done({
           tipo: a.tipo,
           resultado: buildCodeIndex(cfg, {
             root: String(a.path || a.raiz || a.workspace || ''),
             refresh: a.refresh === true || a.atualizar === true
           })
-        }
+        })
       case 'codigo.scaffold': {
         const resultado = scaffoldProject(cfg, {
           tipo: String(a.tipo_projeto || a.template || a.modelo || a.kind || 'site'),
@@ -626,7 +671,7 @@ async function runQuery(
           force: a.force === true || a.forcar === true
         })
         if (resultado.created[0]) setLastEditedFile(resultado.created[0], resultado.root)
-        return { tipo: a.tipo, resultado }
+        return done({ tipo: a.tipo, resultado })
       }
       case 'codigo.criar': {
         const resultado = writeCodeFile(cfg, {
@@ -636,21 +681,40 @@ async function runQuery(
           overwrite: a.sobrescrever === true || a.overwrite === true
         })
         setLastEditedFile(resultado.file, String(a.path || a.raiz || a.workspace || '') || undefined)
-        return { tipo: a.tipo, resultado }
+        return done({ tipo: a.tipo, resultado })
+      }
+      case 'codigo.editar': {
+        const mode = String(a.modo || a.mode || '') as CodeEditMode
+        const resultado = editCodeFile(cfg, {
+          root: String(a.path || a.raiz || a.workspace || ''),
+          file: String(a.arquivo || a.file || ''),
+          mode,
+          oldText: a.antigo || a.oldText || a.find ? String(a.antigo || a.oldText || a.find) : undefined,
+          newText: String(a.novo ?? a.newText ?? a.replace ?? ''),
+          anchor: a.ancora || a.anchor ? String(a.ancora || a.anchor) : undefined,
+          startLine: Number(a.inicio || a.startLine || a.start || 0) || undefined,
+          endLine: Number(a.fim || a.endLine || a.end || 0) || undefined,
+          replaceAll: a.todos === true || a.replaceAll === true || a.all === true,
+          expectedMatches: Number.isFinite(Number(a.esperado ?? a.expectedMatches))
+            ? Number(a.esperado ?? a.expectedMatches)
+            : undefined
+        })
+        setLastEditedFile(resultado.file, String(a.path || a.raiz || a.workspace || '') || undefined)
+        return done({ tipo: a.tipo, resultado })
       }
       case 'codigo.diagnostico':
-        return {
+        return done({
           tipo: a.tipo,
-          resultado: await diagnoseProject(cfg, { root: String(a.path || a.raiz || a.workspace || ''), signal })
-        }
+          resultado: await diagnoseProject(cfg, { root: String(a.path || a.raiz || a.workspace || ''), signal, onProgress: progress })
+        })
       case 'codigo.testar':
-        return { tipo: a.tipo, resultado: await runTests(cfg, { root: String(a.path || a.raiz || a.workspace || ''), signal }) }
+        return done({ tipo: a.tipo, resultado: await runTests(cfg, { root: String(a.path || a.raiz || a.workspace || ''), signal, onProgress: progress }) })
       case 'codigo.lint':
-        return { tipo: a.tipo, resultado: await runLint(cfg, { root: String(a.path || a.raiz || a.workspace || ''), signal }) }
+        return done({ tipo: a.tipo, resultado: await runLint(cfg, { root: String(a.path || a.raiz || a.workspace || ''), signal, onProgress: progress }) })
       case 'codigo.formatar':
-        return { tipo: a.tipo, resultado: await runFormat(cfg, { root: String(a.path || a.raiz || a.workspace || ''), signal }) }
+        return done({ tipo: a.tipo, resultado: await runFormat(cfg, { root: String(a.path || a.raiz || a.workspace || ''), signal, onProgress: progress }) })
       case 'codigo.projeto':
-        return {
+        return done({
           tipo: a.tipo,
           resultado: await runCoderTask(cfg, {
             objetivo: String(a.objetivo || a.tarefa || a.descricao || a.texto || ''),
@@ -658,16 +722,16 @@ async function runQuery(
             passos: Number(a.passos || a.steps || 0) || undefined,
             signal
           })
-        }
+        })
       case 'codigo.patch.preview':
-        return {
+        return done({
           tipo: a.tipo,
           resultado: previewCodePatch(cfg, {
             root: String(a.path || a.raiz || a.workspace || ''),
             diff: a.diff,
             patches: a.patches
           })
-        }
+        })
       case 'codigo.patch.aplicar': {
         const resultado = applyCodePatch(cfg, {
           root: String(a.path || a.raiz || a.workspace || ''),
@@ -675,7 +739,7 @@ async function runQuery(
           patches: a.patches
         })
         if (resultado.applied && resultado.files[0]) setLastEditedFile(resultado.files[0], resultado.root)
-        return { tipo: a.tipo, resultado }
+        return done({ tipo: a.tipo, resultado })
       }
       case 'briefing.consultar': {
         const b = await buildBriefing(cfg)
@@ -697,7 +761,7 @@ async function runQuery(
       }
     }
   } catch (e) {
-    return { tipo: a.tipo, erro: e instanceof Error ? e.message : String(e) }
+    return done({ tipo: a.tipo, erro: e instanceof Error ? e.message : String(e) })
   }
   return { tipo: a.tipo, erro: 'ferramenta desconhecida' }
 }
@@ -742,7 +806,12 @@ function applyMutations(acoes: Acao[]): { board: Board; notes: string[]; changed
       board = r.board
       if (r.note) notes.push(r.note)
     } else if (a.tipo === 'memoria.salvar' && a.fato) {
-      addFact(String(a.fato), { category: asCategory(a.categoria), source: 'manual', status: 'active' })
+      addFact(String(a.fato), {
+        category: asCategory(a.categoria),
+        source: 'manual',
+        status: 'active',
+        evidence: a.evidencia ? [String(a.evidencia)] : undefined
+      })
       notes.push('memória atualizada')
     } else if (a.tipo === 'memoria.remover' && a.fato) {
       const f = loadMemory().find((x) => norm(x.text).includes(norm(a.fato)))
@@ -815,7 +884,134 @@ function memoryFallback(userText: string, acoes: Acao[]): Acao[] {
 // altera a tela — usado para o resumo falável conciso de tarefas de programação).
 export type DeltaKind = 'both' | 'display' | 'speak'
 export type DeltaFn = (chunk: string, phase: number, kind?: DeltaKind) => void
+export type ActivityFn = (activity: AgentActivityEvent) => void
 type DeltaTextTransform = (text: string, phase: number, kind: DeltaKind) => string
+
+type ActivityMeta = {
+  id: string
+  kind: AgentActivityKind
+  title: string
+  detail?: string
+  target?: string
+  command?: string
+}
+
+function trimActivityOutput(raw: string): string {
+  return String(raw || '')
+    .split(/\r?\n/)
+    .map((l) => l.trimEnd())
+    .filter(Boolean)
+    .slice(-4)
+    .join('\n')
+    .slice(-900)
+}
+
+function emitActivity(
+  onActivity: ActivityFn | undefined,
+  meta: ActivityMeta | null,
+  patch: Omit<AgentActivityEvent, 'id' | 'kind' | 'title' | 'phase' | 'ts'>
+): void {
+  if (!onActivity || !meta) return
+  onActivity({
+    id: meta.id,
+    kind: meta.kind,
+    title: meta.title,
+    phase: 1,
+    ts: Date.now(),
+    detail: meta.detail,
+    target: meta.target,
+    command: meta.command,
+    ...patch
+  })
+}
+
+function codeActivityMeta(a: Acao): ActivityMeta | null {
+  const tipo = String(a.tipo || '')
+  if (!tipo.startsWith('codigo.')) return null
+  const path = String(a.path || a.raiz || a.workspace || a.destino || a.onde || '').trim()
+  const file = String(a.arquivo || a.file || '').trim()
+  const command = String(a.comando || a.command || '').trim()
+  const query = String(a.consulta || a.query || a.simbolo || '').trim()
+  const target = file || path || undefined
+  const base = { id: uid('act'), target }
+  switch (tipo) {
+    case 'codigo.workspace':
+      return { ...base, kind: 'workspace', title: 'Analisando workspace', detail: path || undefined }
+    case 'codigo.buscar':
+      return { ...base, kind: 'search', title: 'Buscando no código', detail: query || undefined }
+    case 'codigo.ler':
+      return { ...base, kind: 'read', title: 'Lendo arquivo', detail: file || undefined }
+    case 'codigo.comando':
+      return { ...base, kind: 'command', title: 'Rodando comando', command }
+    case 'codigo.terminal':
+      return { ...base, kind: 'terminal', title: 'Terminal', command }
+    case 'codigo.confirmar':
+      return { ...base, kind: 'terminal', title: 'Executando comando autorizado' }
+    case 'codigo.cancelar':
+      return { ...base, kind: 'terminal', title: 'Cancelando comando pendente' }
+    case 'codigo.git':
+      return { ...base, kind: 'git', title: 'Consultando Git', detail: String(a.operacao || a.operation || 'status') }
+    case 'codigo.indexar':
+      return { ...base, kind: 'index', title: 'Indexando projeto', detail: path || undefined }
+    case 'codigo.scaffold':
+      return { ...base, kind: 'scaffold', title: 'Criando projeto', detail: String(a.nome || a.name || a.projeto || '') || undefined }
+    case 'codigo.criar':
+      return { ...base, kind: 'write', title: 'Escrevendo arquivo', detail: file || undefined }
+    case 'codigo.editar':
+      return { ...base, kind: 'write', title: 'Editando arquivo', detail: file || undefined }
+    case 'codigo.diagnostico':
+      return { ...base, kind: 'diagnostic', title: 'Rodando diagnóstico', detail: path || undefined }
+    case 'codigo.testar':
+      return { ...base, kind: 'command', title: 'Rodando testes', detail: path || undefined }
+    case 'codigo.lint':
+      return { ...base, kind: 'command', title: 'Rodando lint', detail: path || undefined }
+    case 'codigo.formatar':
+      return { ...base, kind: 'command', title: 'Formatando projeto', detail: path || undefined }
+    case 'codigo.projeto':
+      return { ...base, kind: 'write', title: 'Executando coder autônomo', detail: String(a.objetivo || a.tarefa || '') || undefined }
+    case 'codigo.patch.preview':
+      return { ...base, kind: 'patch', title: 'Validando patch', detail: path || undefined }
+    case 'codigo.patch.aplicar':
+      return { ...base, kind: 'patch', title: 'Aplicando patch', detail: path || undefined }
+    default:
+      return { ...base, kind: 'tool', title: tipo.replace('codigo.', 'Código: ') }
+  }
+}
+
+function activityDetail(result: unknown): string | undefined {
+  const r = result as { resultado?: Record<string, unknown>; erro?: string }
+  if (r.erro) return r.erro
+  const o = r.resultado || {}
+  if (typeof o.summary === 'string' && o.summary) return o.summary
+  if (typeof o.file === 'string') return o.file
+  if (Array.isArray(o.files) && o.files.length) return `${o.files.length} arquivo(s)`
+  if (Array.isArray(o.created) && o.created.length) return `${o.created.length} arquivo(s) criados`
+  if (typeof o.command === 'string' && Object.prototype.hasOwnProperty.call(o, 'code')) return `código ${String(o.code)}`
+  if (typeof o.root === 'string') return o.root
+  return undefined
+}
+
+function activityOk(result: unknown): boolean | undefined {
+  const r = result as { resultado?: Record<string, unknown>; erro?: string }
+  if (r.erro) return false
+  const o = r.resultado || {}
+  if (typeof o.ok === 'boolean') return o.ok
+  if (typeof o.applied === 'boolean') return o.applied
+  if (typeof o.ran === 'boolean' && typeof o.requiresApproval === 'boolean') return o.ran ? o.ok === true : undefined
+  return true
+}
+
+function createProgressActivity(onActivity: ActivityFn | undefined, meta: ActivityMeta | null): (event: { stream: 'stdout' | 'stderr'; chunk: string }) => void {
+  let last = 0
+  return ({ stream, chunk }) => {
+    const output = trimActivityOutput(chunk)
+    if (!output) return
+    const now = Date.now()
+    if (now - last < 250 && !chunk.includes('\n')) return
+    last = now
+    emitActivity(onActivity, meta, { status: 'output', stream, output })
+  }
+}
 
 /**
  * Faz uma chamada do agente transmitindo a "fala" em tempo real (streaming) via
@@ -874,7 +1070,8 @@ export async function runTurn(
   sessionId: string,
   userText: string,
   voice = false,
-  onDelta?: DeltaFn
+  onDelta?: DeltaFn,
+  onActivity?: ActivityFn
 ): Promise<AgentTurnResult> {
   const cfg = readConfig()
   // Controlador de cancelamento do turno: permite ao usuário (Esc/IPC code:cancel) abortar
@@ -918,7 +1115,7 @@ export async function runTurn(
   if (queries.length) {
     // Ferramentas de consulta rodam em PARALELO (são, em geral, independentes:
     // clima, notícias, web, código). Promise.all preserva a ordem dos resultados.
-    const results = await Promise.all(queries.map((q) => runQuery(q, cfg, sessionId, onDelta, signal)))
+    const results = await Promise.all(queries.map((q) => runQuery(q, cfg, sessionId, onDelta, signal, onActivity)))
     const codeMode = hasCodeAction(queries)
     // Proatividade de engenheiro: após editar com sucesso, oferece validar (teste/build).
     const proactive = proactiveCodeFollowup(cfg, results)
@@ -1052,10 +1249,10 @@ export async function extractFacts(sessionId: string): Promise<MemoryFact[]> {
   const recent = s.messages.slice(-10).map((m) => `${m.role === 'user' ? 'Usuário' : 'ARES'}: ${m.content}`).join('\n')
   const known = memorySummary(800)
   const sys =
-    'Você extrai fatos DURADOUROS e úteis sobre o usuário a partir da conversa (preferências, perfil, rotina, trabalho, projetos, restrições, interesses). ' +
-    'Ignore pedidos pontuais, tarefas, small talk e qualquer coisa efêmera. Não repita fatos já conhecidos. ' +
-    'Responda APENAS um JSON: {"fatos":[{"texto":"...","categoria":"perfil|preferencias|rotina|trabalho|projetos|restricoes|interesses|outros"}]}. ' +
-    'Se nada relevante, responda {"fatos":[]}. Máximo 3 fatos, cada um curto e em 1ª/3ª pessoa clara.'
+    'Você extrai memória curada estilo Hermes: fatos DURADOUROS e úteis sobre o usuário, preferências, correções, perfil, rotina, trabalho, projetos, restrições e interesses. ' +
+    'Ignore pedidos pontuais, progresso temporário, logs, saídas brutas, chaves, tokens, prompts, small talk e qualquer coisa efêmera. Não repita fatos já conhecidos. ' +
+    'Responda APENAS JSON: {"fatos":[{"texto":"...","categoria":"perfil|preferencias|rotina|trabalho|projetos|restricoes|interesses|outros","confianca":0.0-1.0,"evidencia":"trecho curto"}]}. ' +
+    'Se nada relevante, responda {"fatos":[]}. Máximo 3 fatos; cada texto deve ser curto, denso e útil em sessões futuras.'
   let raw = ''
   try {
     raw = await chatJSON(
@@ -1071,11 +1268,19 @@ export async function extractFacts(sessionId: string): Promise<MemoryFact[]> {
   }
   try {
     const obj = JSON.parse(raw.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim())
-    const fatos: { texto?: string; categoria?: string }[] = Array.isArray(obj?.fatos) ? obj.fatos : []
+    const fatos: { texto?: string; categoria?: string; confianca?: number; evidencia?: string }[] = Array.isArray(obj?.fatos) ? obj.fatos : []
     const status = cfg.memory.autoApprove ? 'active' : 'pending'
     for (const f of fatos.slice(0, 3)) {
       const texto = String(f?.texto || '').trim()
-      if (texto.length > 3) addFact(texto, { category: asCategory(f?.categoria), source: 'auto', status })
+      if (texto.length > 3) {
+        addFact(texto, {
+          category: asCategory(f?.categoria),
+          source: 'auto',
+          status,
+          confidence: typeof f.confianca === 'number' ? f.confianca : undefined,
+          evidence: f.evidencia ? [String(f.evidencia)] : undefined
+        })
+      }
     }
   } catch {
     /* extração é best-effort */

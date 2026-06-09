@@ -203,9 +203,17 @@ function registerIpc(): void {
   // A "fala" é transmitida em tempo real via evento 'chat:delta'; o invoke
   // resolve com o resultado final (board, memória, eventos, notas).
   ipcMain.handle('chat:ask', async (event, payload: { sessionId: string; text: string; voice?: boolean }) => {
-    return runTurn(payload.sessionId, payload.text, !!payload.voice, (chunk, phase, kind = 'both') => {
-      if (!event.sender.isDestroyed()) event.sender.send('chat:delta', { chunk, phase, kind })
-    })
+    return runTurn(
+      payload.sessionId,
+      payload.text,
+      !!payload.voice,
+      (chunk, phase, kind = 'both') => {
+        if (!event.sender.isDestroyed()) event.sender.send('chat:delta', { chunk, phase, kind })
+      },
+      (activity) => {
+        if (!event.sender.isDestroyed()) event.sender.send('chat:activity', activity)
+      }
+    )
   })
   // Cancela comandos/coder em execução na sessão (ex.: parar um build travado pelo Esc).
   ipcMain.handle('code:cancel', (_e, sessionId: string): number => cancelSession(sessionId))

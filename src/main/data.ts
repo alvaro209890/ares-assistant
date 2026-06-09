@@ -4,6 +4,7 @@ import { join, dirname } from 'path'
 import type {
   MemoryFact,
   MemoryCategory,
+  MemoryTarget,
   CalendarEvent,
   ChatSession,
   SessionMeta,
@@ -16,6 +17,20 @@ import type {
 } from '../shared/types'
 import { MEMORY_CATEGORIES, MEMORY_CATEGORY_LABEL } from '../shared/types'
 import { formatCodingPreferences } from './preferences'
+import {
+  buildMemoryContextBlock,
+  clampConfidence,
+  cleanMemoryText,
+  hasPolarityConflict,
+  inferMemoryCategory,
+  memoryIdentity,
+  memoryTargetForCategory,
+  memoryUsage,
+  mergeEvidence,
+  safeMemoryPromptText,
+  scanMemoryThreat,
+  tokenSimilarity
+} from './memory'
 
 // Persistência local (userData) de: memória de longo prazo, calendário e sessões de
 // conversa. Tudo em JSON simples, sobrevive a fechar/abrir o app.
@@ -51,51 +66,44 @@ const normCat = (c: unknown): MemoryCategory =>
 
 // Migra fatos antigos (sem categoria/origem/status) para o novo formato.
 function normalizeFact(raw: any): MemoryFact {
+  const category = normCat(raw?.category)
+  const evidence = Array.isArray(raw?.evidence)
+    ? raw.evidence.map((x: unknown) => cleanMemoryText(x)).filter(Boolean).slice(0, 4)
+    : undefined
+  const target: MemoryTarget =
+    raw?.target === 'user' || raw?.target === 'memory' ? raw.target : memoryTargetForCategory(category)
   return {
     id: typeof raw?.id === 'string' ? raw.id : uid('fact'),
-    text: String(raw?.text ?? '').trim(),
-    category: normCat(raw?.category),
+    text: cleanMemoryText(raw?.text ?? ''),
+    category,
     source: raw?.source === 'auto' ? 'auto' : 'manual',
     status: raw?.status === 'pending' ? 'pending' : 'active',
     createdAt: typeof raw?.createdAt === 'number' ? raw.createdAt : Date.now(),
-    updatedAt: typeof raw?.updatedAt === 'number' ? raw.updatedAt : undefined
+    updatedAt: typeof raw?.updatedAt === 'number' ? raw.updatedAt : undefined,
+    target,
+    confidence: raw?.confidence === undefined ? undefined : clampConfidence(raw.confidence),
+    evidence,
+    review: ['ok', 'possible_conflict', 'low_confidence'].includes(raw?.review) ? raw.review : undefined
   }
 }
 
 export function loadMemory(): MemoryFact[] {
-  return readJSON<any[]>('memory.json', []).map(normalizeFact).filter((f) => f.text)
+  return readJSON<any[]>('memory.json', [])
+    .map(normalizeFact)
+    .filter((f) => f.text)
 }
 
 function saveMemory(facts: MemoryFact[]): void {
   writeJSON('memory.json', facts)
 }
 
-const tokenize = (s: string): Set<string> =>
-  new Set(
-    s
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-z0-9\s]/g, ' ')
-      .split(/\s+/)
-      .filter((w) => w.length > 3)
-  )
-
-// Sobreposição de tokens (Jaccard) para decidir se um fato é "o mesmo" de outro
-// e deve ser atualizado em vez de duplicado.
-function similarity(a: string, b: string): number {
-  const ta = tokenize(a)
-  const tb = tokenize(b)
-  if (!ta.size || !tb.size) return 0
-  let inter = 0
-  for (const t of ta) if (tb.has(t)) inter++
-  return inter / (ta.size + tb.size - inter)
-}
-
 export interface AddFactOptions {
   category?: MemoryCategory
   source?: 'manual' | 'auto'
   status?: 'active' | 'pending'
+  target?: MemoryTarget
+  confidence?: number
+  evidence?: string[]
 }
 
 /**
@@ -104,34 +112,82 @@ export interface AddFactOptions {
  * não substituem fatos já ativos confirmados pelo usuário.
  */
 export function addFact(text: string, opts: AddFactOptions = {}): MemoryFact[] {
-  const t = text.trim()
+  const t = cleanMemoryText(text)
   if (!t) return loadMemory()
+  if (scanMemoryThreat(t)) return loadMemory()
   const facts = loadMemory()
-  const category = opts.category ? normCat(opts.category) : undefined
+  const category = opts.category ? normCat(opts.category) : inferMemoryCategory(t)
   const source = opts.source ?? 'manual'
   const status = opts.status ?? 'active'
+  const target = opts.target || memoryTargetForCategory(category)
+  const confidence = opts.confidence === undefined ? (source === 'auto' ? 0.7 : 1) : clampConfidence(opts.confidence)
+  const evidence = mergeEvidence(undefined, opts.evidence)
 
-  const exact = facts.find((f) => f.text.toLowerCase() === t.toLowerCase())
+  const identity = memoryIdentity(t)
+  const exact = facts.find(
+    (f) => f.text.toLowerCase() === t.toLowerCase() || (memoryIdentity(f.text) === identity && !hasPolarityConflict(f.text, t))
+  )
   if (exact) {
     // Já existe igual: só promove de pending->active e ajusta categoria se vier.
     if (status === 'active') exact.status = 'active'
-    if (category) exact.category = category
+    exact.category = category
+    exact.target = target
+    exact.confidence = Math.max(exact.confidence ?? 0, confidence)
+    exact.evidence = mergeEvidence(exact.evidence, evidence)
+    exact.review = exact.review === 'possible_conflict' && status !== 'active' ? exact.review : 'ok'
     exact.updatedAt = Date.now()
     saveMemory(facts)
     return facts
   }
 
   const similar = facts
-    .map((f) => ({ f, score: similarity(f.text, t) }))
-    .filter((x) => x.score >= 0.55)
+    .map((f) => ({ f, score: tokenSimilarity(f.text, t), conflict: hasPolarityConflict(f.text, t) }))
+    .filter((x) => x.score >= 0.45)
     .sort((a, b) => b.score - a.score)[0]
   if (similar) {
+    if (similar.conflict && source === 'auto') {
+      facts.unshift({
+        id: uid('fact'),
+        text: t,
+        category,
+        source,
+        status: 'pending',
+        createdAt: Date.now(),
+        target,
+        confidence: Math.min(confidence, 0.55),
+        evidence,
+        review: 'possible_conflict'
+      })
+      saveMemory(facts)
+      return facts
+    }
+
     // Não sobrescreve um fato manual já confirmado com uma extração automática:
     // nesse caso ignora a duplicata para não poluir a memória.
     if (source === 'auto' && similar.f.status === 'active' && similar.f.source === 'manual') return facts
+    if (similar.score < 0.62) {
+      facts.unshift({
+        id: uid('fact'),
+        text: t,
+        category,
+        source,
+        status: source === 'auto' ? 'pending' : status,
+        createdAt: Date.now(),
+        target,
+        confidence,
+        evidence,
+        review: source === 'auto' && confidence < 0.7 ? 'low_confidence' : 'ok'
+      })
+      saveMemory(facts)
+      return facts
+    }
     similar.f.text = t
-    if (category) similar.f.category = category
+    similar.f.category = category
+    similar.f.target = target
+    similar.f.confidence = Math.max(similar.f.confidence ?? 0, confidence)
+    similar.f.evidence = mergeEvidence(similar.f.evidence, evidence)
     if (status === 'active') similar.f.status = 'active'
+    similar.f.review = similar.f.review === 'possible_conflict' && status !== 'active' ? similar.f.review : 'ok'
     similar.f.updatedAt = Date.now()
     saveMemory(facts)
     return facts
@@ -143,7 +199,11 @@ export function addFact(text: string, opts: AddFactOptions = {}): MemoryFact[] {
     category: category ?? 'outros',
     source,
     status,
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    target,
+    confidence,
+    evidence,
+    review: source === 'auto' && confidence < 0.7 ? 'low_confidence' : 'ok'
   })
   saveMemory(facts)
   return facts
@@ -153,9 +213,16 @@ export function updateFact(id: string, patch: Partial<Pick<MemoryFact, 'text' | 
   const facts = loadMemory()
   const f = facts.find((x) => x.id === id)
   if (f) {
-    if (typeof patch.text === 'string' && patch.text.trim()) f.text = patch.text.trim()
-    if (patch.category) f.category = normCat(patch.category)
+    if (typeof patch.text === 'string') {
+      const text = cleanMemoryText(patch.text)
+      if (text && !scanMemoryThreat(text)) f.text = text
+    }
+    if (patch.category) {
+      f.category = normCat(patch.category)
+      f.target = memoryTargetForCategory(f.category)
+    }
     if (patch.status) f.status = patch.status
+    if (patch.status === 'active') f.review = 'ok'
     f.updatedAt = Date.now()
     saveMemory(facts)
   }
@@ -179,24 +246,29 @@ export function removeFact(id: string): MemoryFact[] {
 export function memorySummary(maxChars = 1400): string {
   const active = loadMemory().filter((f) => f.status === 'active')
   if (!active.length) return '(nada registrado)'
+  const usage = memoryUsage(active)
   const byCat = new Map<MemoryCategory, string[]>()
   for (const f of active) {
     const arr = byCat.get(f.category) || []
-    arr.push(f.text)
+    arr.push(safeMemoryPromptText(f.text))
     byCat.set(f.category, arr)
   }
-  let out = ''
+  let out = `Perfil ${usage.user.pct}% (${usage.user.chars}/${usage.user.limit}); notas ${usage.memory.pct}% (${usage.memory.chars}/${usage.memory.limit}).`
   for (const cat of MEMORY_CATEGORIES) {
     const items = byCat.get(cat)
     if (!items?.length) continue
-    const block = `${MEMORY_CATEGORY_LABEL[cat]}: ${items.join('; ')}`
+    const block = `\n${MEMORY_CATEGORY_LABEL[cat]}: ${items.join('; ')}`
     if (out.length + block.length > maxChars) {
-      out += (out ? '\n' : '') + block.slice(0, Math.max(0, maxChars - out.length))
+      out += block.slice(0, Math.max(0, maxChars - out.length))
       break
     }
-    out += (out ? '\n' : '') + block
+    out += block
   }
   return out || '(nada registrado)'
+}
+
+export function memoryPromptBlock(maxChars = 1500): string {
+  return buildMemoryContextBlock(memorySummary(maxChars))
 }
 
 /**
@@ -328,6 +400,40 @@ export function appendMessages(id: string, msgs: StoredMessage[]): ChatSession |
   }
   saveSessions(list)
   return s
+}
+
+export function searchSessions(query: string, limit = 5): {
+  query: string
+  matches: Array<{ sessionId: string; title: string; updatedAt: number; role: StoredMessage['role']; content: string; score: number }>
+} {
+  const q = cleanMemoryText(query)
+  if (!q) return { query: q, matches: [] }
+  const terms = memoryIdentity(q).split(/\s+/).filter(Boolean)
+  if (!terms.length) return { query: q, matches: [] }
+  const matches: Array<{ sessionId: string; title: string; updatedAt: number; role: StoredMessage['role']; content: string; score: number }> = []
+  for (const s of loadSessions()) {
+    for (const m of s.messages) {
+      const text = cleanMemoryText(m.content)
+      if (!text) continue
+      const hay = memoryIdentity(text)
+      const score = terms.reduce((n, t) => n + (hay.includes(t) ? 1 : 0), 0)
+      if (score <= 0) continue
+      matches.push({
+        sessionId: s.id,
+        title: s.title,
+        updatedAt: s.updatedAt,
+        role: m.role,
+        content: text.slice(0, 360),
+        score
+      })
+    }
+  }
+  return {
+    query: q,
+    matches: matches
+      .sort((a, b) => b.score - a.score || b.updatedAt - a.updatedAt)
+      .slice(0, Math.max(1, Math.min(Number(limit) || 5, 20)))
+  }
 }
 export function setSessionSummary(id: string, summary: string, keepLast: number): void {
   const list = loadSessions()

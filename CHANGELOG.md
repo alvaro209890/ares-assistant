@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.29.0 - 2026-06-09
+
+- **Memoria estilo Hermes Agent oficial**: a memoria agora segue a logica do repositorio `NousResearch/hermes-agent`: fatos curtos, duradouros, com alvo (`perfil do usuario` ou `notas do agente`), limite de tamanho, evidencia, confianca e revisao. Fatos contraditorios ou fracos entram como pendentes, em vez de sobrescrever memoria boa.
+- **Memoria mais segura**: antes de salvar ou injetar memoria no prompt, o Ares remove tokens/segredos comuns, bloqueia padroes de prompt injection/exfiltracao e envolve o contexto em `<memory-context>` com aviso de sistema. Isso reduz o risco de uma memoria virar instrucao maliciosa.
+- **Busca de conversas antigas**: nova ferramenta `memoria.buscar` procura em sessoes salvas quando o usuario pede para lembrar algo que ja foi discutido, sem transformar progresso temporario em memoria permanente.
+- **Edicao de codigo mais precisa**: nova ferramenta `codigo.editar` edita arquivos existentes com replace, insert before/after e line range. Ela tenta correspondencia exata, depois correspondencia flexivel por linhas/espacos, rejeita matches ambiguos e bloqueia caminhos sensiveis como `.env`, `.ssh` e `.git`.
+- **Chat lateral acompanha o trabalho real**: o renderer agora mostra uma linha do tempo por resposta com leitura, busca, escrita, comandos, git, diagnostico, testes, lint, formatacao e trechos de `stdout`/`stderr` em tempo real. Isso deixa claro o que o Ares esta lendo, editando e executando no PC.
+- **Tela de Memoria mais informativa**: cada fato mostra alvo, confianca, possivel conflito e evidencia quando existir, inclusive nos itens pendentes.
+
 ## 0.28.2 - 2026-06-09
 
 - **Voz de análise mais clara e formal**: respostas faladas agora removem markdown, listas numeradas, bullets, links e marcações como `**texto**` antes de chegar ao Piper/Web Speech. Isso evita áudio embolado ao analisar pastas com resposta estruturada.

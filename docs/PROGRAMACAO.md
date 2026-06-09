@@ -7,6 +7,7 @@ O modo programador do Ares e nativo. Ele trabalha diretamente no workspace permi
 - `codigo.workspace {path?}`: resume projeto, stack, scripts, linguagens e estado Git.
 - `codigo.buscar {path?, consulta, filtro?}`: busca texto ou simbolos.
 - `codigo.ler {path?, arquivo, inicio?, linhas?}`: le trechos com numeros de linha.
+- `codigo.editar {path?, arquivo, modo?, antigo?, novo?, ancora?, inicio?, fim?, todos?, esperado?}`: edita um arquivo existente com correspondencia exata ou flexivel.
 - `codigo.criar {path?, arquivo, conteudo, sobrescrever?}`: cria ou escreve arquivo.
 - `codigo.patch.preview {path?, diff?, patches?}`: valida patch antes de aplicar.
 - `codigo.patch.aplicar {path?, diff?, patches?}`: aplica diff Git ou patches textuais.
@@ -25,10 +26,20 @@ O modo programador do Ares e nativo. Ele trabalha diretamente no workspace permi
 A escrita real usa `integrations.code.allowPatchApply`. Quando ativo, o Ares pode:
 
 - criar arquivos;
+- editar arquivos existentes com `codigo.editar`;
 - aplicar patches textuais;
 - aplicar diffs Git;
 - gerar scaffolds;
 - usar o executor autonomo para tarefas de varios arquivos.
+
+`codigo.editar` cobre alteracoes pequenas e localizadas. Modos suportados:
+
+- `replace`: troca `antigo` por `novo`;
+- `insert_before`: insere `novo` antes de `ancora` ou `antigo`;
+- `insert_after`: insere `novo` depois de `ancora` ou `antigo`;
+- `line_range`: substitui as linhas `inicio` ate `fim` por `novo`.
+
+A ferramenta tenta match exato, depois match flexivel por linhas aparadas e por espacos normalizados. Se houver mais de uma ocorrencia, ela rejeita a edicao a menos que `todos` esteja ativo; `esperado` permite exigir uma quantidade exata de matches. Caminhos sensiveis como `.git`, `.ssh`, `.env` e chaves SSH sao bloqueados.
 
 O preview de patch continua recomendado antes de aplicar mudancas grandes. O agente deve explicar quais arquivos serao alterados e validar o projeto depois da escrita sempre que houver comando permitido.
 
@@ -104,6 +115,7 @@ Se um script existir mas nao estiver na allowlist, ele aparece como nao executad
 - "Analise o projeto em `/home/acer/Documentos/Ares`."
 - "Procure onde fica `runCodeTerminal`."
 - "Leia `src/main/code.ts` a partir da linha 420."
+- "Troque essa funcao por uma versao mais simples em `src/main/code.ts`."
 - "Crie um arquivo `docs/NOTAS.md` com o resumo da arquitetura."
 - "Faça preview desse patch."
 - "Aplique o patch e rode `npm run verify`."
@@ -114,6 +126,7 @@ Se um script existir mas nao estiver na allowlist, ele aparece como nao executad
 
 - Localizar antes de editar.
 - Ler arquivos com linhas antes de explicar detalhes.
+- Preferir `codigo.editar` para alteracoes pequenas em arquivo existente.
 - Preferir patches pequenos e reversiveis.
 - Rodar diagnostico ou comando de teste apos mudancas.
 - Pedir autorizacao antes de comandos que alterem ambiente, dependencias ou Git.

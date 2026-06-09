@@ -20,7 +20,9 @@ vi.mock('../src/main/ninerouter', () => ({
   streamChat: vi.fn()
 }))
 
-import { mkdirSync, rmSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import type { AgentActivityEvent } from '../src/shared/types'
 import { chatJSON, streamChat } from '../src/main/ninerouter'
 import { runTurn, stripRepeatedGreeting } from '../src/main/agent'
 import { createSession } from '../src/main/data'
@@ -97,6 +99,48 @@ describe('agent — runTurn (orquestração do cérebro)', () => {
 
     expect(brain).toHaveBeenCalledTimes(2)
     expect(r.fala).toBe('São quatro, senhor.')
+  })
+
+  it('emite atividades ao ler arquivo no modo programador', async () => {
+    updateConfig({ integrations: { code: { workspaceRoot: TMP, allowedRoots: [TMP] } } })
+    writeFileSync(join(TMP, 'a.ts'), 'export const a = 1\n', 'utf8')
+    const sid = createSession().id
+    nextEnvelope('Vou ler.', [{ tipo: 'codigo.ler', arquivo: 'a.ts' }])
+    nextEnvelope('Arquivo lido.', [])
+    const activities: AgentActivityEvent[] = []
+
+    await runTurn(sid, 'leia a.ts', false, undefined, (a) => activities.push(a))
+
+    expect(activities.some((a) => a.kind === 'read' && a.status === 'running')).toBe(true)
+    expect(activities.some((a) => a.kind === 'read' && a.status === 'done' && a.detail === 'a.ts')).toBe(true)
+  })
+
+  it('emite waiting quando terminal precisa de autorização', async () => {
+    updateConfig({ integrations: { code: { workspaceRoot: TMP, allowedRoots: [TMP], terminalAutoApprove: false } } })
+    const sid = createSession().id
+    nextEnvelope('Vou preparar o comando.', [{ tipo: 'codigo.terminal', comando: 'npm install left-pad' }])
+    nextEnvelope('Autoriza executar npm install left-pad?', [])
+    const activities: AgentActivityEvent[] = []
+
+    await runTurn(sid, 'instale left-pad', false, undefined, (a) => activities.push(a))
+
+    expect(activities.some((a) => a.kind === 'terminal' && a.status === 'running')).toBe(true)
+    expect(activities.some((a) => a.kind === 'terminal' && a.status === 'waiting' && a.command === 'npm install left-pad')).toBe(true)
+  })
+
+  it('emite amostra de output em comando permitido', async () => {
+    updateConfig({
+      integrations: { code: { workspaceRoot: TMP, allowedRoots: [TMP], allowedCommands: ['node --version'] } }
+    })
+    const sid = createSession().id
+    nextEnvelope('Vou rodar.', [{ tipo: 'codigo.comando', comando: 'node --version' }])
+    nextEnvelope('Comando concluído.', [])
+    const activities: AgentActivityEvent[] = []
+
+    await runTurn(sid, 'rode node --version', false, undefined, (a) => activities.push(a))
+
+    expect(activities.some((a) => a.kind === 'command' && a.status === 'output' && /v\d+/.test(a.output || ''))).toBe(true)
+    expect(activities.some((a) => a.kind === 'command' && a.status === 'done')).toBe(true)
   })
 
   it('voz+código: streama a resposta COMPLETA na tela e fala um resumo NÃO-vazio (fase 2)', async () => {

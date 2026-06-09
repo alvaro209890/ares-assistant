@@ -10,9 +10,11 @@ Ares e um assistente desktop em Electron, React e TypeScript, feito para uso loc
 - **Voz neural (Linux e Windows)**: usa o Piper local — voz masculina pt-BR grave e humana, estilo JARVIS. O binario e baixado em background no primeiro uso; ate ficar pronto (e no macOS) usa a Web Speech do Chromium como fallback, priorizando vozes Natural/Neural/Online.
 - **Responde por voz tambem ao texto**: mensagens digitadas no chat sao faladas quando o TTS esta ligado, nao so os comandos de microfone.
 - **Voz de analise mais precisa**: respostas faladas limpam markdown, listas, bullets e links antes do TTS, usam resumo falavel para analise de pastas/projetos e evitam repetir saudacao dentro do mesmo chat.
+- **Memoria estilo Hermes Agent**: fatos duradouros agora têm alvo, limite de contexto, evidencia, confianca e revisao. O Ares deduplica fatos parecidos, coloca contradicoes em pendente, bloqueia memoria suspeita e busca conversas antigas com `memoria.buscar`.
 - **Modelos DeepSeek**: somente `deepseek-v4-flash` e `deepseek-v4-pro` ficam disponiveis.
-- **Modo Programador nativo**: busca codigo, le arquivos com linhas, cria arquivos, aplica patches, gera scaffold, roda diagnostico e usa terminal local com autorizacao.
+- **Modo Programador nativo**: busca codigo, le arquivos com linhas, edita trechos existentes com match exato/flexivel, cria arquivos, aplica patches, gera scaffold, roda diagnostico e usa terminal local com autorizacao.
 - **Skills de teste e qualidade**: `codigo.testar` detecta o runner do projeto (script `test`, vitest/jest/pytest/go) e responde por voz quantos testes passaram/falharam; `codigo.lint` (eslint/ruff) conta os problemas; `codigo.formatar` (prettier/ruff/gofmt) formata o codigo. Deteccao e parsing puros em `src/main/devtools.ts`; execucao assincrona, com timeout e cancelavel por Esc.
+- **Chat lateral acompanha o PC**: enquanto o Ares trabalha, a conversa mostra leitura de arquivos, buscas, edicoes, comandos, git, diagnostico, testes, lint, formatacao e saidas recentes em tempo real.
 - **Edicao por voz no codigo**: entende caminhos ditados como "src barra main ponto ts" e termos tecnicos ("funcao seta" -> arrow function, "tente e capture" -> try catch); evita ler codigo, diffs ou logs em voz alta. Resultados grandes sao truncados para voz e comandos lentos retornam resumo curto.
 - **Voz mais viva (JARVIS)**: siglas tecnicas pronunciadas certo (API, JSON, TS, JS), fala mais continua e ritmo que muda com o conteudo (erro direto e rapido, sucesso calmo e elegante).
 - **Engenheiro proativo**: apos editar/aplicar patch sugere validar com o teste/build do projeto, reporta a saude do projeto, avisa "iniciando a tarefa, senhor" em comandos longos, lembra do ultimo arquivo/comando e respeita as preferencias de codigo do usuario.
@@ -39,6 +41,8 @@ Use os artefatos `.deb` ou `.AppImage` gerados no mesmo workflow, ou gere localm
 ```bash
 npm run dist:linux
 ```
+
+Ao instalar o `.deb` por cima da versao anterior, o pacote atualiza o aplicativo e preserva os dados em `~/.config/ares` (config, chaves, cidade, tarefas, memoria, sessoes e voz baixada). O `.AppImage` e portatil; basta substituir o arquivo antigo pelo novo.
 
 ## Desenvolvimento
 
@@ -96,6 +100,7 @@ O Ares nao depende de servico externo para editar codigo. As ferramentas nativas
 - `codigo.workspace`: resume stack, scripts, linguagens, arquivos ignorados e estado Git.
 - `codigo.buscar`: busca texto ou simbolos em arquivos permitidos.
 - `codigo.ler`: le trechos com numeros de linha.
+- `codigo.editar`: altera trechos existentes com replace, insert before/after ou intervalo de linhas, usando match exato/flexivel.
 - `codigo.criar`: cria ou sobrescreve arquivos quando permitido.
 - `codigo.patch.preview`: valida e resume patches antes de aplicar.
 - `codigo.patch.aplicar`: aplica diff Git ou operacoes textuais.
@@ -114,6 +119,7 @@ No Windows, o terminal nativo usa PowerShell. No Linux e macOS, usa Bash. Comand
 - **Saude do projeto**: `codigo.workspace` agora traz um campo `health` com avaliacao estrutural rapida (alteracoes sem commit, ausencia de teste/lockfile), sem rodar comandos; `codigo.diagnostico` reporta a saude apos rodar typecheck/lint/test (`tudo verde` ou `atencao: ... falharam`). Funcoes `structuralHealth` e `assessDiagnosisHealth`.
 - **Tarefas longas**: antes de bloquear em um comando demorado (instalar/build/test), o Ares fala "Iniciando a tarefa, senhor. Um momento." para nao deixar o usuario no vacuo. A deteccao e `isLongRunningCommand`; o aviso so ocorre quando o comando vai de fato rodar (autorizado ou seguro).
 - **Memoria de sessao curta**: o ultimo arquivo editado e o ultimo comando de terminal bem-sucedido sao persistidos (`session-context.json`) e injetados no prompt, para o Ares retomar o trabalho sem pedir o caminho de novo. Veja `setLastEditedFile`/`setLastTerminalCommand`/`sessionContextSummary` em `src/main/data.ts`.
+- **Memoria longa estilo Hermes**: preferencias e fatos duradouros sao sanitizados, deduplicados, separados entre perfil do usuario e notas do agente, e injetados no prompt dentro de `<memory-context>`. Conversas antigas podem ser recuperadas por `memoria.buscar`. Veja `docs/MEMORIA.md` e `src/main/memory.ts`.
 - **Pilulas de contexto (estilo de codigo)**: preferencias de codificacao guardadas na memoria (ex.: "sempre use aspas simples", "prefira funcoes nomeadas") sao filtradas e injetadas na secao de Programacao do prompt, para o Ares respeitar o estilo do usuario ao escrever/editar. Veja `src/main/preferences.ts` e `codingPreferencesSummary`.
 
 ### Execucao nao-bloqueante e cancelamento
@@ -158,6 +164,7 @@ As ferramentas de codigo tambem usam orcamento de tempo em varreduras de pasta. 
 ## Interface
 
 - **Memoria**: os selects de categoria e filtro usam bordas cyan mais visiveis, hover claro, foco com glow suave e seta SVG customizada. As pilulas de categoria continuam inline e editaveis.
+- **Timeline no chat**: cada resposta pode exibir o que o Ares esta fazendo no computador, com etapas de leitura, busca, escrita e comandos.
 - **Provedor de IA**: o cadastro mostra icones por provedor (`DeepSeek`, `Groq`, `OpenRouter`, `OpenAI`, `Local`) e borda colorida sutil conforme o provedor selecionado.
 - **Chave de API**: o campo tem icone de chave e botao para mostrar/ocultar a senha sem trocar de tela.
 - **Voz em programacao**: Piper responde rapido (processo quente + frase seguinte ja sintetizada em paralelo), cai para Web Speech no timeout, preserva virgulas como pausa natural e cancela fala antiga quando entra uma nova resposta ou interrupcao.
@@ -167,7 +174,8 @@ As ferramentas de codigo tambem usam orcamento de tempo em varreduras de pasta. 
 ## Arquitetura
 
 - `src/main/agent.ts`: prompt do agente, roteamento de acoes e execucao das ferramentas.
-- `src/main/code.ts`: motor nativo de programacao, patches, terminal, scaffold e diagnostico.
+- `src/main/memory.ts`: sanitizacao, redacao, limites, deduplicacao e contexto cercado da memoria.
+- `src/main/code.ts`: motor nativo de programacao, edicao precisa, patches, terminal, scaffold e diagnostico.
 - `src/main/exec.ts`: execucao de processos assincrona (spawnAsync) com timeout, streaming e AbortSignal.
 - `src/main/running.ts`: registro de execucoes canceláveis por sessao (cancelamento via Esc / IPC).
 - `src/main/coder.ts`: executor autonomo para tarefas de codigo em varias etapas.
@@ -204,6 +212,6 @@ npm run build
 
 Na interface, abra a aba **Memoria**, altere o filtro e edite uma pilula de categoria para confirmar que `onChange` continua funcionando. Em **Configuracoes**, troque o provedor/modelo, use o botao de olho na chave de API e rode **TESTAR CONEXAO**.
 
-Para voz, ative TTS e modo continuo, peca uma resposta curta, uma media e depois interrompa falando por cima. Para simular o fallback, deixe o Piper indisponivel ou lento; o Ares deve cancelar a tentativa, cair para Web Speech e continuar a conversa. No modo programador, rode uma analise em pasta grande e confirme que a resposta falada fica curta, com aviso de resultado truncado quando necessario.
+Para voz, ative TTS e modo continuo, peca uma resposta curta, uma media e depois interrompa falando por cima. Para simular o fallback, deixe o Piper indisponivel ou lento; o Ares deve cancelar a tentativa, cair para Web Speech e continuar a conversa. No modo programador, rode uma analise em pasta grande e confirme que a resposta falada fica curta, com aviso de resultado truncado quando necessario, e que o chat lateral mostra leitura, comandos e saidas em andamento. Na memoria, salve uma preferencia, tente salvar um fato contraditorio e confirme que ele fica pendente.
 
 O workflow de instaladores roda em push para `main` e publica artefatos para Windows e Linux.

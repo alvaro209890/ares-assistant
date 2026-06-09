@@ -10,6 +10,7 @@ import {
   buildCodeIndex,
   classifyCommand,
   diagnoseProject,
+  editCodeFile,
   isLongRunningCommand,
   planDiagnosis,
   previewCodePatch,
@@ -181,6 +182,56 @@ describe('ferramentas locais de programação', () => {
     const applied = applyCodePatch(config(), patch)
     expect(applied.applied).toBe(true)
     expect(readCodeFile(config(), { file: 'src/main.ts' }).content).toContain('olá')
+  })
+
+  it('edita arquivo com substituição flexível e contagem esperada', () => {
+    writeProjectFile('src/edit.ts', 'export function run() {\n    return "old"\n}\n')
+
+    const res = editCodeFile(config(), {
+      file: 'src/edit.ts',
+      oldText: 'export function run() {\nreturn "old"',
+      newText: 'export function run() {\n    return "new"',
+      expectedMatches: 1
+    })
+
+    expect(res.changed).toBe(true)
+    expect(res.strategy).toBe('line_trimmed')
+    expect(readFileSync(join(root, 'src/edit.ts'), 'utf8')).toContain('return "new"')
+  })
+
+  it('insere por âncora e edita intervalo de linhas', () => {
+    writeProjectFile('src/lines.ts', 'const a = 1\nconst b = 2\n')
+
+    const inserted = editCodeFile(config(), {
+      file: 'src/lines.ts',
+      mode: 'insert_after',
+      anchor: 'const a = 1',
+      newText: '\nconst inserted = true'
+    })
+    expect(inserted.matchCount).toBe(1)
+    expect(readFileSync(join(root, 'src/lines.ts'), 'utf8')).toContain('const inserted = true')
+
+    const ranged = editCodeFile(config(), {
+      file: 'src/lines.ts',
+      mode: 'line_range',
+      startLine: 2,
+      endLine: 2,
+      newText: 'const b = 3'
+    })
+    expect(ranged.strategy).toBe('line_range')
+    expect(readFileSync(join(root, 'src/lines.ts'), 'utf8')).toContain('const b = 3')
+  })
+
+  it('recusa edição ambígua sem replaceAll', () => {
+    writeProjectFile('src/ambiguous.ts', 'x()\nx()\n')
+
+    expect(() =>
+      editCodeFile(config(), {
+        file: 'src/ambiguous.ts',
+        oldText: 'x()',
+        newText: 'y()'
+      })
+    ).toThrow(/encontrado 2 vezes/)
   })
 })
 

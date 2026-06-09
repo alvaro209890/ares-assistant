@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AgentTurnResult,
+  AgentActivityEvent,
   AppConfig,
   AresState,
   DeepPartial,
@@ -83,6 +84,11 @@ const api = {
         cb(data)
       ipcRenderer.on('chat:delta', listener)
       return () => ipcRenderer.removeListener('chat:delta', listener)
+    },
+    onActivity: (cb: (data: AgentActivityEvent) => void): (() => void) => {
+      const listener = (_e: unknown, data: AgentActivityEvent) => cb(data)
+      ipcRenderer.on('chat:activity', listener)
+      return () => ipcRenderer.removeListener('chat:activity', listener)
     }
   },
   code: {

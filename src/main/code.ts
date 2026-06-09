@@ -8,6 +8,8 @@ import type {
   CodeCommandResult,
   CodeDiagnosis,
   CodeDiagnosisCheck,
+  CodeEditMode,
+  CodeEditResult,
   CodeFileSnippet,
   CodePatchApplyResult,
   CodePatchPreview,
@@ -31,6 +33,8 @@ import {
   parseLintCount,
   describeDevResult
 } from './devtools'
+
+export type CodeProgressFn = (event: { stream: 'stdout' | 'stderr'; chunk: string }) => void
 
 const IGNORE_NAMES = new Set([
   '.git',
@@ -421,11 +425,190 @@ export function readCodeFile(
   }
 }
 
+type TextMatch = { start: number; end: number; strategy: string }
+
+function lineOffsets(content: string): number[] {
+  const offsets = [0]
+  for (let i = 0; i < content.length; i++) {
+    if (content[i] === '\n') offsets.push(i + 1)
+  }
+  return offsets
+}
+
+function exactMatches(content: string, needle: string): TextMatch[] {
+  const matches: TextMatch[] = []
+  if (!needle) return matches
+  let idx = content.indexOf(needle)
+  while (idx !== -1) {
+    matches.push({ start: idx, end: idx + needle.length, strategy: 'exact' })
+    idx = content.indexOf(needle, idx + Math.max(1, needle.length))
+  }
+  return matches
+}
+
+function lineTrimmedMatches(content: string, needle: string): TextMatch[] {
+  const oldLines = needle.replace(/\r\n/g, '\n').split('\n')
+  if (!oldLines.length) return []
+  const lines = content.replace(/\r\n/g, '\n').split('\n')
+  const offsets = lineOffsets(content.replace(/\r\n/g, '\n'))
+  const want = oldLines.map((l) => l.trimEnd())
+  const matches: TextMatch[] = []
+  for (let i = 0; i <= lines.length - oldLines.length; i++) {
+    const got = lines.slice(i, i + oldLines.length).map((l) => l.trimEnd())
+    if (got.length === want.length && got.every((line, idx) => line.trim() === want[idx].trim())) {
+      const start = offsets[i]
+      const endLine = i + oldLines.length - 1
+      const end = offsets[endLine] + lines[endLine].length
+      matches.push({ start, end, strategy: 'line_trimmed' })
+    }
+  }
+  return matches
+}
+
+function whitespaceRegexMatches(content: string, needle: string): TextMatch[] {
+  const compact = needle.trim()
+  if (!compact || !/\s/.test(compact)) return []
+  const pattern = compact
+    .split(/\s+/)
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('\\s+')
+  const re = new RegExp(pattern, 'g')
+  const matches: TextMatch[] = []
+  let m: RegExpExecArray | null
+  while ((m = re.exec(content))) {
+    matches.push({ start: m.index, end: m.index + m[0].length, strategy: 'whitespace_normalized' })
+    if (m[0].length === 0) re.lastIndex++
+  }
+  return matches
+}
+
+function findFlexibleMatches(content: string, needle: string): TextMatch[] {
+  const exact = exactMatches(content, needle)
+  if (exact.length) return exact
+  const lineTrimmed = lineTrimmedMatches(content, needle)
+  if (lineTrimmed.length) return lineTrimmed
+  return whitespaceRegexMatches(content, needle)
+}
+
+function applyTextReplacements(content: string, matches: TextMatch[], replacement: string, mode: CodeEditMode): string {
+  let next = content
+  for (const m of [...matches].sort((a, b) => b.start - a.start)) {
+    const insert =
+      mode === 'insert_before'
+        ? replacement + next.slice(m.start, m.end)
+        : mode === 'insert_after'
+          ? next.slice(m.start, m.end) + replacement
+          : replacement
+    next = next.slice(0, m.start) + insert + next.slice(m.end)
+  }
+  return next
+}
+
+function lineRangeEdit(content: string, startLine: number, endLine: number, replacement: string): { next: string; matchCount: number } {
+  const lines = content.replace(/\r\n/g, '\n').split('\n')
+  const start = Math.max(1, Math.floor(startLine || 1))
+  const end = Math.max(start, Math.floor(endLine || start))
+  if (start > lines.length + 1) throw new Error(`Linha inicial fora do arquivo: ${start}`)
+  const before = lines.slice(0, start - 1)
+  const after = lines.slice(Math.min(end, lines.length))
+  const repl = replacement.split(/\r?\n/)
+  const next = [...before, ...repl, ...after].join('\n')
+  return { next, matchCount: Math.max(1, Math.min(end, lines.length) - start + 1) }
+}
+
+function editPreview(content: string, file: string): string {
+  const lines = content.split(/\r?\n/).slice(0, 8).join('\n')
+  return `${file}\n${lines}`.slice(0, 900)
+}
+
+function normalizeEditMode(mode: unknown): CodeEditMode {
+  return ['replace', 'insert_before', 'insert_after', 'line_range'].includes(String(mode))
+    ? (String(mode) as CodeEditMode)
+    : 'replace'
+}
+
+function assertSafeEditPath(file: string): void {
+  const parts = displayPath(file).split('/')
+  const name = parts[parts.length - 1]?.toLowerCase() || ''
+  if (parts.includes('.git') || parts.includes('.ssh')) throw new Error('Edição bloqueada em diretório sensível.')
+  if (['.env', '.env.local', '.env.production', 'id_rsa', 'id_ed25519'].includes(name)) {
+    throw new Error(`Edição bloqueada em arquivo sensível: ${file}`)
+  }
+}
+
+export function editCodeFile(
+  cfg: AppConfig,
+  opts: {
+    root?: string
+    file: string
+    mode?: CodeEditMode
+    oldText?: string
+    newText?: string
+    anchor?: string
+    startLine?: number
+    endLine?: number
+    replaceAll?: boolean
+    expectedMatches?: number
+  }
+): CodeEditResult {
+  ensureCanWrite(cfg)
+  const root = resolveCodeWorkspace(cfg, opts.root)
+  const file = String(opts.file || '').trim()
+  if (!file) throw new Error('Diga o arquivo a editar.')
+  assertSafeEditPath(file)
+  const abs = resolveCodeFile(cfg, root, file)
+  if (!existsSync(abs) || !statSync(abs).isFile()) throw new Error(`Arquivo não encontrado: ${file}`)
+  const maxBytes = Math.max(1, codeConfig(cfg).maxFileKB) * 1024
+  if (!isLikelyText(abs, maxBytes)) throw new Error(`Arquivo muito grande ou binário: ${file}`)
+
+  const current = readFileSync(abs, 'utf8')
+  const mode = normalizeEditMode(opts.mode)
+  const replacement = String(opts.newText ?? '')
+  let next = current
+  let matchCount = 0
+  let strategy = 'none'
+
+  if (mode === 'line_range') {
+    const edited = lineRangeEdit(current, Number(opts.startLine || 1), Number(opts.endLine || opts.startLine || 1), replacement)
+    next = edited.next
+    matchCount = edited.matchCount
+    strategy = 'line_range'
+  } else {
+    const needle = mode === 'replace' ? String(opts.oldText || '') : String(opts.anchor || opts.oldText || '')
+    if (!needle) throw new Error(mode === 'replace' ? 'oldText é obrigatório para replace.' : 'anchor é obrigatório para inserção.')
+    const matches = findFlexibleMatches(current, needle)
+    if (!matches.length) throw new Error(`Trecho não encontrado em ${file}. Releia o arquivo e passe uma âncora mais específica.`)
+    if (matches.length > 1 && !opts.replaceAll) {
+      throw new Error(`Trecho encontrado ${matches.length} vezes em ${file}. Use replaceAll ou forneça mais contexto.`)
+    }
+    const used = opts.replaceAll ? matches : [matches[0]]
+    next = applyTextReplacements(current, used, replacement, mode)
+    matchCount = used.length
+    strategy = used[0].strategy
+  }
+
+  if (typeof opts.expectedMatches === 'number' && opts.expectedMatches >= 0 && matchCount !== opts.expectedMatches) {
+    throw new Error(`Edição recusada: esperado ${opts.expectedMatches} ocorrência(s), encontrado ${matchCount}.`)
+  }
+  const changed = next !== current
+  if (changed) writeFileSync(abs, next, 'utf8')
+  return {
+    root,
+    file: relativeDisplayPath(root, abs),
+    mode,
+    changed,
+    strategy,
+    matchCount,
+    bytes: Buffer.byteLength(next, 'utf8'),
+    preview: editPreview(next, relativeDisplayPath(root, abs))
+  }
+}
+
 export function codePromptContext(cfg: AppConfig): string {
   const c = codeConfig(cfg)
   if (!c.enabled) return 'Ferramentas de programação locais: desativadas.'
   return [
-    `Ferramentas de programação locais: ativadas com leitura, escrita, patches, terminal e coder autônomo nativos.`,
+    `Ferramentas de programação locais: ativadas com leitura, edição precisa, escrita, patches, terminal e coder autônomo nativos.`,
     `Workspace padrão: ${c.workspaceRoot}.`,
     `Raízes permitidas: ${(c.allowedRoots || []).join(', ') || '(sem restrição explícita)'}.`,
     `Limites: arquivo até ${c.maxFileKB} KB, ${c.maxSearchResults} resultados de busca, ${c.maxContextChars} caracteres de contexto interno.`
@@ -469,7 +652,7 @@ function isCommandAllowed(cfg: AppConfig, command: string): boolean {
 
 export function runCodeCommand(
   cfg: AppConfig,
-  opts: { root?: string; command: string; signal?: AbortSignal }
+  opts: { root?: string; command: string; signal?: AbortSignal; onProgress?: CodeProgressFn }
 ): Promise<CodeCommandResult> {
   // Guardas SÍNCRONAS (lançam antes de retornar a Promise — os testes contam com isso).
   const root = resolveCodeWorkspace(cfg, opts.root)
@@ -479,8 +662,12 @@ export function runCodeCommand(
   if (!parts.length) throw new Error('Comando vazio.')
 
   const started = Date.now()
-  return spawnAsync(parts[0], parts.slice(1), { cwd: root, timeoutMs: execTimeout(cfg), signal: opts.signal }).then(
-    (res) => ({
+  return spawnAsync(parts[0], parts.slice(1), {
+    cwd: root,
+    timeoutMs: execTimeout(cfg),
+    signal: opts.signal,
+    onChunk: (stream, chunk) => opts.onProgress?.({ stream, chunk })
+  }).then((res) => ({
       root,
       command,
       ok: !res.timedOut && !res.aborted && res.code === 0,
@@ -492,8 +679,7 @@ export function runCodeCommand(
           ? timeoutSummary(command)
           : res.stderr.slice(0, 12000),
       durationMs: Date.now() - started
-    })
-  )
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -686,7 +872,7 @@ function platformShell(command: string): { file: string; args: string[] } {
 
 export function runCodeTerminal(
   cfg: AppConfig,
-  opts: { root?: string; command: string; approved?: boolean; signal?: AbortSignal }
+  opts: { root?: string; command: string; approved?: boolean; signal?: AbortSignal; onProgress?: CodeProgressFn }
 ): Promise<CodeTerminalResult> {
   // Guardas SÍNCRONAS (lançam antes de retornar a Promise).
   if (codeConfig(cfg).terminalEnabled === false) throw new Error('Terminal desativado nas Configurações.')
@@ -706,7 +892,12 @@ export function runCodeTerminal(
 
   const started = Date.now()
   const shell = platformShell(command)
-  return spawnAsync(shell.file, shell.args, { cwd: root, timeoutMs: execTimeout(cfg), signal: opts.signal }).then((res) => ({
+  return spawnAsync(shell.file, shell.args, {
+    cwd: root,
+    timeoutMs: execTimeout(cfg),
+    signal: opts.signal,
+    onChunk: (stream, chunk) => opts.onProgress?.({ stream, chunk })
+  }).then((res) => ({
     ...empty,
     requiresApproval: false,
     ran: true,
@@ -722,10 +913,20 @@ export function runCodeTerminal(
   }))
 }
 
-function gitResult(cfg: AppConfig, root: string, args: string[], signal?: AbortSignal): Promise<CodeCommandResult> {
+function gitResult(
+  cfg: AppConfig,
+  root: string,
+  args: string[],
+  signal?: AbortSignal,
+  onProgress?: CodeProgressFn
+): Promise<CodeCommandResult> {
   const command = `git ${args.join(' ')}`
   const started = Date.now()
-  return spawnAsync('git', ['-C', root, ...args], { timeoutMs: execTimeout(cfg), signal }).then((res) => ({
+  return spawnAsync('git', ['-C', root, ...args], {
+    timeoutMs: execTimeout(cfg),
+    signal,
+    onChunk: (stream, chunk) => onProgress?.({ stream, chunk })
+  }).then((res) => ({
     root,
     command,
     ok: !res.timedOut && !res.aborted && res.code === 0,
@@ -742,16 +943,16 @@ function gitResult(cfg: AppConfig, root: string, args: string[], signal?: AbortS
 
 export function runCodeGit(
   cfg: AppConfig,
-  opts: { root?: string; operation: string; file?: string; signal?: AbortSignal }
+  opts: { root?: string; operation: string; file?: string; signal?: AbortSignal; onProgress?: CodeProgressFn }
 ): Promise<CodeCommandResult> {
   const root = resolveCodeWorkspace(cfg, opts.root)
   const op = String(opts.operation || '').trim()
   const file = opts.file ? relativeDisplayPath(root, resolveCodeFile(cfg, root, opts.file)) : ''
   if (file && (file.startsWith('..') || isAbsolute(file))) throw new Error(`Arquivo fora do workspace: ${opts.file}`)
-  if (op === 'status') return gitResult(cfg, root, ['status', '--short'], opts.signal)
-  if (op === 'diffStat') return gitResult(cfg, root, file ? ['diff', '--stat', '--', file] : ['diff', '--stat'], opts.signal)
-  if (op === 'diff') return gitResult(cfg, root, file ? ['diff', '--', file] : ['diff'], opts.signal)
-  if (op === 'log') return gitResult(cfg, root, ['log', '--oneline', '-10'], opts.signal)
+  if (op === 'status') return gitResult(cfg, root, ['status', '--short'], opts.signal, opts.onProgress)
+  if (op === 'diffStat') return gitResult(cfg, root, file ? ['diff', '--stat', '--', file] : ['diff', '--stat'], opts.signal, opts.onProgress)
+  if (op === 'diff') return gitResult(cfg, root, file ? ['diff', '--', file] : ['diff'], opts.signal, opts.onProgress)
+  if (op === 'log') return gitResult(cfg, root, ['log', '--oneline', '-10'], opts.signal, opts.onProgress)
   throw new Error(`Operação Git não permitida: ${op}`)
 }
 
@@ -1045,7 +1246,7 @@ export function planDiagnosis(
 /** Diagnostica a saúde do projeto: roda as checagens disponíveis e permitidas. */
 export async function diagnoseProject(
   cfg: AppConfig,
-  opts: { root?: string; signal?: AbortSignal } = {}
+  opts: { root?: string; signal?: AbortSignal; onProgress?: CodeProgressFn } = {}
 ): Promise<CodeDiagnosis> {
   const summary = summarizeCodeWorkspace(cfg, opts.root)
   const root = summary.root
@@ -1060,7 +1261,7 @@ export async function diagnoseProject(
       hints.push(`adicione "${step.command}" à allowlist para checar ${step.name}`)
       continue
     }
-    const res = await runCodeCommand(cfg, { root, command: step.command, signal: opts.signal })
+    const res = await runCodeCommand(cfg, { root, command: step.command, signal: opts.signal, onProgress: opts.onProgress })
     const tail = (res.ok ? res.stdout : res.stderr || res.stdout).split(/\r?\n/).filter(Boolean).slice(-3).join(' | ')
     checks.push({ name: step.name, command: step.command, ran: true, ok: res.ok, code: res.code, summary: tail.slice(0, 240) })
   }
@@ -1091,7 +1292,7 @@ async function runDevTool(
   kind: DevToolResult['kind'],
   detect: (p: { scripts?: Record<string, string>; packageManager?: string; files: string[] }) => { command: string; runner: string } | null,
   noneHint: string,
-  opts: { root?: string; signal?: AbortSignal }
+  opts: { root?: string; signal?: AbortSignal; onProgress?: CodeProgressFn }
 ): Promise<DevToolResult> {
   const summary = summarizeCodeWorkspace(cfg, opts.root)
   const root = summary.root
@@ -1115,7 +1316,12 @@ async function runDevTool(
   const parts = splitCommand(detected.command)
   if (!parts.length) return { ...base, command: detected.command }
 
-  const res = await spawnAsync(parts[0], parts.slice(1), { cwd: root, timeoutMs: execTimeout(cfg), signal: opts.signal })
+  const res = await spawnAsync(parts[0], parts.slice(1), {
+    cwd: root,
+    timeoutMs: execTimeout(cfg),
+    signal: opts.signal,
+    onChunk: (stream, chunk) => opts.onProgress?.({ stream, chunk })
+  })
   const ok = !res.timedOut && !res.aborted && res.code === 0
   const combined = `${res.stdout}\n${res.stderr}`
 
@@ -1150,16 +1356,16 @@ async function runDevTool(
 }
 
 /** Skill `codigo.testar`: roda os testes do projeto e resume passou/falhou. */
-export function runTests(cfg: AppConfig, opts: { root?: string; signal?: AbortSignal } = {}): Promise<DevToolResult> {
+export function runTests(cfg: AppConfig, opts: { root?: string; signal?: AbortSignal; onProgress?: CodeProgressFn } = {}): Promise<DevToolResult> {
   return runDevTool(cfg, 'test', detectTestCommand, 'nenhum runner de testes detectado (sem script "test" nem vitest/jest/pytest/go)', opts)
 }
 
 /** Skill `codigo.lint`: roda o linter do projeto e conta os problemas. */
-export function runLint(cfg: AppConfig, opts: { root?: string; signal?: AbortSignal } = {}): Promise<DevToolResult> {
+export function runLint(cfg: AppConfig, opts: { root?: string; signal?: AbortSignal; onProgress?: CodeProgressFn } = {}): Promise<DevToolResult> {
   return runDevTool(cfg, 'lint', detectLintCommand, 'nenhum linter detectado (sem script "lint" nem eslint/ruff)', opts)
 }
 
 /** Skill `codigo.formatar`: aplica o formatador do projeto. */
-export function runFormat(cfg: AppConfig, opts: { root?: string; signal?: AbortSignal } = {}): Promise<DevToolResult> {
+export function runFormat(cfg: AppConfig, opts: { root?: string; signal?: AbortSignal; onProgress?: CodeProgressFn } = {}): Promise<DevToolResult> {
   return runDevTool(cfg, 'format', detectFormatCommand, 'nenhum formatador detectado (sem script "format" nem prettier/ruff/gofmt)', opts)
 }

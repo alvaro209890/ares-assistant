@@ -167,6 +167,8 @@ export const MEMORY_CATEGORY_LABEL: Record<MemoryCategory, string> = {
   outros: 'Outros'
 }
 
+export type MemoryTarget = 'user' | 'memory'
+
 export interface MemoryFact {
   id: string
   text: string
@@ -175,6 +177,10 @@ export interface MemoryFact {
   status: 'active' | 'pending' // pending = aguardando revisão do usuário
   createdAt: number
   updatedAt?: number
+  target?: MemoryTarget // user = perfil/preferências; memory = notas operacionais do agente
+  confidence?: number // 0..1 para extrações automáticas
+  evidence?: string[] // pequenos trechos que justificam a memória
+  review?: 'ok' | 'possible_conflict' | 'low_confidence'
 }
 
 export interface StoredMessage {
@@ -310,6 +316,36 @@ export interface AgentTurnResult {
   config?: AppConfig // presente só quando o turno alterou a config (ex.: troca de modelo/raciocínio por voz)
 }
 
+export type AgentActivityStatus = 'running' | 'output' | 'waiting' | 'done' | 'error'
+export type AgentActivityKind =
+  | 'workspace'
+  | 'search'
+  | 'read'
+  | 'write'
+  | 'command'
+  | 'terminal'
+  | 'git'
+  | 'index'
+  | 'scaffold'
+  | 'patch'
+  | 'diagnostic'
+  | 'tool'
+
+export interface AgentActivityEvent {
+  id: string
+  kind: AgentActivityKind
+  status: AgentActivityStatus
+  phase: number
+  title: string
+  ts: number
+  detail?: string
+  target?: string
+  command?: string
+  stream?: 'stdout' | 'stderr'
+  output?: string
+  ok?: boolean
+}
+
 // --- Programação / código ---
 export interface CodeWorkspaceSummary {
   root: string
@@ -395,6 +431,19 @@ export interface CodePatchPreview {
 export interface CodePatchApplyResult extends CodePatchPreview {
   applied: boolean
   output: string
+}
+
+export type CodeEditMode = 'replace' | 'insert_before' | 'insert_after' | 'line_range'
+
+export interface CodeEditResult {
+  root: string
+  file: string
+  mode: CodeEditMode
+  changed: boolean
+  strategy: string
+  matchCount: number
+  bytes: number
+  preview: string
 }
 
 export interface CodeProjectIndex {

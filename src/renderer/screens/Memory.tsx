@@ -215,6 +215,7 @@ function FactRow({
       </div>
       <div className="mt-2">
         <CategoryPill fact={fact} onCategory={onCategory} />
+        <MemoryMeta fact={fact} />
       </div>
     </article>
   )
@@ -234,6 +235,7 @@ function PendingRow({
   return (
     <article className="rounded-lg border border-amber-300/15 bg-black/20 p-2.5">
       <p className="text-sm text-cyan-50">{fact.text}</p>
+      <MemoryMeta fact={fact} />
       <div className="mt-2 flex items-center gap-2">
         <CategoryPill fact={fact} onCategory={onCategory} />
         <button onClick={onApprove} className="ml-auto rounded-full border border-emerald-300/40 px-2 py-0.5 text-[10px] text-emerald-200 hover:bg-emerald-400/10">
@@ -244,6 +246,25 @@ function PendingRow({
         </button>
       </div>
     </article>
+  )
+}
+
+function MemoryMeta({ fact }: { fact: MemoryFact }): JSX.Element {
+  const target = fact.target === 'memory' ? 'notas do agente' : 'perfil do usuário'
+  const confidence = typeof fact.confidence === 'number' ? ` · ${(fact.confidence * 100).toFixed(0)}%` : ''
+  const review =
+    fact.review === 'possible_conflict'
+      ? ' · possível conflito'
+      : fact.review === 'low_confidence'
+        ? ' · baixa confiança'
+        : ''
+  return (
+    <div className="mt-1 text-[10px] text-cyan-200/40">
+      {target}
+      {confidence}
+      {review}
+      {fact.evidence?.[0] ? <span className="block truncate font-mono text-cyan-200/35">evidência: {fact.evidence[0]}</span> : null}
+    </div>
   )
 }
 
