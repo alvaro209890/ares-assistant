@@ -96,8 +96,12 @@ export function sanitizeVoiceCodeFala(input: string): string {
   // Limpeza base: remove blocos/inline de código e marcações markdown.
   const base = String(input || '')
     .replace(/```[\s\S]*?```/g, 'Trecho de codigo omitido na fala.')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .replace(/`([^`]{1,120})`/g, '$1')
     .replace(/`[^`]*$/g, '')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/^\s{0,3}[-*+]\s+/gm, '')
+    .replace(/^\s{0,3}\d{1,2}[.)]\s+/gm, '')
     .replace(/[#*_>\[\]]/g, '')
 
   // Tenta remover quadros de stack trace; se isso esvaziar tudo (resposta toda "técnica"),

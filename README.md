@@ -9,6 +9,7 @@ Ares e um assistente desktop em Electron, React e TypeScript, feito para uso loc
 - **Nivel de raciocinio que funciona e por voz**: baixo/medio/alto viram `reasoning_effort` low/medium/high na chamada (com fallback se o provedor recusar). Ajustavel por voz: "diminua o seu nivel de raciocinio para baixo", "raciocinio no maximo", e tambem "use o DeepSeek Pro" / "troca pro ChatGPT". A aba Modelos tem **"Testar todos os niveis"**, que mede a latencia de cada nivel no modelo conectado.
 - **Voz neural (Linux e Windows)**: usa o Piper local — voz masculina pt-BR grave e humana, estilo JARVIS. O binario e baixado em background no primeiro uso; ate ficar pronto (e no macOS) usa a Web Speech do Chromium como fallback, priorizando vozes Natural/Neural/Online.
 - **Responde por voz tambem ao texto**: mensagens digitadas no chat sao faladas quando o TTS esta ligado, nao so os comandos de microfone.
+- **Voz de analise mais precisa**: respostas faladas limpam markdown, listas, bullets e links antes do TTS, usam resumo falavel para analise de pastas/projetos e evitam repetir saudacao dentro do mesmo chat.
 - **Modelos DeepSeek**: somente `deepseek-v4-flash` e `deepseek-v4-pro` ficam disponiveis.
 - **Modo Programador nativo**: busca codigo, le arquivos com linhas, cria arquivos, aplica patches, gera scaffold, roda diagnostico e usa terminal local com autorizacao.
 - **Skills de teste e qualidade**: `codigo.testar` detecta o runner do projeto (script `test`, vitest/jest/pytest/go) e responde por voz quantos testes passaram/falharam; `codigo.lint` (eslint/ruff) conta os problemas; `codigo.formatar` (prettier/ruff/gofmt) formata o codigo. Deteccao e parsing puros em `src/main/devtools.ts`; execucao assincrona, com timeout e cancelavel por Esc.
@@ -77,6 +78,7 @@ Campos importantes:
 | `tts.engine` | `auto` (Piper neural primeiro no Linux e no Windows, Web Speech como fallback; macOS usa Web Speech), `piper` ou `web` |
 | `tts.piperVoice` | voz neural do Piper (padrao `pt_BR-faber-medium`) |
 | `tts.webVoiceURI` | voz do sistema usada no fallback Web Speech |
+| `tts.rate` | velocidade da fala; o padrao novo e mais conservador para priorizar clareza |
 | `integrations.location.city` | cidade definida no onboarding |
 | `integrations.location.region` | UF definida no onboarding |
 | `integrations.code.workspaceRoot` | workspace padrao do modo programador |

@@ -22,7 +22,7 @@ vi.mock('../src/main/ninerouter', () => ({
 
 import { mkdirSync, rmSync } from 'node:fs'
 import { chatJSON, streamChat } from '../src/main/ninerouter'
-import { runTurn } from '../src/main/agent'
+import { runTurn, stripRepeatedGreeting } from '../src/main/agent'
 import { createSession } from '../src/main/data'
 import { updateConfig } from '../src/main/config'
 
@@ -43,6 +43,19 @@ beforeEach(() => {
 })
 
 describe('agent — runTurn (orquestração do cérebro)', () => {
+  it('remove saudacao repetida quando o chat ja tem historico', async () => {
+    expect(stripRepeatedGreeting('Boa tarde, Alvaaro. Sua pasta está em ordem.')).toBe('Sua pasta está em ordem.')
+
+    const sid = createSession().id
+    nextEnvelope('Olá, Alvaaro. Como posso ajudar?', [])
+    await runTurn(sid, 'ola')
+
+    nextEnvelope('Boa tarde, Alvaaro. Sua pasta Documentos está em ordem.', [])
+    const r = await runTurn(sid, 'analise minha pasta de documentos')
+
+    expect(r.fala).toBe('Sua pasta Documentos está em ordem.')
+  })
+
   it('aplica uma mutação proposta pelo LLM e devolve a fala', async () => {
     const sid = createSession().id
     nextEnvelope('Anotado, senhor.', [
@@ -118,6 +131,7 @@ describe('agent — runTurn (orquestração do cérebro)', () => {
     expect(speak2.length).toBeGreaterThan(0) // a voz CONTINUOU (não ficou muda) — o bug
     expect(speak2).toContain('diretório') // e fala o conteúdo real, não um genérico
     expect(r.fala).toContain('testes configurados') // chat guarda o texto COMPLETO (2 frases)
+    expect(r.falaVoz).toContain('diretório') // fallback robusto caso o último IPC de fala se perca
   })
 
   it('segura ação destrutiva até a confirmação e executa após o "sim"', async () => {

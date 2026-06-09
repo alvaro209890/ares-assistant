@@ -171,6 +171,9 @@ describe('tts', () => {
       'Ares: pronto, senhor; sistemas online.'
     )
     expect(normalizeSpeechText('total R$ 1.250,90')).toBe('total R$ 1.250,90')
+    expect(normalizeSpeechText('**Documentos**\n1. `Ares`\n- [relatório](https://exemplo.com)')).toBe(
+      'Documentos Ares relatório'
+    )
   })
 
   it('quebra texto longo sem pontuacao para nao atrasar a voz', () => {

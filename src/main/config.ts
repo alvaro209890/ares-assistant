@@ -67,7 +67,7 @@ const DEFAULT_CONFIG: AppConfig = {
     engine: 'auto', // Piper neural primeiro no Linux E no Windows; Web Speech como fallback
     piperVoice: 'pt_BR-faber-medium',
     webVoiceURI: '',
-    rate: 1.08,
+    rate: 0.98,
     pitch: 0.78,
     volume: 1.0
   },

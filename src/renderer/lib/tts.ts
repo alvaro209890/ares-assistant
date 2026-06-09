@@ -95,7 +95,13 @@ export function normalizeSpeechText(input: string): string {
   // "R$ 1.250,90" e "14:30" antes deles chegarem lá. Aqui só limpamos markdown e ruído.
   return String(input || '')
     .replace(/```[\s\S]*?```/g, 'trecho de codigo omitido.')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .replace(/`([^`]{1,100})`/g, '$1')
+    .replace(/`[^`]*$/g, '')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/^\s{0,3}[-*+]\s+/gm, '')
+    .replace(/^\s{0,3}\d{1,2}[.)]\s+/gm, '')
+    .replace(/[*_~]+/g, '')
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")
     .replace(/\.{3,}|…/g, '. ')

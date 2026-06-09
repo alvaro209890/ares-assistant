@@ -10,7 +10,7 @@
  * vírgulas agora preservadas (ver prepareText), as pausas internas voltam a existir, então
  * este valor cobre apenas a separação entre frases.
  */
-export const PIPER_SENTENCE_SILENCE = '0.15'
+export const PIPER_SENTENCE_SILENCE = '0.20'
 
 // Nomes das letras em pt-BR, para soletrar siglas que o Piper não pronuncia bem.
 const LETTER_PT: Record<string, string> = {
@@ -79,10 +79,13 @@ function clamp(n: number, lo: number, hi: number): number {
  * Mantém-se dentro de limites seguros para a voz não distorcer.
  */
 export function computeLengthScale(rate: number | undefined, tone: SpeechTone = 'neutro'): number {
-  const r = clamp(Number.isFinite(rate as number) ? (rate as number) : 1.08, 0.5, 1.6)
+  const rawRate = clamp(Number.isFinite(rate as number) ? (rate as number) : 0.98, 0.5, 1.6)
+  // A escala da UI continua responsiva, mas a curva do Piper fica mais conservadora.
+  // Isso evita áudio embolado quando o usuário deixa a velocidade um pouco acima de 1.
+  const r = 1 + (rawRate - 1) * 0.65
   let ls = 1 / r
-  if (tone === 'erro') ls *= 0.92
-  else if (tone === 'sucesso') ls *= 1.06
+  if (tone === 'erro') ls *= 0.96
+  else if (tone === 'sucesso') ls *= 1.04
   return clamp(ls, 0.45, 2.2)
 }
 
@@ -250,6 +253,19 @@ export function normalizeSymbols(text: string): string {
     .replace(/\s@\s/g, ' arroba ')
 }
 
+/** Remove marcação visual que faz o TTS soletrar ruído em voz alta. */
+export function cleanSpeechMarkup(text: string): string {
+  return String(text || '')
+    .replace(/```[\s\S]*?```/g, ' trecho de código omitido. ')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/`([^`]{1,120})`/g, '$1')
+    .replace(/`[^`]*$/g, '')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/^\s{0,3}[-*+]\s+/gm, '')
+    .replace(/^\s{0,3}\d{1,2}[.)]\s+/gm, '')
+    .replace(/[*_~]+/g, '')
+}
+
 /**
  * Pré-processa o texto para a síntese: normaliza números/símbolos, pronuncia siglas
  * técnicas e ajusta a pontuação. As vírgulas são PRESERVADAS (viram pausa curta natural no
@@ -257,7 +273,7 @@ export function normalizeSymbols(text: string): string {
  * pontuação forte para a respiração entre frases.
  */
 export function prepareText(text: string): string {
-  return expandTechAcronyms(normalizeSymbols(normalizePtNumbers(text)))
+  return expandTechAcronyms(normalizeSymbols(normalizePtNumbers(cleanSpeechMarkup(text))))
     .replace(/\b(senhor|senhora)\s*[,;:]\s*/gi, '$1. ')
     .replace(/\s*;\s*/g, ', ')
     .replace(/\s*,\s*/g, ', ')
@@ -283,17 +299,17 @@ export interface SpeechNoise {
  * do Piper (0.667 / 0.8).
  */
 export function computeNoise(tone: SpeechTone = 'neutro'): SpeechNoise {
-  let noiseScale = 0.667
-  let noiseW = 0.8
+  let noiseScale = 0.62
+  let noiseW = 0.74
   if (tone === 'erro') {
-    noiseScale = 0.6
-    noiseW = 0.75
+    noiseScale = 0.58
+    noiseW = 0.72
   } else if (tone === 'sucesso') {
-    noiseScale = 0.7
-    noiseW = 0.86
+    noiseScale = 0.64
+    noiseW = 0.78
   }
   return {
-    noiseScale: clamp(noiseScale, 0.55, 0.72),
-    noiseW: clamp(noiseW, 0.7, 0.9)
+    noiseScale: clamp(noiseScale, 0.55, 0.68),
+    noiseW: clamp(noiseW, 0.68, 0.82)
   }
 }

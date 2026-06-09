@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import type {
+  AgentTurnResult,
   AppConfig,
   Board,
   BriefingData,
@@ -28,6 +29,18 @@ export interface ConvMsg {
   role: 'user' | 'assistant'
   content: string
   pending?: boolean
+}
+
+export function finalSpeechFallback(
+  result: Pick<AgentTurnResult, 'fala' | 'falaVoz'>,
+  queuedSpeech: boolean,
+  phase2QueuedSpeech: boolean
+): string {
+  const voiceSummary = result.falaVoz?.trim()
+  if (voiceSummary && !phase2QueuedSpeech) return voiceSummary
+  const fullSpeech = result.fala.trim()
+  if (!queuedSpeech && fullSpeech) return fullSpeech
+  return ''
 }
 
 type Screen = 'assistant' | 'tasks' | 'calendar' | 'reminders' | 'lists' | 'memory' | 'models' | 'system'
@@ -443,7 +456,18 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
       let sentenceBuf = ''
       let speaking = false
       let queuedSpeech = false
+      const queuedSpeechByPhase: Record<number, boolean> = {}
       const opts = voiceOpts()
+
+      const queueSpeech = (text: string): void => {
+        if (!speaking) {
+          speaking = true
+          setAresState('speaking')
+        }
+        queuedSpeech = true
+        queuedSpeechByPhase[phase] = true
+        enqueueSentence(text, opts)
+      }
 
       const flush = (final: boolean): void => {
         if (!speak) {
@@ -453,12 +477,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
         const { sentences, rest } = splitSentences(sentenceBuf, final)
         sentenceBuf = rest
         for (const s of sentences) {
-          if (!speaking) {
-            speaking = true
-            setAresState('speaking')
-          }
-          queuedSpeech = true
-          enqueueSentence(s, opts)
+          queueSpeech(s)
         }
       }
 
@@ -502,11 +521,8 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
         setConversation((prev) =>
           prev.map((m) => (m.id === assistantId ? { ...m, content: result.fala, pending: false } : m))
         )
-        if (speak && !queuedSpeech && result.fala.trim()) {
-          queuedSpeech = true
-          setAresState('speaking')
-          enqueueSentence(result.fala, opts)
-        }
+        const fallbackSpeech = finalSpeechFallback(result, queuedSpeech, !!queuedSpeechByPhase[2])
+        if (speak && fallbackSpeech) queueSpeech(fallbackSpeech)
         if (result.notes.length) showToast(result.notes.join('   ·   '))
         await refreshSessions()
         void refreshWidgets()
@@ -805,7 +821,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   }, [refreshWidgets, showToast])
 
   const testVoice = useCallback(
-    async (text = 'Ola senhor. Sistemas online. Estou pronto para ajudar com calma precisao e resposta rapida.') => {
+    async (text = 'Ares online. Respostas formais, precisas e com voz mais clara.') => {
       await speakText(text)
     },
     [speakText]

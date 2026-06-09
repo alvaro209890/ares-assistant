@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   PIPER_SENTENCE_SILENCE,
+  cleanSpeechMarkup,
   computeLengthScale,
   computeNoise,
   detectTone,
@@ -43,7 +44,7 @@ describe('fala neural (speech)', () => {
   it('mantém o length_scale dentro de limites seguros', () => {
     expect(computeLengthScale(5, 'erro')).toBeGreaterThanOrEqual(0.45)
     expect(computeLengthScale(0.01, 'sucesso')).toBeLessThanOrEqual(2.2)
-    expect(computeLengthScale(undefined)).toBeCloseTo(1 / 1.08, 2)
+    expect(computeLengthScale(undefined)).toBeCloseTo(1 / (1 + (0.98 - 1) * 0.65), 2)
   })
 
   it('prepareText pronuncia siglas e PRESERVA as vírgulas como pausa natural', () => {
@@ -55,7 +56,14 @@ describe('fala neural (speech)', () => {
   })
 
   it('usa um silêncio entre frases natural (uma respiração curta)', () => {
-    expect(PIPER_SENTENCE_SILENCE).toBe('0.15')
+    expect(PIPER_SENTENCE_SILENCE).toBe('0.20')
+  })
+
+  it('limpa markdown e listas antes de preparar a fala', () => {
+    const raw = '**Documentos**:\n1. `Ares` pronto\n- [Relatório](https://exemplo.com)'
+    expect(cleanSpeechMarkup(raw)).not.toMatch(/[*`\[\]()]/)
+    expect(prepareText(raw)).toContain('Documentos')
+    expect(prepareText(raw)).not.toMatch(/asterisco|colchete/i)
   })
 })
 
@@ -116,14 +124,14 @@ describe('expressividade (noise)', () => {
     const neutro = computeNoise('neutro')
     const erro = computeNoise('erro')
     const sucesso = computeNoise('sucesso')
-    expect(neutro).toEqual({ noiseScale: 0.667, noiseW: 0.8 })
+    expect(neutro).toEqual({ noiseScale: 0.62, noiseW: 0.74 })
     expect(erro.noiseW).toBeLessThan(neutro.noiseW) // erro: mais seco/nítido
     expect(sucesso.noiseW).toBeGreaterThan(neutro.noiseW) // sucesso: mais caloroso
     for (const n of [neutro, erro, sucesso]) {
       expect(n.noiseScale).toBeGreaterThanOrEqual(0.55)
-      expect(n.noiseScale).toBeLessThanOrEqual(0.72)
-      expect(n.noiseW).toBeGreaterThanOrEqual(0.7)
-      expect(n.noiseW).toBeLessThanOrEqual(0.9)
+      expect(n.noiseScale).toBeLessThanOrEqual(0.68)
+      expect(n.noiseW).toBeGreaterThanOrEqual(0.68)
+      expect(n.noiseW).toBeLessThanOrEqual(0.82)
     }
   })
 })

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.28.2 - 2026-06-09
+
+- **Voz de análise mais clara e formal**: respostas faladas agora removem markdown, listas numeradas, bullets, links e marcações como `**texto**` antes de chegar ao Piper/Web Speech. Isso evita áudio embolado ao analisar pastas com resposta estruturada.
+- **Menos repetição no mesmo chat**: se a conversa já começou, o Ares não deve iniciar novas respostas com "olá", "bom dia", "boa tarde", "boa noite" ou o nome do usuário. O prompt foi reforçado e o processo principal remove saudação repetida da fala final.
+- **Piper mais inteligível**: a voz padrão ficou um pouco mais calma, com pausa maior entre frases e parâmetros de ruído mais conservadores para priorizar clareza em vez de expressividade exagerada.
+- **Teste de voz atualizado**: a frase de teste agora usa tom formal e direto, sem "olá senhor" por padrão.
+
+## 0.28.1 - 2026-06-09
+
+- **Fallback robusto para a fala final da análise por voz**: quando o Ares analisa uma pasta/projeto, a resposta completa continua indo para a tela, mas agora o processo principal também devolve um `falaVoz` com o resumo seguro para TTS.
+- O renderer passa a tocar esse `falaVoz` se a fase 2 não tiver entrado na fila de áudio, cobrindo a corrida em que o último evento IPC `kind: "speak"` podia se perder logo antes do `chat:ask` resolver.
+- Adicionados testes para o retorno `falaVoz` no agente e para a regra de fallback do renderer.
+
 ## 0.28.0 - 2026-06-09
 
 - **Stream de voz para tarefas de programação, corrigido e moderno**: antes, ao pedir uma análise por voz (ex.: "analise o diretório"), o Ares falava "vou analisar" e depois **ficava mudo na resposta** — porque a fala da 2ª fase passava por uma limpeza que podia esvaziá-la, e o texto exibido também ficava cortado em 2 frases. Agora:

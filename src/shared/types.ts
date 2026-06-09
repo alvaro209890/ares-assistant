@@ -298,6 +298,7 @@ export interface WebResult {
 
 export interface AgentTurnResult {
   fala: string
+  falaVoz?: string // resumo seguro para TTS quando a fala exibida precisa ser completa/técnica
   board: Board
   memory: MemoryFact[]
   events: CalendarEvent[]

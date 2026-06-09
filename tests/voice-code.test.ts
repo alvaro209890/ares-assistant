@@ -51,6 +51,15 @@ describe('voz no modo programador', () => {
     expect(fala).not.toContain('Detalhe extra')
   })
 
+  it('remove markdown e marcadores de lista da resposta falada de analise', () => {
+    const fala = sanitizeVoiceCodeFala('**Documentos**:\n1. `Ares`\n2. **Cerebro_Obsidian**\n- Tudo em ordem.')
+
+    expect(fala).toContain('Documentos')
+    expect(fala).toContain('Ares')
+    expect(fala).not.toMatch(/[*`]/)
+    expect(fala).not.toContain('1.')
+  })
+
   it('NUNCA esvazia a fala quando há conteúdo (corrige a voz mudada após análise)', () => {
     // Resposta de "analisar diretório" sem pontuação de fim de frase (lista de arquivos).
     const listagem = sanitizeVoiceCodeFala(

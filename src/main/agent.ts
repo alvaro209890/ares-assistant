@@ -115,14 +115,32 @@ function normBrightnessAction(raw: unknown): BrightnessAction {
   return 'set'
 }
 
-const PERSONA = `Você é o Ares, assistente de IA pessoal inspirado no JARVIS. Fala português do Brasil de forma educada, elegante, levemente espirituosa e muito competente. Trata o usuário com respeito (pode chamar de "senhor" com sutileza, sem repetir a cada frase). Seja natural e direto, nunca robótico. Use o CONTEXTO (memória, agenda, tarefas, localização) para responder de forma pessoal e útil, sem repetir dados que o usuário não pediu.
+const PERSONA = `Você é o Ares, assistente de IA pessoal inspirado no JARVIS. Fala português do Brasil de forma educada, formal, precisa e muito competente. Trata o usuário com respeito, mas sem repetir "senhor", o nome dele ou saudações a cada resposta. Seja natural e direto, nunca robótico. Use o CONTEXTO (memória, agenda, tarefas, localização) para responder de forma pessoal e útil, sem repetir dados que o usuário não pediu.
 Em assuntos de programação você é um engenheiro de software sênior: fala com precisão técnica mas em linguagem clara e falável, sem ler código longo nem despejar logs inteiros — resume e cita arquivo:linha. ANTES de executar no terminal qualquer comando que altere o sistema, instale dependências, crie/apague arquivos ou mexa no Git (commit/push), você PEDE AUTORIZAÇÃO ao usuário de forma natural ("Senhor, isso vai rodar tal comando — autoriza?") e só age após o aceite. Nunca tenta burlar bloqueios de segurança nem usar sudo.`
 
 const VOICE_HINT =
-  'A resposta será OUVIDA em voz alta: seja MUITO conciso (1-2 frases), sem listas, sem markdown, sem URLs longas. Diga o essencial.'
+  'A resposta será OUVIDA em voz alta: seja MUITO conciso (1-2 frases), formal, claro, sem listas, sem markdown, sem URLs longas e sem saudações repetidas. Diga o essencial.'
 const TEXT_HINT = 'Pode ser um pouco mais detalhado quando ajudar, mas evite enrolação e listas longas desnecessárias.'
 const CODE_VOICE_HINT =
   'Modo voz em programação: interprete ditados como "barra", "ponto ts", "traço", "underline", "npm run" e "git status" como caminhos/comandos quando fizer sentido. Nunca leia código, diffs, JSON, stdout ou stderr em voz; diga só o arquivo, a ação feita, se passou/falhou e o próximo passo. Se precisar autorização para terminal, fale o comando uma vez e peça sim ou não.'
+
+const LEADING_GREETING_RE =
+  /^\s*(?:ol[aá](?:\s+de novo)?|oi|bom dia|boa tarde|boa noite)(?:\s*,?\s+[\p{Lu}][\p{L}'-]{0,24}(?:\s+[\p{Lu}][\p{L}'-]{0,24})?)?[.!?,:;—–-]*\s*/iu
+
+export function stripRepeatedGreeting(text: string): string {
+  return String(text || '').replace(LEADING_GREETING_RE, '').trimStart()
+}
+
+function sessionStyleHint(hasPriorAssistant: boolean): string {
+  return hasPriorAssistant
+    ? 'Este chat já tem conversa anterior. Não inicie a resposta com saudação, período do dia ou nome do usuário; vá direto ao resultado com tom formal e preciso.'
+    : 'Este é o começo do chat. Uma saudação breve é aceitável se o usuário cumprimentar primeiro.'
+}
+
+function finalFala(text: string, suppressGreeting: boolean): string {
+  const out = suppressGreeting ? stripRepeatedGreeting(text) : String(text || '')
+  return out.trim()
+}
 
 function toolDocs(): string {
   return `Você SEMPRE responde com um único objeto JSON válido, sem texto fora dele, no formato:
@@ -241,7 +259,7 @@ function dateAnchors(now: Date): string {
   const periodo = h < 5 ? 'madrugada' : h < 12 ? 'manhã' : h < 18 ? 'tarde' : 'noite'
   return [
     `Agora: ${weekday}, ${now.toLocaleString('pt-BR')} (ISO local ${localISO(now)}) — período: ${periodo}`,
-    `Saudações coerentes com o período: "bom dia" de manhã, "boa tarde" à tarde, "boa noite" à noite.`,
+    `Saudação por período só no primeiro contato do chat. Depois disso, não comece respostas com "olá", "bom dia", "boa tarde" ou "boa noite".`,
     `Hoje=${day(0)} · Amanhã=${day(1)} · Depois de amanhã=${day(2)}`,
     `Próxima segunda (semana que vem começa aqui)=${nextMon.getFullYear()}-${String(nextMon.getMonth() + 1).padStart(2, '0')}-${String(nextMon.getDate()).padStart(2, '0')}`,
     `"daqui a N horas/minutos" = some à hora atual. Sem horário dito, assuma 09:00 para o dia indicado.`
@@ -378,6 +396,7 @@ function buildSystemPrompt(ctx: {
   brain: string
   summary?: string
   voice: boolean
+  hasPriorAssistant: boolean
 }): string {
   const now = new Date()
   const upcoming = ctx.events
@@ -395,6 +414,7 @@ function buildSystemPrompt(ctx: {
     PERSONA,
     ctx.voice ? VOICE_HINT : TEXT_HINT,
     ctx.voice ? CODE_VOICE_HINT : '',
+    `## Estilo da sessão\n${sessionStyleHint(ctx.hasPriorAssistant)}`,
     toolDocs(),
     `# CONTEXTO`,
     `## DATAS\n${dateAnchors(now)}`,
@@ -795,6 +815,7 @@ function memoryFallback(userText: string, acoes: Acao[]): Acao[] {
 // altera a tela — usado para o resumo falável conciso de tarefas de programação).
 export type DeltaKind = 'both' | 'display' | 'speak'
 export type DeltaFn = (chunk: string, phase: number, kind?: DeltaKind) => void
+type DeltaTextTransform = (text: string, phase: number, kind: DeltaKind) => string
 
 /**
  * Faz uma chamada do agente transmitindo a "fala" em tempo real (streaming) via
@@ -806,16 +827,18 @@ async function streamTurn(
   messages: ChatMessage[],
   phase: number,
   onDelta?: DeltaFn,
-  kind: DeltaKind = 'both'
+  kind: DeltaKind = 'both',
+  transform?: DeltaTextTransform
 ): Promise<string> {
   if (!onDelta) return chatJSON(cfg, messages, true)
   let cumulative = ''
   let emitted = 0
   const pump = (full: string): void => {
     const { text } = extractFalaPrefix(full)
-    if (text.length > emitted) {
-      onDelta(text.slice(emitted), phase, kind)
-      emitted = text.length
+    const out = transform ? transform(text, phase, kind) : text
+    if (out.length > emitted) {
+      onDelta(out.slice(emitted), phase, kind)
+      emitted = out.length
     }
   }
   try {
@@ -829,7 +852,7 @@ async function streamTurn(
     if (emitted > 0) throw e // já falamos parte: não dá para refazer com segurança
     const full = await chatJSON(cfg, messages, true)
     const env = parseEnvelope(full)
-    if (env.fala) onDelta(env.fala, phase, kind)
+    if (env.fala) onDelta(transform ? transform(env.fala, phase, kind) : env.fala, phase, kind)
     return full
   }
 }
@@ -861,6 +884,11 @@ export async function runTurn(
   const signal = controller.signal
   const session = getSession(sessionId)
   const recent = (session?.messages || []).slice(-12)
+  const hasPriorAssistant = recent.some((m) => m.role === 'assistant')
+  const suppressGreeting = hasPriorAssistant
+  const deltaTransform: DeltaTextTransform | undefined = suppressGreeting
+    ? (text) => stripRepeatedGreeting(text)
+    : undefined
   const sys = buildSystemPrompt({
     board: loadBoard(),
     events: loadEvents(),
@@ -871,7 +899,8 @@ export async function runTurn(
     sessionContext: sessionContextSummary(),
     brain: brainSummary(cfg),
     summary: session?.summary,
-    voice
+    voice,
+    hasPriorAssistant
   })
   const messages: ChatMessage[] = [
     { role: 'system', content: sys },
@@ -879,8 +908,9 @@ export async function runTurn(
     { role: 'user', content: voiceAwareUserContent(userText, voice) }
   ]
 
-  const env = parseEnvelope(await streamTurn(cfg, messages, 1, onDelta))
-  let fala = env.fala
+  const env = parseEnvelope(await streamTurn(cfg, messages, 1, onDelta, 'both', deltaTransform))
+  let fala = finalFala(env.fala, suppressGreeting)
+  let falaVoz: string | undefined
   const allNotes: string[] = []
   let mutations = env.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo))
   const queries = env.acoes.filter((a) => QUERY_TOOLS.has(a.tipo))
@@ -895,7 +925,7 @@ export async function runTurn(
     if (proactive) allNotes.push(proactive.note)
     const followup: ChatMessage[] = [
       ...messages,
-      { role: 'assistant', content: env.fala || '...' },
+      { role: 'assistant', content: fala || '...' },
       {
         role: 'system',
         content: toolResultsPrompt(results, voice, codeMode) + (proactive ? `\n${proactive.instruction}` : '')
@@ -907,18 +937,20 @@ export async function runTurn(
       // resumo conciso, limpo e GARANTIDAMENTE não-vazio num canal separado. Assim a voz
       // "continua" naturalmente para a resposta (ex.: o que havia no diretório) sem ler
       // código/caminhos/diffs em voz alta, e o chat mantém o conteúdo inteiro.
-      const raw2 = await streamTurn(cfg, followup, 2, onDelta, 'display')
+      const raw2 = await streamTurn(cfg, followup, 2, onDelta, 'display', deltaTransform)
       const env2 = parseEnvelope(raw2)
       if (env2.fala) {
-        fala = env2.fala // texto completo permanece no chat
-        const spoken = sanitizeVoiceCodeFala(env2.fala) || 'Concluí a análise, senhor. Os detalhes estão na tela.'
+        fala = finalFala(env2.fala, suppressGreeting) // texto completo permanece no chat
+        const spoken =
+          sanitizeVoiceCodeFala(fala) || 'Análise concluída. Os detalhes principais estão na tela.'
+        falaVoz = spoken
         onDelta?.(` ${spoken}`, 2, 'speak')
       }
       mutations = mutations.concat(env2.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo)))
     } else {
-      const raw2 = await streamTurn(cfg, followup, 2, onDelta)
+      const raw2 = await streamTurn(cfg, followup, 2, onDelta, 'both', deltaTransform)
       const env2 = parseEnvelope(raw2)
-      if (env2.fala) fala = env2.fala
+      if (env2.fala) fala = finalFala(env2.fala, suppressGreeting)
       mutations = mutations.concat(env2.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo)))
     }
   }
@@ -980,6 +1012,7 @@ export async function runTurn(
     reminders: loadReminders(),
     notes: allNotes,
     changedBoard,
+    ...(falaVoz ? { falaVoz } : {}),
     ...(brainChanged ? { config: cfgAfter } : {})
   }
 }
