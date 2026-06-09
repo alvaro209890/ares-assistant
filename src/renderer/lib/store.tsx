@@ -462,7 +462,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
         }
       }
 
-      const off = window.ares.chat.onDelta(({ chunk, phase: ph }) => {
+      const off = window.ares.chat.onDelta(({ chunk, phase: ph, kind = 'both' }) => {
         if (ph !== phase) {
           // Resposta final após ferramentas: encerra a fase anterior e recomeça.
           flush(true)
@@ -470,10 +470,14 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
           display = ''
           sentenceBuf = ''
         }
-        display += chunk
-        const current = display
-        setConversation((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: current } : m)))
-        if (speak) {
+        // 'speak' = canal só de fala (resumo conciso de código): não vai pra tela.
+        if (kind !== 'speak') {
+          display += chunk
+          const current = display
+          setConversation((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: current } : m)))
+        }
+        // 'display' = canal só de tela (resposta completa de código): não é falado.
+        if (speak && kind !== 'display') {
           sentenceBuf += chunk
           flush(false)
         }

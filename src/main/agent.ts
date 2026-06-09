@@ -790,7 +790,11 @@ function memoryFallback(userText: string, acoes: Acao[]): Acao[] {
   return fact ? [...acoes, { tipo: 'memoria.salvar', fato: fact }] : acoes
 }
 
-export type DeltaFn = (chunk: string, phase: number) => void
+// Canal do delta: 'both' (exibe no chat E fala — padrão), 'display' (só texto na tela,
+// não fala — usado para streamar a resposta COMPLETA de código) ou 'speak' (só fala, não
+// altera a tela — usado para o resumo falável conciso de tarefas de programação).
+export type DeltaKind = 'both' | 'display' | 'speak'
+export type DeltaFn = (chunk: string, phase: number, kind?: DeltaKind) => void
 
 /**
  * Faz uma chamada do agente transmitindo a "fala" em tempo real (streaming) via
@@ -801,7 +805,8 @@ async function streamTurn(
   cfg: AppConfig,
   messages: ChatMessage[],
   phase: number,
-  onDelta?: DeltaFn
+  onDelta?: DeltaFn,
+  kind: DeltaKind = 'both'
 ): Promise<string> {
   if (!onDelta) return chatJSON(cfg, messages, true)
   let cumulative = ''
@@ -809,7 +814,7 @@ async function streamTurn(
   const pump = (full: string): void => {
     const { text } = extractFalaPrefix(full)
     if (text.length > emitted) {
-      onDelta(text.slice(emitted), phase)
+      onDelta(text.slice(emitted), phase, kind)
       emitted = text.length
     }
   }
@@ -824,7 +829,7 @@ async function streamTurn(
     if (emitted > 0) throw e // já falamos parte: não dá para refazer com segurança
     const full = await chatJSON(cfg, messages, true)
     const env = parseEnvelope(full)
-    if (env.fala) onDelta(env.fala, phase)
+    if (env.fala) onDelta(env.fala, phase, kind)
     return full
   }
 }
@@ -896,12 +901,26 @@ export async function runTurn(
         content: toolResultsPrompt(results, voice, codeMode) + (proactive ? `\n${proactive.instruction}` : '')
       }
     ]
-    // Fase 2 (resposta final após as ferramentas): novo streaming, fase 2 = reset no cliente.
-    const raw2 = await streamTurn(cfg, followup, 2, voice && codeMode ? undefined : onDelta)
-    const env2 = parseEnvelope(raw2)
-    if (env2.fala) fala = voice && codeMode ? sanitizeVoiceCodeFala(env2.fala) : env2.fala
-    if (voice && codeMode && fala && onDelta) onDelta(fala, 2)
-    mutations = mutations.concat(env2.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo)))
+    // Fase 2 (resposta final após as ferramentas): fase 2 = reset no cliente.
+    if (voice && codeMode) {
+      // VOZ + CÓDIGO: streama a resposta COMPLETA na tela (token a token) e fala um
+      // resumo conciso, limpo e GARANTIDAMENTE não-vazio num canal separado. Assim a voz
+      // "continua" naturalmente para a resposta (ex.: o que havia no diretório) sem ler
+      // código/caminhos/diffs em voz alta, e o chat mantém o conteúdo inteiro.
+      const raw2 = await streamTurn(cfg, followup, 2, onDelta, 'display')
+      const env2 = parseEnvelope(raw2)
+      if (env2.fala) {
+        fala = env2.fala // texto completo permanece no chat
+        const spoken = sanitizeVoiceCodeFala(env2.fala) || 'Concluí a análise, senhor. Os detalhes estão na tela.'
+        onDelta?.(` ${spoken}`, 2, 'speak')
+      }
+      mutations = mutations.concat(env2.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo)))
+    } else {
+      const raw2 = await streamTurn(cfg, followup, 2, onDelta)
+      const env2 = parseEnvelope(raw2)
+      if (env2.fala) fala = env2.fala
+      mutations = mutations.concat(env2.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo)))
+    }
   }
 
   mutations = memoryFallback(userText, mutations)

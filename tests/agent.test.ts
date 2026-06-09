@@ -21,11 +21,13 @@ vi.mock('../src/main/ninerouter', () => ({
 }))
 
 import { mkdirSync, rmSync } from 'node:fs'
-import { chatJSON } from '../src/main/ninerouter'
+import { chatJSON, streamChat } from '../src/main/ninerouter'
 import { runTurn } from '../src/main/agent'
 import { createSession } from '../src/main/data'
+import { updateConfig } from '../src/main/config'
 
 const brain = vi.mocked(chatJSON)
+const stream = vi.mocked(streamChat)
 
 /** Faz o "cérebro" devolver este envelope na próxima chamada (1 por turno sem queries). */
 function nextEnvelope(fala: string, acoes: unknown[] = []): void {
@@ -37,6 +39,7 @@ beforeEach(() => {
   rmSync(TMP, { recursive: true, force: true })
   mkdirSync(TMP, { recursive: true })
   brain.mockReset()
+  stream.mockReset()
 })
 
 describe('agent — runTurn (orquestração do cérebro)', () => {
@@ -81,6 +84,40 @@ describe('agent — runTurn (orquestração do cérebro)', () => {
 
     expect(brain).toHaveBeenCalledTimes(2)
     expect(r.fala).toBe('São quatro, senhor.')
+  })
+
+  it('voz+código: streama a resposta COMPLETA na tela e fala um resumo NÃO-vazio (fase 2)', async () => {
+    // Regressão do bug: ao analisar um diretório por voz, ele falava "vou analisar" (fase 1)
+    // mas ficava MUDO na resposta (fase 2). Agora a tela recebe o texto completo (canal
+    // 'display') e a voz recebe um resumo conciso e não-vazio (canal 'speak').
+    updateConfig({ integrations: { code: { workspaceRoot: TMP, allowedRoots: [TMP] } } })
+    const sid = createSession().id
+    const envelopes = [
+      JSON.stringify({ fala: 'Vou analisar o diretório, senhor.', acoes: [{ tipo: 'codigo.workspace' }] }),
+      JSON.stringify({
+        fala: 'O diretório tem três pastas principais: src, tests e docs, além de package.json e do README. É um projeto Node com testes configurados.',
+        acoes: []
+      })
+    ]
+    let i = 0
+    stream.mockImplementation(async (_cfg: unknown, _msgs: unknown, onDelta: (d: string) => void) => {
+      const text = envelopes[i++] ?? '{"fala":"","acoes":[]}'
+      onDelta(text)
+      return text
+    })
+
+    const deltas: { chunk: string; phase: number; kind: string }[] = []
+    const r = await runTurn(sid, 'analise o diretório atual', true, (chunk, phase, kind = 'both') =>
+      deltas.push({ chunk, phase, kind })
+    )
+
+    const display2 = deltas.filter((d) => d.phase === 2 && d.kind === 'display').map((d) => d.chunk).join('')
+    const speak2 = deltas.filter((d) => d.phase === 2 && d.kind === 'speak').map((d) => d.chunk).join('').trim()
+
+    expect(display2).toContain('três pastas principais') // resposta completa foi pra tela
+    expect(speak2.length).toBeGreaterThan(0) // a voz CONTINUOU (não ficou muda) — o bug
+    expect(speak2).toContain('diretório') // e fala o conteúdo real, não um genérico
+    expect(r.fala).toContain('testes configurados') // chat guarda o texto COMPLETO (2 frases)
   })
 
   it('segura ação destrutiva até a confirmação e executa após o "sim"', async () => {

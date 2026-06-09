@@ -93,26 +93,35 @@ export function rootCauseError(raw: string, maxLen = 200): string {
 }
 
 export function sanitizeVoiceCodeFala(input: string): string {
-  let text = String(input || '')
+  // Limpeza base: remove blocos/inline de código e marcações markdown.
+  const base = String(input || '')
     .replace(/```[\s\S]*?```/g, 'Trecho de codigo omitido na fala.')
     .replace(/`([^`]{1,120})`/g, '$1')
     .replace(/`[^`]*$/g, '')
     .replace(/[#*_>\[\]]/g, '')
-    // remove quadros de stack trace que o LLM por ventura tenha incluído na fala
+
+  // Tenta remover quadros de stack trace; se isso esvaziar tudo (resposta toda "técnica"),
+  // cai para o texto base sem esse filtro — nunca devolve vazio à toa (era a causa de a voz
+  // não continuar a resposta após analisar diretório/erro).
+  const noStack = base
     .split(/\r?\n/)
     .filter((l) => !STACK_LINE_RE.test(l.trim()))
     .join(' ')
+  let text = (noStack.trim() ? noStack : base)
     .replace(/\b(stdout|stderr)\b\s*:/gi, '$1 resumido:')
     .replace(/\s+/g, ' ')
     .trim()
 
   if (!text) return ''
+  // Protege extensões (".ts", ".json") para não cortar frase no ponto do arquivo.
   const protectedText = text.replace(
     /([A-Za-z0-9_./\\-]+)\.(tsx?|jsx?|json|md|css|html|py|ya?ml|env)\b/g,
     (_m, name: string, ext: string) => `${name}<DOT>${ext}`
   )
-  const sentences = protectedText.match(/[^.!?]+[.!?]+|[^.!?]+$/g)?.map((s) => s.trim()).filter(Boolean) || [protectedText]
-  text = sentences.slice(0, 2).join(' ').replace(/<DOT>/g, '.')
+  const sentences = protectedText.match(/[^.!?]+[.!?]+|[^.!?]+$/g)?.map((s) => s.trim()).filter(Boolean) || []
+  // Fala concisa: até 2 frases. Se não houver pontuação (lista de arquivos etc.), usa o
+  // texto inteiro em vez de virar vazio.
+  text = (sentences.length ? sentences.slice(0, 2).join(' ') : protectedText).replace(/<DOT>/g, '.').trim()
   if (text.length > 360) {
     text = `${text.slice(0, 357).replace(/\s+\S*$/, '').trim()}...`
   }

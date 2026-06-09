@@ -51,6 +51,22 @@ describe('voz no modo programador', () => {
     expect(fala).not.toContain('Detalhe extra')
   })
 
+  it('NUNCA esvazia a fala quando há conteúdo (corrige a voz mudada após análise)', () => {
+    // Resposta de "analisar diretório" sem pontuação de fim de frase (lista de arquivos).
+    const listagem = sanitizeVoiceCodeFala(
+      'O diretório tem três pastas principais: src, tests e docs, além de package.json e README'
+    )
+    expect(listagem.length).toBeGreaterThan(0)
+    expect(listagem).toContain('diretório')
+
+    // Resposta cujas linhas TODAS parecem stack/code-frame não deve virar vazio.
+    const soTecnico = sanitizeVoiceCodeFala('arquivo.ts:12:5\noutro.ts:30:2')
+    expect(soTecnico.length).toBeGreaterThan(0)
+
+    // String realmente vazia continua vazia.
+    expect(sanitizeVoiceCodeFala('   ')).toBe('')
+  })
+
   it('inclui regra especifica para resultados de codigo em voz', () => {
     const prompt = toolResultsPrompt([{ tipo: 'codigo.ler', resultado: { file: 'x.ts' } }], true, true)
 

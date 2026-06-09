@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.28.0 - 2026-06-09
+
+- **Stream de voz para tarefas de programação, corrigido e moderno**: antes, ao pedir uma análise por voz (ex.: "analise o diretório"), o Ares falava "vou analisar" e depois **ficava mudo na resposta** — porque a fala da 2ª fase passava por uma limpeza que podia esvaziá-la, e o texto exibido também ficava cortado em 2 frases. Agora:
+  - A **resposta completa é transmitida na tela** (token a token, com listas/código formatados), num canal só de exibição.
+  - A **voz continua naturalmente** com um resumo conciso, limpo e **garantidamente não-vazio**, num canal separado — sem ler código, caminhos ou stack trace em voz alta.
+  - `sanitizeVoiceCodeFala` nunca mais devolve vazio quando há conteúdo (cai para o texto limpo se a filtragem de stack/código zerar tudo).
+- Implementação: novo "kind" no stream (`both`/`display`/`speak`) ponta a ponta (agent → IPC → preload → renderer). 2 testes novos (206 no total), incluindo um teste de integração do fluxo de duas fases em voz+código.
+
 ## 0.27.0 - 2026-06-09
 
 - **Novas skills de programação e teste** (modo programador / por voz):
