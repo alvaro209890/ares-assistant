@@ -450,8 +450,18 @@ export async function speak(text: string, opts: SpeakOptions = {}): Promise<void
   sentenceQueue = []
   prefetched.clear()
   queueGeneration++
-  await speakInternal(text, opts, true)
-  resolveIdle()
+  drainRunId++
+  draining = false
+  const generation = queueGeneration
+  try {
+    await speakInternal(text, opts, true)
+  } catch (err) {
+    log('error', `speak: uncaught speech error for "${text}"`, err)
+    opts.onError?.('Falha inesperada na fala.')
+    opts.onEnd?.()
+  } finally {
+    if (generation === queueGeneration) resolveIdle()
+  }
 }
 
 export function cancelSpeech(): void {
@@ -467,6 +477,7 @@ let sentenceQueue: { text: string; opts: SpeakOptions }[] = []
 let draining = false
 let idleWaiters: (() => void)[] = []
 let queueGeneration = 0
+let drainRunId = 0
 
 function resolveIdle(): void {
   const waiters = idleWaiters
@@ -481,6 +492,7 @@ async function drainQueue(): Promise<void> {
     return
   }
   draining = true
+  const runId = ++drainRunId
   const generation = queueGeneration
   log('debug', `drainQueue started: queue size=${sentenceQueue.length}, generation=${generation}`)
   while (sentenceQueue.length && generation === queueGeneration) {
@@ -491,17 +503,23 @@ async function drainQueue(): Promise<void> {
     for (let i = 0; i < PREFETCH_DEPTH && i < sentenceQueue.length; i++) {
       startPrefetch(sentenceQueue[i].text, sentenceQueue[i].opts)
     }
-    await speakInternal(text, opts, false)
+    try {
+      await speakInternal(text, opts, false)
+    } catch (err) {
+      log('error', `drainQueue: uncaught speech error for "${text}"`, err)
+      opts.onError?.('Falha inesperada na fala.')
+      opts.onEnd?.()
+    }
     if (generation !== queueGeneration) {
       log('debug', 'drainQueue: generation changed, breaking')
       break
     }
   }
-  if (generation === queueGeneration) {
-    draining = false
-  } else {
-    draining = false
+  if (generation !== queueGeneration || runId !== drainRunId) {
+    log('debug', 'drainQueue: stale generation finished; leaving current queue state untouched')
+    return
   }
+  draining = false
   log('debug', 'drainQueue: finished loop, resolving idle')
   resolveIdle()
 }
@@ -527,12 +545,42 @@ export function clearSpeechQueue(): void {
   // Piper para não carregar penalidade transitória de um turno anterior ao começar outro.
   piperDisabledUntil = 0
   queueGeneration++
+  drainRunId++
   cancelSpeech()
   draining = false
   resolveIdle()
 }
 
 const SENTENCE_RE = /.*?(?:[.!?…]+(?=\s|["')\]}*_]|$)|[\n]+)["')\]}*_]*/g
+const SENTENCE_PLACEHOLDER_PREFIX = '\uE000'
+const SENTENCE_PLACEHOLDER_SUFFIX = '\uE001'
+const SENTENCE_ABBREVIATIONS = [
+  'etc.', 'ex.', 'obs.', 'sr.', 'sra.', 'dr.', 'dra.', 'prof.', 'profa.', 'fig.', 'p.ex.'
+]
+
+function protectSentenceDots(text: string): { text: string; restore: (value: string) => string } {
+  const protectedDots: string[] = []
+  const mark = (token: string): string => {
+    const id = protectedDots.push(token) - 1
+    return `${SENTENCE_PLACEHOLDER_PREFIX}${id}${SENTENCE_PLACEHOLDER_SUFFIX}`
+  }
+  let out = String(text || '')
+  out = out.replace(/\b[\p{L}\p{N}_-]+\.(?:[A-Za-z0-9]{1,8})(?=[\s,;:)\]}]|$)/gu, (m) =>
+    mark(m)
+  )
+  for (const abbr of SENTENCE_ABBREVIATIONS) {
+    const escaped = abbr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    out = out.replace(new RegExp(`\\b${escaped}`, 'giu'), (m) => mark(m))
+  }
+  return {
+    text: out,
+    restore: (value: string): string =>
+      value.replace(
+        new RegExp(`${SENTENCE_PLACEHOLDER_PREFIX}(\\d+)${SENTENCE_PLACEHOLDER_SUFFIX}`, 'g'),
+        (_m, idx: string) => protectedDots[Number(idx)] ?? _m
+      )
+  }
+}
 
 // Partida rápida: quando NADA foi falado ainda neste turno, vale a pena cortar a
 // primeira oração na vírgula/conector para a voz começar ~1 frase antes. Só o
@@ -573,11 +621,13 @@ export function splitSentences(
 ): { sentences: string[]; rest: string } {
   log('debug', `splitSentences: input length=${buffer.length}, final=${final}, eager=${!!opts.eager}`)
   const sentences: string[] = []
+  const protectedText = protectSentenceDots(buffer)
+  const scan = protectedText.text
   let lastIndex = 0
   let m: RegExpExecArray | null
   SENTENCE_RE.lastIndex = 0
-  while ((m = SENTENCE_RE.exec(buffer))) {
-    const s = m[0].trim()
+  while ((m = SENTENCE_RE.exec(scan))) {
+    const s = protectedText.restore(m[0].trim())
     // Apenas enfileira frases que tenham pelo menos uma letra ou número
     if (s && /[\p{L}\p{N}]/u.test(s)) {
       sentences.push(s)
@@ -585,7 +635,7 @@ export function splitSentences(
     }
     lastIndex = SENTENCE_RE.lastIndex
   }
-  let rest = buffer.slice(lastIndex)
+  let rest = protectedText.restore(scan.slice(lastIndex))
   // Sem frase completa ainda E nada falado neste turno: corta a primeira oração
   // na vírgula para reduzir a latência até o primeiro som.
   if (!final && opts.eager && sentences.length === 0) {

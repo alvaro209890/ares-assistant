@@ -166,10 +166,28 @@ describe('tts', () => {
     installSpeechMock()
     const split = splitSentences('arquivos de layout do ArcGIS (PQC_Area_da_queima.mxd, Distancia_T_I.mxd, etc.), usados para montar mapas finais.', false)
     expect(split.sentences).toEqual([
-      'arquivos de layout do ArcGIS (PQC_Area_da_queima.mxd, Distancia_T_I.mxd, etc.)',
-      ', usados para montar mapas finais.'
+      'arquivos de layout do ArcGIS (PQC_Area_da_queima.mxd, Distancia_T_I.mxd, etc.), usados para montar mapas finais.'
     ])
     expect(split.rest).toBe('')
+  })
+
+  it('nao deixa a fila presa quando ocorre excecao inesperada na fala', async () => {
+    installSpeechMock()
+    const onError = vi.fn()
+    vi.stubGlobal(
+      'SpeechSynthesisUtterance',
+      class {
+        constructor() {
+          throw new Error('utterance quebrado')
+        }
+      }
+    )
+
+    enqueueSentence('primeira frase.', { engine: 'web', onError })
+    enqueueSentence('segunda frase.', { engine: 'web', onError })
+    await whenSpeechQueueIdle()
+
+    expect(onError).toHaveBeenCalled()
   })
 
   it('limpa markdown/ruído mas PRESERVA vírgulas e números para a prosódia', () => {
