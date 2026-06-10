@@ -5,10 +5,14 @@ O modo programador do Ares e nativo. Ele trabalha diretamente no workspace permi
 ## Ferramentas
 
 - `codigo.workspace {path?}`: resume projeto, stack, scripts, linguagens e estado Git.
+- `codigo.listar {path?, filtro?}`: lista arquivos no workspace por padrão de busca (glob) sem precisar lê-los por completo.
+- `codigo.esboco {path?, arquivo}`: gera um esboço/mapa do arquivo (funções, classes, tipos, interfaces e arrow functions) com as linhas iniciais.
 - `codigo.buscar {path?, consulta, filtro?}`: busca texto ou simbolos.
 - `codigo.ler {path?, arquivo, inicio?, linhas?}`: le trechos com numeros de linha.
 - `codigo.editar {path?, arquivo, modo?, antigo?, novo?, ancora?, inicio?, fim?, todos?, esperado?}`: edita um arquivo existente com correspondencia exata ou flexivel.
 - `codigo.criar {path?, arquivo, conteudo, sobrescrever?}`: cria ou escreve arquivo.
+- `codigo.substituir {path?, antigo, novo, filtro?, confirmado?}`: realiza substituição global de texto no projeto (find and replace). Sem `confirmado` (ou `false`), traz apenas a prévia de alterações.
+- `codigo.referencias {path?, simbolo}`: encontra todas as referências de um símbolo no projeto.
 - `codigo.patch.preview {path?, diff?, patches?}`: valida patch antes de aplicar.
 - `codigo.patch.aplicar {path?, diff?, patches?}`: aplica diff Git ou patches textuais.
 - `codigo.scaffold {nome, tipo_projeto?, path?}`: cria projeto simples usando templates locais.
@@ -27,6 +31,7 @@ A escrita real usa `integrations.code.allowPatchApply`. Quando ativo, o Ares pod
 
 - criar arquivos;
 - editar arquivos existentes com `codigo.editar`;
+- realizar substituições globais com `codigo.substituir`;
 - aplicar patches textuais;
 - aplicar diffs Git;
 - gerar scaffolds;
@@ -39,7 +44,11 @@ A escrita real usa `integrations.code.allowPatchApply`. Quando ativo, o Ares pod
 - `insert_after`: insere `novo` depois de `ancora` ou `antigo`;
 - `line_range`: substitui as linhas `inicio` ate `fim` por `novo`.
 
-A ferramenta tenta match exato, depois match flexivel por linhas aparadas e por espacos normalizados. Se houver mais de uma ocorrencia, ela rejeita a edicao a menos que `todos` esteja ativo; `esperado` permite exigir uma quantidade exata de matches. Caminhos sensiveis como `.git`, `.ssh`, `.env` e chaves SSH sao bloqueados.
+A ferramenta tenta match exato, depois match flexivel por linhas aparadas e por espacos normalizados. Se houver mais de uma ocorrencia, ela rejeita a edicao a menos que `todos` esteja ativo; `esperado` permite exigir uma quantidade exata de matches.
+
+`codigo.substituir` permite a substituição global (find and replace) em vários arquivos do projeto. Por segurança, se for chamada com `confirmado: false`, ela apenas simula a operação e retorna um relatório de visualização prévia das mudanças (preview). Se chamada com `confirmado: true`, ela realiza a substituição real, respeitando os caminhos seguros permitidos e com limite máximo de 40 arquivos alterados por vez.
+
+Caminhos sensiveis como `.git`, `.ssh`, `.env` e chaves SSH sao bloqueados para escrita.
 
 O preview de patch continua recomendado antes de aplicar mudancas grandes. O agente deve explicar quais arquivos serao alterados e validar o projeto depois da escrita sempre que houver comando permitido.
 
@@ -64,7 +73,14 @@ Quando o comando vem do microfone, o Ares cria uma interpretacao auxiliar para t
 - "npm rum verify" -> `npm run verify`;
 - "git estado" -> `git status`.
 
-Em respostas faladas, o Ares nao deve ler codigo, diffs, JSON, `stdout` ou `stderr`. Para ferramentas `codigo.*`, a resposta final e gerada primeiro, sanitizada e enviada ao TTS so depois. O formato ideal da fala e: arquivo principal, acao feita, validacao e proximo passo em uma ou duas frases.
+### Interação Contínua, Cancelamento e Heartbeats
+
+Durante execuções longas (como builds, testes ou escrita contínua pelo coder autônomo), o microfone de conversação contínua permanece ativo:
+- **Interrupção e Cancelamento**: Caso o usuário fale palavras curtas de parada no início da frase, como `"para"`, `"cancela"`, `"aborta"`, `"esquece"`, `"pode parar"` ou `"stop"`, a tarefa atual é abortada imediatamente (enviando SIGTERM/SIGKILL para o processo) e a resposta de voz é silenciada na hora. A palavra de ativação não é exigida para comandos de cancelamento curtos (até 4 palavras).
+- **Fila de Comandos**: Comandos ditos durante a execução precedidos pela palavra de ativação (ex: "Ares, depois rode os testes") são enfileirados e executados automaticamente na sequência. Falas ou conversas paralelas sem a palavra de ativação e sem verbos de cancelamento são ignoradas por segurança.
+- **Batimento Cardíaco (Heartbeats)**: Se um comando de terminal, build ou teste demorar mais do que 15 segundos, o Ares emitirá avisos de voz breves a cada 30 segundos (com fraseados dinâmicos e variados) para atualizar o usuário sobre o progresso e certificar que a execução não travou.
+
+Em respostas faladas normais, o Ares nao deve ler codigo, diffs, JSON, `stdout` ou `stderr`. Para ferramentas `codigo.*`, a resposta final e gerada primeiro, sanitizada e enviada ao TTS so depois. O formato ideal da fala e: arquivo principal, acao feita, validacao e proximo passo em uma ou duas frases.
 
 ## Diagnostico
 

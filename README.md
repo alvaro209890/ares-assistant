@@ -20,6 +20,10 @@ Ares e um assistente desktop em Electron, React e TypeScript, feito para uso loc
 - **Engenheiro proativo**: apos editar/aplicar patch sugere validar com o teste/build do projeto, reporta a saude do projeto, avisa "iniciando a tarefa, senhor" em comandos longos, lembra do ultimo arquivo/comando e respeita as preferencias de codigo do usuario.
 - **Interface HUD refinada**: selects da memoria usam seta SVG, foco com glow cyan e hover claro; o seletor de provedor mostra icones por IA e chave de API com toggle de visibilidade.
 - **Atualizar por cima preserva os dados**: instalar uma versao nova sobre a antiga (Windows) mantem config, chaves, cidade, localizacao, tarefas, memoria e sessoes.
+- **Destaques da v0.31.0/v0.30.0 (Voz e Apps)**:
+  - **Conversa contínua e interrupção**: O microfone continua ativo no modo contínuo durante tarefas longas ou fala. Pode abortar a tarefa na hora dizendo "para", "cancela", "aborta" (sem palavra de ativação se a frase for curta), ou enfileirar novos comandos (ex: "Ares, depois rode os testes") usando a palavra de ativação.
+  - **Batimento cardíaco (Heartbeat)**: Avisos falados breves e dinâmicos a cada 30 segundos evitam silêncio em execuções de terminal ou builds longos (>15s).
+  - **Busca difusa de aplicativos (Windows)**: "abrir [aplicativo]" mapeia todos os atalhos do Menu Iniciar (.lnk / .url), permitindo iniciar qualquer programa local por voz (tolerante a acentos e pequenas falhas de transcrição).
 - **Dados locais**: tarefas, memoria, agenda, listas, notas e lembretes ficam no `userData` do Electron.
 
 ## Instalar
@@ -98,10 +102,14 @@ Veja `config.example.json` para um template completo.
 O Ares nao depende de servico externo para editar codigo. As ferramentas nativas sao:
 
 - `codigo.workspace`: resume stack, scripts, linguagens, arquivos ignorados e estado Git.
+- `codigo.listar`: lista arquivos por padrão de busca (glob) no workspace.
+- `codigo.esboco`: extrai esboço/outline de classes, funções, interfaces, tipos e arrow functions com suas linhas de início (JS/TS/Python/Go).
 - `codigo.buscar`: busca texto ou simbolos em arquivos permitidos.
 - `codigo.ler`: le trechos com numeros de linha.
 - `codigo.editar`: altera trechos existentes com replace, insert before/after ou intervalo de linhas, usando match exato/flexivel.
 - `codigo.criar`: cria ou sobrescreve arquivos quando permitido.
+- `codigo.substituir`: faz substituição global de texto (find and replace) com visualização prévia das mudanças antes de aplicar.
+- `codigo.referencias`: encontra todas as ocorrências de um símbolo no projeto.
 - `codigo.patch.preview`: valida e resume patches antes de aplicar.
 - `codigo.patch.aplicar`: aplica diff Git ou operacoes textuais.
 - `codigo.scaffold`: cria projetos simples a partir de templates locais.
@@ -142,6 +150,13 @@ Comandos `blocked` (catastroficos/elevacao) nunca rodam, nem com confirmacao. Pi
 ### Voz no Modo Programador
 
 Quando a entrada vem do microfone, o agente adiciona uma interpretacao auxiliar para termos comuns de desenvolvimento: "barra" vira `/`, "ponto ts" vira `.ts`, "traço" vira `-`, "underline" vira `_`, "npm rum" vira `npm run` e "git estado" vira `git status`. O dicionario tambem cobre termos tecnicos ditados: "funcao seta" vira `arrow function`, "assincrono com await" vira `async await`, "tente e capture" vira `try catch` e "funcao de retorno" vira `callback`. A resposta final de ferramentas `codigo.*` nao e transmitida em streaming bruto; ela e gerada, filtrada e so entao falada para evitar que o Ares leia codigo, JSON, diffs ou logs longos. A fala deve ficar em ate duas frases com o arquivo principal, o que mudou, se a validacao passou e qual autorizacao falta.
+
+### Interação por voz em segundo plano e Heartbeat
+
+Durante tarefas longas de programação ou execução de terminal, o microfone contínuo permanece ativo para receber comandos:
+- **Parada e Cancelamento**: Dizer `"para"`, `"cancela"` ou `"pode parar"` interrompe instantaneamente a execução do processo e o áudio da resposta (sem precisar de wake word).
+- **Fila de Execução**: Comandos precedidos pela wake word (ex: "Ares, depois rode os testes") são colocados em fila para execução sequencial posterior.
+- **Heartbeat**: Atualizações rápidas a cada 30 segundos ajudam a saber se a tarefa ainda está rodando.
 
 Ao reportar erros de terminal, o Ares fala apenas a **causa raiz** (a primeira linha que descreve o problema), ignorando o stack trace e os code frames. Veja `rootCauseError` em `src/main/voiceCode.ts`.
 

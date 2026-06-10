@@ -11,6 +11,7 @@ binários conhecidos do sistema, sem interpretação de comando.
 - `sistema.abrir {alvo}` — abre app, site ou arquivo.
   - apps por apelido: `firefox`, `chrome`, `vscode`, `calculadora`, `arquivos`,
     `terminal`, `navegador`, `editor`…
+  - **Integração com Menu Iniciar (Windows)**: No Windows, o Ares varre todos os atalhos (`.lnk` / `.url`) do Menu Iniciar e permite abrir qualquer aplicativo instalado via busca difusa (fuzzy match) inteligente. O casamento é tolerante a acentos, palavras parciais, maiúsculas e pequenos erros de transcrição de voz (ex.: "abre o Whatsapp", "abra o QGIS", "abrir OBS").
   - sites: `youtube.com`, `https://github.com` (domínio sem `http` vira `https://`);
   - arquivos/pastas: `~/Documentos`, `/caminho/arquivo.pdf`.
 - `sistema.volume {acao, nivel?}` — `acao`: `set`/`up`/`down`/`mute`/`unmute`/`toggle`;
