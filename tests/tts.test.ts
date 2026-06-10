@@ -206,4 +206,17 @@ describe('tts', () => {
     expect(split.sentences[0].length).toBeLessThanOrEqual(220)
     expect(split.rest.length).toBeGreaterThan(0)
   })
+
+  it('ignora frases e normaliza como vazio textos compostos apenas por pontuação', () => {
+    installSpeechMock()
+    expect(normalizeSpeechText('.')).toBe('')
+    expect(normalizeSpeechText('?.')).toBe('')
+    expect(normalizeSpeechText('...')).toBe('')
+    expect(normalizeSpeechText('   ,,,  ')).toBe('')
+
+    // splitSentences também deve descartar strings que consistem puramente de pontuação
+    const split = splitSentences('Quer que eu analise algum desses projetos com mais profundidade?.', true)
+    expect(split.sentences).toEqual(['Quer que eu analise algum desses projetos com mais profundidade?.'])
+    expect(split.rest).toBe('')
+  })
 })

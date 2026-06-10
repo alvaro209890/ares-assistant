@@ -96,7 +96,7 @@ export function normalizeSpeechText(input: string): string {
   // moeda, hora, versão, símbolos, pausas) é feita no processo principal por prepareText
   // (src/main/speech.ts), que precisa do texto cru. Apagar vírgulas/pontos aqui mutilaria
   // "R$ 1.250,90" e "14:30" antes deles chegarem lá. Aqui só limpamos markdown e ruído.
-  return String(input || '')
+  const cleaned = String(input || '')
     .replace(/```[\s\S]*?```/g, 'trecho de codigo omitido.')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .replace(/`([^`]{1,100})`/g, '$1')
@@ -112,6 +112,13 @@ export function normalizeSpeechText(input: string): string {
     .replace(/\s+([.!?,;:])/g, '$1')
     .replace(/\s+/g, ' ')
     .trim()
+
+  // Se não contém nenhuma letra ou número, considera vazio (evita falar apenas pontuação,
+  // o que trava o Web Speech ou gera erros/timeouts no Piper).
+  if (!/[\p{L}\p{N}]/u.test(cleaned)) {
+    return ''
+  }
+  return cleaned
 }
 
 function withTimeout<T>(work: Promise<T>, ms: number, label: string): Promise<T> {
@@ -499,7 +506,8 @@ export function splitSentences(
   SENTENCE_RE.lastIndex = 0
   while ((m = SENTENCE_RE.exec(buffer))) {
     const s = m[0].trim()
-    if (s) sentences.push(s)
+    // Apenas enfileira frases que tenham pelo menos uma letra ou número
+    if (s && /[\p{L}\p{N}]/u.test(s)) sentences.push(s)
     lastIndex = SENTENCE_RE.lastIndex
   }
   let rest = buffer.slice(lastIndex)
@@ -509,7 +517,7 @@ export function splitSentences(
     const idx = eagerSplitIndex(rest)
     if (idx > 0) {
       const head = rest.slice(0, idx).trim()
-      if (head) sentences.push(head)
+      if (head && /[\p{L}\p{N}]/u.test(head)) sentences.push(head)
       rest = rest.slice(idx)
     }
   }
@@ -517,7 +525,7 @@ export function splitSentences(
     const idx = chunkSplitIndex(rest)
     if (idx < 0) break
     const chunk = rest.slice(0, idx).trim()
-    if (chunk) sentences.push(chunk)
+    if (chunk && /[\p{L}\p{N}]/u.test(chunk)) sentences.push(chunk)
     rest = rest.slice(idx)
   }
   if (final && rest.trim()) {
@@ -526,10 +534,10 @@ export function splitSentences(
       const idx = chunkSplitIndex(pending)
       if (idx < 0) break
       const chunk = pending.slice(0, idx).trim()
-      if (chunk) sentences.push(chunk)
+      if (chunk && /[\p{L}\p{N}]/u.test(chunk)) sentences.push(chunk)
       pending = pending.slice(idx).trim()
     }
-    if (pending) sentences.push(pending)
+    if (pending && /[\p{L}\p{N}]/u.test(pending)) sentences.push(pending)
     rest = ''
   }
   return { sentences, rest }
