@@ -458,7 +458,7 @@ export interface CodeProjectIndex {
 // Resultado das skills de qualidade (rodar testes, lint, formatação). Falável.
 export interface DevToolResult {
   root: string
-  kind: 'test' | 'lint' | 'format'
+  kind: 'test' | 'lint' | 'format' | 'typecheck'
   command: string
   detected: boolean // achou um runner/script para essa tarefa no projeto?
   ran: boolean
@@ -467,10 +467,31 @@ export interface DevToolResult {
   passed?: number // testes
   failed?: number // testes
   total?: number // testes
-  problems?: number // lint (erros + avisos)
+  problems?: number // lint (erros + avisos) e typecheck (erros de tipo)
   summary: string // resumo curto e falável
   stdoutTail: string // últimas linhas (para a UI/log, não para a fala)
   hint?: string // dica quando nada foi detectado
+}
+
+// Resultado de `codigo.deps`: dependências desatualizadas e vulnerabilidades. Falável.
+export interface CodeDepsResult {
+  root: string
+  manager: string // npm/pnpm/yarn/bun
+  checked: boolean // conseguiu consultar o registro?
+  outdated: Array<{ name: string; current: string; wanted: string; latest: string }>
+  vulnerabilities: { critical: number; high: number; moderate: number; low: number; total: number } | null
+  summary: string
+  hint?: string
+}
+
+// Resultado de `codigo.todo`: pendências (TODO/FIXME/...) encontradas no código. Falável.
+export interface CodeTodosResult {
+  root: string
+  total: number
+  byTag: Record<string, number>
+  items: Array<{ file: string; line: number; tag: string; text: string }>
+  truncated: boolean
+  summary: string
 }
 
 export interface CodeScaffoldResult {

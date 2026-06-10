@@ -20,6 +20,11 @@ Ares e um assistente desktop em Electron, React e TypeScript, feito para uso loc
 - **Engenheiro proativo**: apos editar/aplicar patch sugere validar com o teste/build do projeto, reporta a saude do projeto, avisa "iniciando a tarefa, senhor" em comandos longos, lembra do ultimo arquivo/comando e respeita as preferencias de codigo do usuario.
 - **Interface HUD refinada**: selects da memoria usam seta SVG, foco com glow cyan e hover claro; o seletor de provedor mostra icones por IA e chave de API com toggle de visibilidade.
 - **Atualizar por cima preserva os dados**: instalar uma versao nova sobre a antiga (Windows) mantem config, chaves, cidade, localizacao, tarefas, memoria e sessoes.
+- **Destaques da v0.32.0 (Programador + correções de fala + escritório vivo)**:
+  - **Novas skills de programador**: `codigo.typecheck` (erros de tipo por voz), `codigo.deps` (dependencias desatualizadas + vulnerabilidades) e `codigo.todo` (pendencias TODO/FIXME com arquivo e linha).
+  - **Fala que conclui**: corrigido o travamento em tarefas de programacao em que o Ares anunciava a ferramenta e nunca falava a conclusao; a resposta final do modelo agora e SEMPRE falada (sem repetir o resumo imediato), com fallback garantido quando o modelo nao devolve fala.
+  - **Fila de fala a prova de travas**: teto rigido por frase (90s) pula sinteses penduradas em vez de congelar o turno; o monitor de barge-in nao usa mais requestAnimationFrame (que congela com a janela minimizada) e corre contra o fim da fala — o Ares nunca mais fica "ocupado" para sempre.
+  - **Escritorio do Ares mais vivo**: janela com ceu que acompanha a hora (estrelas piscando, lua, estrela cadente, skyline de dia), headset com LED que segue o estado, rim light, sombra no chao, reflexo dos monitores na mesa, vinheta + scanlines + varredura de vidro; cliques na caneca (cafe), no relogio (data por extenso) e nos monitores (CPU/RAM), carinho com hover na cabeca e aceno ocasional "para a camera".
 - **Destaques da v0.31.0/v0.30.0 (Voz e Apps)**:
   - **Conversa contínua e interrupção**: O microfone continua ativo no modo contínuo durante tarefas longas ou fala. Pode abortar a tarefa na hora dizendo "para", "cancela", "aborta" (sem palavra de ativação se a frase for curta), ou enfileirar novos comandos (ex: "Ares, depois rode os testes") usando a palavra de ativação.
   - **Batimento cardíaco (Heartbeat)**: Avisos falados breves e dinâmicos a cada 30 segundos evitam silêncio em execuções de terminal ou builds longos (>15s).
@@ -118,6 +123,10 @@ O Ares nao depende de servico externo para editar codigo. As ferramentas nativas
 - `codigo.terminal`: usa shell real com classificacao `allowed`, `confirm` ou `blocked`.
 - `codigo.diagnostico`: roda typecheck, lint, teste e build quando houver scripts permitidos.
 - `codigo.git`: consulta status, diff e log sem alterar o repositorio.
+- `codigo.testar` / `codigo.lint` / `codigo.formatar`: qualidade do projeto com resposta falavel.
+- `codigo.typecheck`: checa os tipos (script `typecheck`, `tsc --noEmit`, mypy ou `go vet`) e fala quantos erros de tipo existem.
+- `codigo.deps`: saude das dependencias — `npm outdated` + `npm audit` — e resume por voz quantas estao desatualizadas e se ha vulnerabilidades (e a gravidade).
+- `codigo.todo`: varre o projeto atras de pendencias marcadas em comentarios (TODO, FIXME, HACK, BUG) e fala o total, as urgentes e onde esta a primeira.
 
 No Windows, o terminal nativo usa PowerShell. No Linux e macOS, usa Bash. Comandos destrutivos ou de elevacao continuam bloqueados mesmo com confirmacao.
 

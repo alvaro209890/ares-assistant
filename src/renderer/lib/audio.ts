@@ -157,6 +157,9 @@ export async function watchForSpeech(
   return new Promise<boolean>((resolve) => {
     let voiceMs = 0
     let last = performance.now()
+    // setTimeout, NÃO requestAnimationFrame: rAF congela com a janela minimizada/oculta,
+    // e este watcher precisa terminar mesmo em segundo plano (senão o turno trava
+    // esperando o barge-in para sempre).
     const tick = (): void => {
       if (opts.shouldStop?.()) return resolve(false)
       const now = performance.now()
@@ -166,8 +169,8 @@ export async function watchForSpeech(
       if (level > threshold) voiceMs += dt
       else voiceMs = Math.max(0, voiceMs - dt * 0.6)
       if (voiceMs >= sustainMs) return resolve(true)
-      requestAnimationFrame(tick)
+      setTimeout(tick, 80)
     }
-    requestAnimationFrame(tick)
+    setTimeout(tick, 80)
   })
 }

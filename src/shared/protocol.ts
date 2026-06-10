@@ -50,6 +50,9 @@ export const QUERY_TOOLS = new Set([
   'codigo.testar',
   'codigo.lint',
   'codigo.formatar',
+  'codigo.typecheck',
+  'codigo.deps',
+  'codigo.todo',
   'codigo.projeto',
   'codigo.patch.preview',
   'codigo.patch.aplicar'

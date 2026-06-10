@@ -86,6 +86,9 @@ import {
   runTests,
   runLint,
   runFormat,
+  runTypecheck,
+  checkDependencies,
+  scanTodos,
   scaffoldProject,
   searchCode,
   summarizeCodeWorkspace,
@@ -98,7 +101,15 @@ import {
 } from './code'
 import { clearPendingCode, getPendingCode, setPendingCode } from './pending'
 import { registerRun } from './running'
-import { hasCodeAction, sanitizeVoiceCodeFala, startHeartbeat, toolResultsPrompt, voiceAwareUserContent } from './voiceCode'
+import {
+  codeVoiceProgressSummary,
+  hasCodeAction,
+  isDuplicateSpeech,
+  sanitizeVoiceCodeFala,
+  startHeartbeat,
+  toolResultsPrompt,
+  voiceAwareUserContent
+} from './voiceCode'
 
 const norm = (s: unknown) => String(s ?? '').toLowerCase().trim()
 const uid = (p: string) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
@@ -238,6 +249,9 @@ ENCADEAMENTO: após receber os resultados, você PODE chamar novas ferramentas d
 - codigo.testar {path?}   (RODA OS TESTES do projeto — detecta vitest/jest/pytest/go ou o script "test" — e resume quantos passaram/falharam; use quando o usuário disser "roda os testes", "testa o projeto", "os testes passam?")
 - codigo.lint {path?}   (RODA O LINT do projeto — eslint/ruff ou o script "lint" — e conta os problemas; use para "passa o lint", "tem erro de lint?", "verifica o estilo")
 - codigo.formatar {path?}   (FORMATA o projeto — prettier/ruff/gofmt ou o script "format"; use para "formata o código", "arruma a indentação". Altera arquivos: só rode quando o usuário pedir explicitamente)
+- codigo.typecheck {path?}   (CHECA OS TIPOS do projeto — script "typecheck", tsc --noEmit, mypy ou go vet — e conta os erros; use para "checa os tipos", "tem erro de tipo?", "passa o typecheck?")
+- codigo.deps {path?}   (SAÚDE DAS DEPENDÊNCIAS: npm outdated + npm audit, resume quantas estão desatualizadas e se há vulnerabilidades; use para "as dependências estão em dia?", "tem pacote desatualizado/vulnerável?". Precisa de internet)
+- codigo.todo {path?, filtro?, limite?}   (LISTA AS PENDÊNCIAS marcadas no código — comentários TODO, FIXME, HACK, BUG — com arquivo e linha; use para "o que falta fazer no projeto?", "lista os TODOs", "tem pendência marcada?")
 - codigo.projeto {objetivo, path?, passos?}   (CODER AUTÔNOMO: dado um objetivo, ele planeja, escreve os arquivos, roda checagens seguras e itera sozinho até concluir; precisa de "Permitir aplicar patches". Use para "construa/faça um app/site/programa que faça X" quando envolver vários arquivos ou lógica)
 - codigo.patch.preview {path?, diff?, patches?}   (valida e resume patch antes de aplicar; use sempre antes de aplicação)
 - codigo.patch.aplicar {path?, diff?, patches?}   (aplica patch apenas se habilitado e já confirmado pelo usuário)
@@ -748,6 +762,19 @@ async function runQuery(
         return done({ tipo: a.tipo, resultado: await beating(runLint(cfg, { root: String(a.path || a.raiz || a.workspace || ''), signal, onProgress: progress })) })
       case 'codigo.formatar':
         return done({ tipo: a.tipo, resultado: await beating(runFormat(cfg, { root: String(a.path || a.raiz || a.workspace || ''), signal, onProgress: progress })) })
+      case 'codigo.typecheck':
+        return done({ tipo: a.tipo, resultado: await beating(runTypecheck(cfg, { root: String(a.path || a.raiz || a.workspace || ''), signal, onProgress: progress })) })
+      case 'codigo.deps':
+        return done({ tipo: a.tipo, resultado: await beating(checkDependencies(cfg, { root: String(a.path || a.raiz || a.workspace || ''), signal, onProgress: progress })) })
+      case 'codigo.todo':
+        return done({
+          tipo: a.tipo,
+          resultado: scanTodos(cfg, {
+            root: String(a.path || a.raiz || a.workspace || ''),
+            filter: a.filtro || a.filter ? String(a.filtro || a.filter) : undefined,
+            maxResults: Number(a.limite || a.max || 0) || undefined
+          })
+        })
       case 'codigo.projeto':
         return done({
           tipo: a.tipo,
@@ -1053,6 +1080,12 @@ function codeActivityMeta(a: Acao): ActivityMeta | null {
       return { ...base, kind: 'command', title: 'Rodando lint', detail: path || undefined }
     case 'codigo.formatar':
       return { ...base, kind: 'command', title: 'Formatando projeto', detail: path || undefined }
+    case 'codigo.typecheck':
+      return { ...base, kind: 'command', title: 'Checando tipos', detail: path || undefined }
+    case 'codigo.deps':
+      return { ...base, kind: 'command', title: 'Checando dependências', detail: path || undefined }
+    case 'codigo.todo':
+      return { ...base, kind: 'search', title: 'Procurando pendências', detail: path || undefined }
     case 'codigo.projeto':
       return { ...base, kind: 'write', title: 'Executando coder autônomo', detail: String(a.objetivo || a.tarefa || '') || undefined }
     case 'codigo.patch.preview':
@@ -1234,9 +1267,14 @@ export async function runTurn(
     phase++
     if (voice && codeMode) {
       // VOZ + CÓDIGO: streama a resposta COMPLETA na tela (token a token) e fala um
-      // resumo conciso, limpo e GARANTIDAMENTE não-vazio num canal separado. Assim a voz
-      // "continua" naturalmente para a resposta (ex.: o que havia no diretório) sem ler
-      // código/caminhos/diffs em voz alta, e o chat mantém o conteúdo inteiro.
+      // resumo conciso, limpo e GARANTIDAMENTE não-vazio num canal separado. O resumo
+      // local sai imediatamente após a ferramenta terminar, então análise de diretório/
+      // código não fica muda enquanto a resposta completa ainda está sendo escrita.
+      const immediateSpoken = codeVoiceProgressSummary(results)
+      if (immediateSpoken) {
+        falaVoz = immediateSpoken
+        onDelta?.(` ${immediateSpoken}`, phase, 'speak')
+      }
       const raw = await streamTurn(cfg, convo, phase, onDelta, 'display', deltaTransform, signal)
       const envN = parseEnvelope(raw)
       if (envN.fala) {
@@ -1244,7 +1282,14 @@ export async function runTurn(
         const spoken =
           sanitizeVoiceCodeFala(fala) || 'Análise concluída. Os detalhes principais estão na tela.'
         falaVoz = spoken
-        onDelta?.(` ${spoken}`, phase, 'speak')
+        // A conclusão do modelo é falada SEMPRE (a menos que repita o resumo imediato):
+        // só o resumo da ferramenta deixava o Ares "anunciar" e nunca terminar de falar.
+        if (!isDuplicateSpeech(spoken, immediateSpoken)) onDelta?.(` ${spoken}`, phase, 'speak')
+      } else if (!immediateSpoken) {
+        // Nem ferramenta nem modelo produziram fala nesta fase: não deixa a voz morrer.
+        const fallback = 'Concluído. Os detalhes estão na tela.'
+        falaVoz = fallback
+        onDelta?.(` ${fallback}`, phase, 'speak')
       }
       mutations = mutations.concat(envN.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo)))
       queries = lastRound ? [] : envN.acoes.filter((a) => QUERY_TOOLS.has(a.tipo))

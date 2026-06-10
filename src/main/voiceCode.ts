@@ -148,6 +148,217 @@ export function sanitizeVoiceCodeFala(input: string): string {
   return text
 }
 
+function obj(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+}
+
+function arr(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : []
+}
+
+function str(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function num(value: unknown): number {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : 0
+}
+
+function oneOrMany(n: number, singular: string, plural: string): string {
+  return `${n} ${n === 1 ? singular : plural}`
+}
+
+function addPeriod(text: string): string {
+  const t = text.trim()
+  if (!t) return ''
+  return /[.!?]$/.test(t) ? t : `${t}.`
+}
+
+function compactSpeech(parts: string[], maxLen = 360): string {
+  let text = parts.map(addPeriod).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()
+  if (text.length <= maxLen) return text
+  text = text.slice(0, maxLen - 3).replace(/\s+\S*$/, '').trim()
+  return addPeriod(`${text}...`)
+}
+
+function topLanguageText(languages: unknown): string {
+  const entries = Object.entries(obj(languages))
+    .map(([name, count]) => [name, num(count)] as const)
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 2)
+  if (!entries.length) return ''
+  return entries.map(([name]) => name).join(' e ')
+}
+
+function basename(path: string): string {
+  const parts = path.split(/[\\/]+/).filter(Boolean)
+  return parts[parts.length - 1] || path
+}
+
+function firstFileLine(value: unknown): string {
+  const first = obj(arr(value)[0])
+  const file = str(first.file)
+  const line = num(first.line)
+  if (!file) return ''
+  return line > 0 ? `${file}:${line}` : file
+}
+
+function commandOutcome(result: Record<string, unknown>): string {
+  const command = str(result.command)
+  const ok = result.ok === true
+  const code = typeof result.code === 'number' && Number.isFinite(result.code) ? result.code : null
+  const stderr = rootCauseError(str(result.stderr) || str(result.error) || str(result.erro))
+  const label = command ? `Comando "${command}"` : 'Comando'
+  if (ok) return `${label} concluido com sucesso`
+  if (stderr) return `${label} falhou: ${stderr}`
+  return code !== null ? `${label} falhou com codigo ${code}` : `${label} falhou`
+}
+
+function summarizeCodeResult(tipo: string, resultado: Record<string, unknown>, erro: string): string {
+  if (erro) return `A ferramenta de codigo falhou: ${rootCauseError(erro) || erro}`
+
+  switch (tipo) {
+    case 'codigo.workspace': {
+      if (resultado.exists === false) return `Nao encontrei o workspace ${str(resultado.root) || 'solicitado'}`
+      const name = str(resultado.name) || basename(str(resultado.root)) || 'workspace'
+      const files = arr(resultado.files).length
+      const langs = topLanguageText(resultado.languages)
+      const health = str(obj(resultado.health).label)
+      const hints = arr(resultado.hints).map(str).filter(Boolean)
+      const first = `Analisei o diretório ${name}: ${oneOrMany(files, 'arquivo', 'arquivos')}${langs ? `, principalmente ${langs}` : ''}`
+      const sig = hints.find((h) => /sig|geoespacial|shapefile|arcgis|qgis/i.test(h))
+      return compactSpeech([first, sig || health || 'Detalhes completos estao na tela'], 340)
+    }
+    case 'codigo.listar': {
+      const total = num(resultado.total) || arr(resultado.files).length
+      const pattern = str(resultado.pattern)
+      return `Listei ${oneOrMany(total, 'arquivo', 'arquivos')}${pattern ? ` para ${pattern}` : ''}; os principais estao na tela`
+    }
+    case 'codigo.buscar': {
+      const matches = arr(resultado.matches)
+      const query = str(resultado.query)
+      const first = firstFileLine(matches)
+      return `Busquei ${query ? `"${query}"` : 'no codigo'} e encontrei ${oneOrMany(matches.length, 'resultado', 'resultados')}${first ? `; primeiro em ${first}` : ''}`
+    }
+    case 'codigo.ler': {
+      const file = str(resultado.file) || 'arquivo'
+      const start = num(resultado.startLine)
+      const end = num(resultado.endLine)
+      return `Li ${file}${start && end ? `, linhas ${start} a ${end}` : ''}; o trecho completo esta na tela`
+    }
+    case 'codigo.esboco': {
+      const file = str(resultado.file) || 'arquivo'
+      const items = arr(resultado.items).map(obj)
+      const names = items.map((i) => str(i.name)).filter(Boolean).slice(0, 2).join(' e ')
+      return `Mapeei ${file}: ${oneOrMany(items.length, 'simbolo', 'simbolos')}${names ? `, incluindo ${names}` : ''}`
+    }
+    case 'codigo.referencias': {
+      const symbol = str(resultado.symbol) || 'simbolo'
+      const total = num(resultado.total)
+      const files = arr(resultado.files)
+      const first = firstFileLine(files)
+      return `Encontrei ${oneOrMany(total, 'referencia', 'referencias')} de ${symbol} em ${oneOrMany(files.length, 'arquivo', 'arquivos')}${first ? `; principal em ${first}` : ''}`
+    }
+    case 'codigo.comando':
+    case 'codigo.git':
+      return commandOutcome(resultado)
+    case 'codigo.terminal': {
+      if (resultado.requiresApproval === true) {
+        const command = str(resultado.command)
+        return command
+          ? `O terminal precisa da sua autorizacao para rodar "${command}"`
+          : 'O terminal precisa da sua autorizacao antes de executar'
+      }
+      return commandOutcome(resultado)
+    }
+    case 'codigo.diagnostico': {
+      const health = str(obj(resultado.health).label)
+      if (health) return `Diagnostico concluido: ${health}`
+      return resultado.ok === true ? 'Diagnostico concluido: tudo verde' : 'Diagnostico concluido com pontos de atencao'
+    }
+    case 'codigo.testar':
+    case 'codigo.lint':
+    case 'codigo.formatar':
+    case 'codigo.typecheck':
+    case 'codigo.deps': {
+      const summary = str(resultado.summary)
+      if (summary) return summary
+      return commandOutcome(resultado)
+    }
+    case 'codigo.todo': {
+      const summary = str(resultado.summary)
+      const first = firstFileLine(resultado.items)
+      if (summary) return first ? `${addPeriod(summary)} A primeira está em ${first}` : summary
+      return commandOutcome(resultado)
+    }
+    case 'codigo.criar':
+    case 'codigo.editar': {
+      const file = str(resultado.file)
+      const changed = resultado.changed !== false
+      return file ? `${changed ? 'Atualizei' : 'Verifiquei'} ${file}` : 'Arquivo atualizado'
+    }
+    case 'codigo.scaffold': {
+      const created = arr(resultado.created).length
+      return `Projeto criado com ${oneOrMany(created, 'arquivo', 'arquivos')}`
+    }
+    case 'codigo.substituir': {
+      const total = num(resultado.totalMatches)
+      const files = arr(resultado.files).length
+      const applied = resultado.applied === true
+      return `${applied ? 'Substituicao aplicada' : 'Previa de substituicao pronta'}: ${oneOrMany(total, 'ocorrencia', 'ocorrencias')} em ${oneOrMany(files, 'arquivo', 'arquivos')}`
+    }
+    case 'codigo.patch.preview':
+    case 'codigo.patch.aplicar': {
+      const files = arr(resultado.files).length
+      const applied = resultado.applied === true
+      return `${applied ? 'Patch aplicado' : 'Patch validado'} em ${oneOrMany(files, 'arquivo', 'arquivos')}`
+    }
+    case 'codigo.indexar': {
+      const count = num(resultado.fileCount)
+      return `Indice do projeto atualizado com ${oneOrMany(count, 'arquivo', 'arquivos')}`
+    }
+    case 'codigo.projeto': {
+      const summary = str(resultado.summary)
+      return summary || 'Coder autonomo concluiu a etapa solicitada'
+    }
+    default:
+      return ''
+  }
+}
+
+/**
+ * Duas falas são "a mesma" quando, normalizadas (sem pontuação/acentos extras de
+ * espaço, caixa baixa), uma contém a outra. Evita o Ares repetir em sequência o
+ * resumo imediato da ferramenta e a conclusão do modelo quando dizem o mesmo.
+ */
+export function isDuplicateSpeech(a: string, b: string): boolean {
+  const norm = (s: string): string =>
+    String(s || '')
+      .toLowerCase()
+      .replace(/[.,;:!?…]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  const na = norm(a)
+  const nb = norm(b)
+  if (!na || !nb) return false
+  return na === nb || na.includes(nb) || nb.includes(na)
+}
+
+export function codeVoiceProgressSummary(results: unknown[]): string {
+  const parts: string[] = []
+  for (const raw of results) {
+    const r = obj(raw)
+    const tipo = str(r.tipo)
+    if (!tipo.startsWith('codigo.')) continue
+    const summary = summarizeCodeResult(tipo, obj(r.resultado), str(r.erro))
+    if (summary) parts.push(summary)
+    if (parts.length >= 2) break
+  }
+  return compactSpeech(parts, 360)
+}
+
 const VOICE_TOOL_RESULT_LIMIT = 4000
 const VOICE_TRUNCATED_MARK = '[...resultado truncado para voz...]'
 

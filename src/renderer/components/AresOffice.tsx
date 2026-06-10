@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { AresState, SystemMetrics } from '../../shared/types'
+import type { AgentActivityEvent, AresState, SystemMetrics } from '../../shared/types'
 
 /**
  * Escritório do Ares — cenário 2D animado e interativo na sidebar.
@@ -17,6 +17,9 @@ interface AresOfficeProps {
   state: AresState // estado atual do assistente
   userName?: string // nome do usuário (vem de config.ui.userName)
   metrics?: SystemMetrics // CPU/RAM/uptime (para tooltip do monitor)
+  activity?: AgentActivityEvent // ultima atividade do agente/codigo
+  statusText?: string // status textual global (voz, transcricao etc.)
+  muted?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -24,7 +27,7 @@ interface AresOfficeProps {
 // ---------------------------------------------------------------------------
 
 type RGB = [number, number, number]
-type IdleAction = 'head-turn' | 'look-monitor' | 'sip' | 'stretch' | 'nod'
+type IdleAction = 'head-turn' | 'look-monitor' | 'sip' | 'stretch' | 'nod' | 'glance'
 type ClickReaction = 'wave' | 'stop'
 type Region = 'character' | 'monitor' | 'monitor2' | 'mug' | 'clock' | null
 
@@ -137,6 +140,13 @@ interface OfficeState {
   slideIndex: number
   slideTimer: number
   steam: number // 0..1 — opacidade do vapor da caneca
+
+  // Carinho (hover sustentado na cabeça) e estrela cadente na janela
+  petT: number // segundos de hover contínuo no personagem
+  petRewardAt: number // s.time da última reação de carinho (cooldown)
+  shootT: number // -1 inativo; 0..1 progresso da estrela cadente
+  shootSeed: number // varia a trajetória
+  shootTimer: number // contagem até a próxima estrela
 }
 
 interface Rect {
@@ -164,6 +174,7 @@ interface Layout {
   clock: Rect
   panelA: Rect
   panelB: Rect
+  win: Rect // janela na parede (céu/estrelas)
 }
 
 /** Fatores de iluminação conforme a hora do dia. */
@@ -185,13 +196,14 @@ const STATE_COLOR: Record<AresState, string> = {
   speaking: '#7df0ff'
 }
 
-const IDLE_ACTIONS: IdleAction[] = ['head-turn', 'look-monitor', 'sip', 'stretch', 'nod']
+const IDLE_ACTIONS: IdleAction[] = ['head-turn', 'look-monitor', 'sip', 'stretch', 'nod', 'glance']
 const IDLE_ACT_DUR: Record<IdleAction, number> = {
   'head-turn': 2,
   'look-monitor': 2.2,
   sip: 2,
   stretch: 1.6,
-  nod: 1.2
+  nod: 1.2,
+  glance: 2.4 // olha "para a câmera" e acena de leve
 }
 
 const THINK_SYMBOLS = ['⚙', '⚡', '{ }', '→', '</>']
@@ -273,7 +285,8 @@ function computeLayout(w: number, h: number): Layout {
     mug: { x: w * 0.89, y: deskTop - h * 0.045, w: w * 0.055, h: h * 0.05 },
     clock: { x: w - 46, y: 6, w: 40, h: 14 },
     panelA: { x: w * 0.05, y: h * 0.08, w: w * 0.2, h: h * 0.15 },
-    panelB: { x: w * 0.29, y: h * 0.11, w: w * 0.16, h: h * 0.1 }
+    panelB: { x: w * 0.29, y: h * 0.11, w: w * 0.16, h: h * 0.1 },
+    win: { x: w * 0.52, y: h * 0.07, w: w * 0.24, h: h * 0.17 }
   }
 }
 
@@ -306,6 +319,42 @@ function greetingForHour(hour: number): string {
   if (hour >= 6 && hour < 12) return 'Bom dia.'
   if (hour >= 12 && hour < 18) return 'Boa tarde.'
   return 'Boa noite.'
+}
+
+function stateLabel(state: AresState): string {
+  if (state === 'listening') return 'Ouvindo'
+  if (state === 'thinking') return 'Analisando'
+  if (state === 'speaking') return 'Falando'
+  return 'Pronto'
+}
+
+function activityStatusLabel(activity?: AgentActivityEvent): string {
+  if (!activity) return ''
+  if (activity.status === 'running') return 'em execucao'
+  if (activity.status === 'waiting') return 'aguardando'
+  if (activity.status === 'error' || activity.ok === false) return 'falhou'
+  if (activity.status === 'done') return 'concluido'
+  return activity.stream === 'stderr' ? 'erro' : 'saida'
+}
+
+function activityLine(activity?: AgentActivityEvent, statusText = '', muted = false): { title: string; detail: string; tone: string } {
+  if (activity) {
+    const status = activityStatusLabel(activity)
+    return {
+      title: status ? `${activity.title} · ${status}` : activity.title,
+      detail: activity.command || activity.target || activity.detail || activity.output || '',
+      tone:
+        activity.status === 'waiting'
+          ? 'waiting'
+          : activity.status === 'error' || activity.ok === false
+            ? 'error'
+            : activity.status === 'done'
+              ? 'done'
+              : 'active'
+    }
+  }
+  if (statusText.trim()) return { title: statusText.trim(), detail: muted ? 'fala silenciada' : '', tone: muted ? 'muted' : 'active' }
+  return { title: muted ? 'Fala silenciada' : 'Sistemas locais online', detail: '', tone: muted ? 'muted' : 'idle' }
 }
 
 function makeOfficeState(state: AresState): OfficeState {
@@ -370,7 +419,12 @@ function makeOfficeState(state: AresState): OfficeState {
     monitorScroll: 0,
     slideIndex: 0,
     slideTimer: 0,
-    steam: 1
+    steam: 1,
+    petT: 0,
+    petRewardAt: -999,
+    shootT: -1,
+    shootSeed: 0,
+    shootTimer: 14
   }
 }
 
@@ -525,6 +579,32 @@ function updateOffice(s: OfficeState, dt: number, L: Layout, amb: Ambient): void
   if (s.panelBoost > 0) s.panelBoost -= dt
   s.clockGlow = approach(s.clockGlow, s.hoverClock ? 1 : 0, 1 - Math.exp(-dt * 8))
 
+  // Carinho: hover sustentado na cabeça deixa o Ares "feliz" (com cooldown)
+  if (s.hoverChar && sleepStage(s.idleFor) < 2) {
+    s.petT += dt
+    if (s.petT > 1.1 && s.time - s.petRewardAt > 6) {
+      s.petRewardAt = s.time
+      s.happyT = 0.9
+      showBubble(s, pick(['Obrigado, senhor.', 'Às ordens, sempre.']))
+      spawnBurst(s, L, 6, 22)
+    }
+  } else {
+    s.petT = Math.max(0, s.petT - dt * 2)
+  }
+
+  // Estrela cadente na janela (só faz sentido à noite; ver drawWindow)
+  if (s.shootT >= 0) {
+    s.shootT += dt * 1.6
+    if (s.shootT > 1) s.shootT = -1
+  } else {
+    s.shootTimer -= dt
+    if (s.shootTimer <= 0) {
+      s.shootTimer = 12 + Math.random() * 14
+      s.shootT = 0
+      s.shootSeed = Math.random()
+    }
+  }
+
   // Respiração por estado
   let cycle = 3
   let amp = 1.6
@@ -612,6 +692,14 @@ function updateOffice(s: OfficeState, dt: number, L: Layout, amb: Ambient): void
       tTilt = 2
     } else if (s.idleAction === 'stretch') tShoulder = -2.5 * Math.sin(pr * Math.PI)
     else if (s.idleAction === 'nod') tDrop = Math.max(0, Math.sin(pr * Math.PI * 2)) * 3
+    else if (s.idleAction === 'glance') {
+      // Olha "para a câmera" e acena de leve com a mão direita
+      tEye = 1.15
+      tTilt = 1.5
+      const wave = Math.sin(pr * Math.PI) // sobe e desce suave
+      hrX = L.cx + 26
+      hrY = L.shoulderY - 4 - wave * 12 + Math.sin(s.time * 10) * wave * 1.8
+    }
   }
   // Hover na caneca: gesto de "pegar"
   if (s.mugReachT > 0) {
@@ -659,6 +747,10 @@ function updateOffice(s: OfficeState, dt: number, L: Layout, amb: Ambient): void
     tLook = -2 // olhando pro monitor
   }
   if (s.idleAction === 'look-monitor') tLook = -2.5
+  if (s.idleAction === 'glance') {
+    tLook = 0
+    tLookY = 0.6 // olha direto pra "câmera"
+  }
   if (s.idleAction === 'sip' || s.mugReachT > 0) {
     tLook = 2.5
     tLookY = 1
@@ -808,6 +900,7 @@ interface DrawEnv {
   amb: Ambient
   C: (a: number) => string // cor do estado atual com alpha
   stage: number // estágio de sono
+  hour: number // hora local (céu da janela, ambiente)
 }
 
 function drawBackground(d: DrawEnv): void {
@@ -878,6 +971,97 @@ function drawWallPanels(d: DrawEnv): void {
   }
 }
 
+/** Janela na parede: céu que acompanha a hora, estrelas piscando e estrela cadente. */
+function drawWindow(d: DrawEnv): void {
+  const { ctx, L, s, C, hour } = d
+  const w = L.win
+  const night = hour >= 18 || hour < 6
+  const dusk = hour >= 17 && hour < 19
+  ctx.save()
+  rr(ctx, w.x, w.y, w.w, w.h, 3)
+  ctx.clip()
+  // Céu
+  const sky = ctx.createLinearGradient(0, w.y, 0, w.y + w.h)
+  if (night) {
+    sky.addColorStop(0, '#04081a')
+    sky.addColorStop(1, '#0a1430')
+  } else if (dusk) {
+    sky.addColorStop(0, '#1a2a55')
+    sky.addColorStop(1, '#5a3550')
+  } else {
+    sky.addColorStop(0, '#2a4a7a')
+    sky.addColorStop(1, '#46688f')
+  }
+  ctx.fillStyle = sky
+  ctx.fillRect(w.x, w.y, w.w, w.h)
+
+  if (night) {
+    // Estrelas determinísticas, piscando dessincronizadas
+    for (let i = 0; i < 14; i++) {
+      const sx = w.x + 2 + hash(i * 17) * (w.w - 4)
+      const sy = w.y + 2 + hash(i * 31) * (w.h * 0.7)
+      const tw = 0.35 + 0.65 * Math.abs(Math.sin(s.time * (0.6 + hash(i) * 1.4) + i * 2.1))
+      ctx.fillStyle = `rgba(220,238,255,${0.25 + tw * 0.55})`
+      ctx.fillRect(sx, sy, 1.1, 1.1)
+    }
+    // Lua crescente
+    const mx = w.x + w.w * 0.78
+    const my = w.y + w.h * 0.26
+    ctx.beginPath()
+    ctx.arc(mx, my, 4, 0, Math.PI * 2)
+    ctx.fillStyle = 'rgba(225,235,250,0.85)'
+    ctx.shadowColor = 'rgba(200,225,255,0.8)'
+    ctx.shadowBlur = 6
+    ctx.fill()
+    ctx.shadowBlur = 0
+    ctx.beginPath()
+    ctx.arc(mx - 2.2, my - 1, 3.4, 0, Math.PI * 2)
+    ctx.fillStyle = night ? '#04081a' : '#0a1430'
+    ctx.fill()
+    // Estrela cadente
+    if (s.shootT >= 0) {
+      const t = s.shootT
+      const x0 = w.x + w.w * (0.15 + s.shootSeed * 0.5)
+      const y0 = w.y + w.h * (0.1 + s.shootSeed * 0.2)
+      const px = x0 + t * w.w * 0.45
+      const py = y0 + t * w.h * 0.4
+      const a = Math.sin(t * Math.PI)
+      ctx.strokeStyle = `rgba(235,245,255,${a * 0.85})`
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.moveTo(px - 8, py - 6)
+      ctx.lineTo(px, py)
+      ctx.stroke()
+    }
+  } else {
+    // Dia/entardecer: skyline distante
+    ctx.fillStyle = 'rgba(10,20,40,0.55)'
+    for (let i = 0; i < 7; i++) {
+      const bw = 4 + hash(i * 7) * 7
+      const bh = w.h * (0.18 + hash(i * 13) * 0.3)
+      ctx.fillRect(w.x + 2 + i * (w.w / 7), w.y + w.h - bh, bw, bh)
+    }
+    if (dusk) {
+      ctx.fillStyle = 'rgba(255,170,90,0.5)'
+      ctx.beginPath()
+      ctx.arc(w.x + w.w * 0.3, w.y + w.h * 0.55, 4.5, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }
+  ctx.restore()
+  // Moldura + travessa
+  ctx.strokeStyle = C(0.3)
+  ctx.lineWidth = 1
+  rr(ctx, w.x, w.y, w.w, w.h, 3)
+  ctx.stroke()
+  ctx.strokeStyle = C(0.16)
+  ctx.lineWidth = 0.8
+  ctx.beginPath()
+  ctx.moveTo(w.x + w.w / 2, w.y)
+  ctx.lineTo(w.x + w.w / 2, w.y + w.h)
+  ctx.stroke()
+}
+
 function drawClock(d: DrawEnv): void {
   const { ctx, L, s } = d
   const now = new Date()
@@ -927,6 +1111,11 @@ function drawHoloPlant(d: DrawEnv): void {
 function drawChair(d: DrawEnv): void {
   const { ctx, L } = d
   const top = L.headCY - L.headR * 1.9
+  // Sombra no chão — assenta o personagem no cenário
+  ctx.beginPath()
+  ctx.ellipse(L.cx, (L.ledY + L.h) / 2 + 1, 34, 3.2, 0, 0, Math.PI * 2)
+  ctx.fillStyle = 'rgba(0,0,0,0.32)'
+  ctx.fill()
   ctx.fillStyle = 'rgba(7,17,32,0.88)'
   ctx.strokeStyle = 'rgba(86,200,255,0.1)'
   ctx.lineWidth = 1
@@ -1139,6 +1328,47 @@ function drawCharacterHead(d: DrawEnv, hx: number, hy: number): void {
     ctx.stroke()
   }
 
+  // Luz de contorno (rim light) no alto do crânio — destaca o personagem do fundo
+  ctx.strokeStyle = 'rgba(235,250,255,0.22)'
+  ctx.lineWidth = 1.2
+  ctx.beginPath()
+  ctx.arc(hx, hy - r * 0.12, r * 0.92, Math.PI * 1.12, Math.PI * 1.62)
+  ctx.stroke()
+
+  // Headset: arco sobre a cabeça, concha na orelha e microfone com LED de estado
+  ctx.strokeStyle = C(0.5)
+  ctx.lineWidth = 1.4
+  ctx.beginPath()
+  ctx.arc(hx, hy - r * 0.05, r * 1.02, Math.PI * 1.15, Math.PI * 1.85)
+  ctx.stroke()
+  const earX = hx + r * 0.88
+  const earY = hy + r * 0.1
+  rr(ctx, earX - 1.6, earY - 3, 3.6, 6.5, 1.6)
+  ctx.fillStyle = '#0c1a31'
+  ctx.fill()
+  ctx.strokeStyle = C(0.55)
+  ctx.lineWidth = 0.9
+  ctx.stroke()
+  // Haste do microfone até perto da boca
+  ctx.beginPath()
+  ctx.moveTo(earX, earY + 3)
+  ctx.quadraticCurveTo(hx + r * 0.7, hy + r * 0.78, hx + r * 0.32, hy + r * 0.62)
+  ctx.strokeStyle = C(0.4)
+  ctx.lineWidth = 0.9
+  ctx.stroke()
+  // LED do mic: pisca rápido ouvindo, fixo falando, pulso lento pensando
+  let led = 0.35 + 0.2 * Math.sin(s.time * 2)
+  if (s.state === 'listening') led = 0.5 + 0.5 * (Math.sin(s.time * 9) > 0 ? 1 : 0.2)
+  else if (s.state === 'speaking') led = 0.95
+  else if (s.state === 'thinking') led = 0.45 + 0.35 * Math.sin(s.time * 3)
+  ctx.beginPath()
+  ctx.arc(hx + r * 0.32, hy + r * 0.62, 1.1, 0, Math.PI * 2)
+  ctx.fillStyle = C(Math.min(1, led))
+  ctx.shadowColor = C(0.8)
+  ctx.shadowBlur = 4
+  ctx.fill()
+  ctx.shadowBlur = 0
+
   // Ondas sonoras perto da "orelha" em listening (tipo sinal WiFi)
   if (s.state === 'listening') {
     for (let i = 0; i < 3; i++) {
@@ -1173,6 +1403,15 @@ function drawDesk(d: DrawEnv): void {
   ctx.closePath()
   ctx.fillStyle = '#13233f'
   ctx.fill()
+  // Poças de luz dos monitores refletidas no tampo
+  for (const m of [d.L.mon1, d.L.mon2]) {
+    const gx = m.x + m.w / 2
+    const glow = ctx.createRadialGradient(gx, d.L.deskTop, 1, gx, d.L.deskTop, m.w * 0.55)
+    glow.addColorStop(0, C(0.1))
+    glow.addColorStop(1, C(0))
+    ctx.fillStyle = glow
+    ctx.fillRect(m.x - 8, d.L.deskTop, m.w + 16, d.L.deskFront - d.L.deskTop)
+  }
   // Borda brilhante do tampo
   ctx.strokeStyle = C(0.4)
   ctx.lineWidth = 1
@@ -1453,14 +1692,45 @@ function drawStatusBubble(d: DrawEnv): void {
   ctx.restore()
 }
 
+/** Acabamento holográfico: vinheta, scanlines sutis e varredura de "vidro". */
+function drawScreenFX(d: DrawEnv): void {
+  const { ctx, L, s } = d
+  // Vinheta — escurece as bordas e dá profundidade
+  const v = ctx.createRadialGradient(L.cx, L.h * 0.45, L.h * 0.3, L.cx, L.h * 0.55, L.h * 0.95)
+  v.addColorStop(0, 'rgba(0,0,0,0)')
+  v.addColorStop(1, 'rgba(0,0,0,0.30)')
+  ctx.fillStyle = v
+  ctx.fillRect(0, 0, L.w, L.h)
+  // Scanlines bem sutis (a cada 3px)
+  ctx.fillStyle = 'rgba(0,0,0,0.05)'
+  for (let y = 0; y < L.h; y += 3) ctx.fillRect(0, y, L.w, 1)
+  // Varredura de vidro: faixa diagonal clara que cruza a "tela" a cada ~9s
+  const ph = (s.time % 9) / 9
+  if (ph < 0.22) {
+    const t = ph / 0.22
+    const x = -L.w * 0.4 + t * L.w * 1.8
+    const g = ctx.createLinearGradient(x - 26, 0, x + 26, 0)
+    g.addColorStop(0, 'rgba(190,230,255,0)')
+    g.addColorStop(0.5, `rgba(190,230,255,${0.05 * Math.sin(t * Math.PI)})`)
+    g.addColorStop(1, 'rgba(190,230,255,0)')
+    ctx.save()
+    ctx.transform(1, 0, -0.35, 1, 0, 0) // inclina a faixa
+    ctx.fillStyle = g
+    ctx.fillRect(x - 30, 0, 60, L.h)
+    ctx.restore()
+  }
+}
+
 function drawOffice(ctx: CanvasRenderingContext2D, L: Layout, s: OfficeState): void {
-  const amb = ambientForHour(new Date().getHours())
+  const hour = new Date().getHours()
+  const amb = ambientForHour(hour)
   const C = (a: number): string => rgba(s.color, a)
-  const d: DrawEnv = { ctx, L, s, amb, C, stage: sleepStage(s.idleFor) }
+  const d: DrawEnv = { ctx, L, s, amb, C, stage: sleepStage(s.idleFor), hour }
 
   ctx.clearRect(0, 0, L.w, L.h)
   drawBackground(d)
   drawWallPanels(d)
+  drawWindow(d)
   drawClock(d)
   drawHoloPlant(d)
   drawLedStrip(d)
@@ -1473,6 +1743,7 @@ function drawOffice(ctx: CanvasRenderingContext2D, L: Layout, s: OfficeState): v
   drawFloatingSymbols(d)
   drawSpeechBubbles(d)
   drawWaveReaction(d)
+  drawScreenFX(d)
   drawStatusBubble(d)
 }
 
@@ -1482,7 +1753,7 @@ function drawOffice(ctx: CanvasRenderingContext2D, L: Layout, s: OfficeState): v
 
 const FRAME_MS = 1000 / 22 // ~22fps — suficiente para animação de personagem
 
-export default function AresOffice({ state, userName, metrics }: AresOfficeProps): JSX.Element {
+export default function AresOffice({ state, userName, metrics, activity, statusText = '', muted = false }: AresOfficeProps): JSX.Element {
   const wrapRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const officeRef = useRef<OfficeState>(makeOfficeState(state))
@@ -1499,6 +1770,16 @@ export default function AresOffice({ state, userName, metrics }: AresOfficeProps
   useEffect(() => {
     userNameRef.current = userName
   }, [userName])
+
+  useEffect(() => {
+    if (!activity) return
+    const s = officeRef.current
+    const label = activityStatusLabel(activity)
+    const text = label ? `${activity.title}: ${label}` : activity.title
+    showBubble(s, text.length > 28 ? `${text.slice(0, 25)}...` : text)
+    if (activity.status === 'running' || activity.status === 'output') s.panelBoost = 1
+    if (activity.status === 'waiting') s.panelBoost = 1.6
+  }, [activity?.id, activity?.status, activity?.title, activity?.detail, activity?.command])
 
   // Reage à troca de estado do assistente
   useEffect(() => {
@@ -1565,7 +1846,7 @@ export default function AresOffice({ state, userName, metrics }: AresOfficeProps
       const region = hitRegion(x, y, L)
       if (region === lastRegionRef.current) return
       lastRegionRef.current = region
-      canvas.style.cursor = region === 'character' ? 'pointer' : 'default'
+      canvas.style.cursor = region ? 'pointer' : 'default' // tudo com região é clicável
       s.hoverChar = region === 'character'
       s.hoverClock = region === 'clock'
       if (region === 'character' && s.time - s.lastHoverBubbleAt > 8) {
@@ -1592,6 +1873,28 @@ export default function AresOffice({ state, userName, metrics }: AresOfficeProps
       const L = layoutNow()
       const region = hitRegion(e.clientX - rect.left, e.clientY - rect.top, L)
       wake(s)
+      if (region === 'mug') {
+        // Pausa para o café: gesto de pegar + bolha
+        s.mugReachT = 0.001
+        s.steam = 1
+        showBubble(s, pick(['Um gole de café.', 'Café primeiro.']))
+        return
+      }
+      if (region === 'clock') {
+        // Data por extenso de hoje
+        const today = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })
+        showBubble(s, today.charAt(0).toUpperCase() + today.slice(1))
+        return
+      }
+      if (region === 'monitor' || region === 'monitor2') {
+        // "Acorda" os painéis e troca o slide do monitor
+        s.panelBoost = 2
+        s.slideIndex = (s.slideIndex + 1) % 4
+        s.slideTimer = 0
+        const m = metricsRef.current
+        showBubble(s, m ? `CPU ${Math.round(m.cpuPercent)}% · RAM ${Math.round(m.memPercent)}%` : 'Sistemas online.')
+        return
+      }
       if (region !== 'character') return
       const now = performance.now()
       if (now - s.lastClickAt < 2000) s.clickCount++
@@ -1656,11 +1959,20 @@ export default function AresOffice({ state, userName, metrics }: AresOfficeProps
   }, [])
 
   const m = metrics
+  const hud = activityLine(activity, statusText, muted)
   const tooltipText = m ? `CPU: ${Math.round(m.cpuPercent)}% · RAM: ${Math.round(m.memPercent)}%` : 'CPU: — · RAM: —'
 
   return (
     <div ref={wrapRef} className="ares-office-wrapper">
       <canvas ref={canvasRef} className="ares-office-canvas" role="img" aria-label="Escritório do Ares" />
+      <div className={`ares-office-hud ares-office-hud-${hud.tone}`} aria-live="polite">
+        <span className="ares-office-hud-dot" />
+        <span className="ares-office-hud-text">
+          <span className="ares-office-hud-title">{stateLabel(state)}</span>
+          <span className="ares-office-hud-detail">{hud.title}</span>
+          {hud.detail && <span className="ares-office-hud-sub">{hud.detail}</span>}
+        </span>
+      </div>
       {tooltipPos && (
         <div className="ares-office-tooltip" style={{ left: tooltipPos.x, top: tooltipPos.y }}>
           {tooltipText}

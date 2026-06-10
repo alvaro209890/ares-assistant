@@ -1,6 +1,7 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { motion } from 'framer-motion'
-import { useAres } from '../lib/store'
+import { useAres, type ConvMsg } from '../lib/store'
+import type { AgentActivityEvent } from '../../shared/types'
 import AresOffice from './AresOffice'
 
 type Screen = 'assistant' | 'tasks' | 'calendar' | 'reminders' | 'lists' | 'memory' | 'models' | 'system'
@@ -16,9 +17,36 @@ const tabs: { id: Screen; label: string; hint: string; icon: JSX.Element }[] = [
   { id: 'system', label: 'Sistema', hint: 'Alt+8', icon: <SystemIcon /> }
 ]
 
+function latestOfficeActivity(conversation: ConvMsg[]): AgentActivityEvent | null {
+  let outputFallback: AgentActivityEvent | null = null
+  for (let i = conversation.length - 1; i >= 0; i--) {
+    const activities = conversation[i].activities
+    if (!activities?.length) continue
+    for (let j = activities.length - 1; j >= 0; j--) {
+      const activity = activities[j]
+      if (activity.status !== 'output') return activity
+      if (!outputFallback) outputFallback = activity
+    }
+  }
+  return outputFallback
+}
+
 export default function TopBar(): JSX.Element {
-  const { screen, navigate, openSettings, openHelp, openPalette, config, saveConfig, aresState, metrics } = useAres()
+  const {
+    screen,
+    navigate,
+    openSettings,
+    openHelp,
+    openPalette,
+    config,
+    saveConfig,
+    aresState,
+    metrics,
+    conversation,
+    status
+  } = useAres()
   const muted = !config?.tts.enabled
+  const officeActivity = useMemo(() => latestOfficeActivity(conversation), [conversation])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -83,7 +111,14 @@ export default function TopBar(): JSX.Element {
 
       {/* Escritório do Ares — cenário interativo */}
       <div className="my-2 flex min-h-0 flex-1 items-end justify-center overflow-hidden px-1">
-        <AresOffice state={aresState} userName={config?.ui.userName} metrics={metrics ?? undefined} />
+        <AresOffice
+          state={aresState}
+          userName={config?.ui.userName}
+          metrics={metrics ?? undefined}
+          activity={officeActivity ?? undefined}
+          statusText={status}
+          muted={muted}
+        />
       </div>
 
       <div className="mt-auto grid gap-2">

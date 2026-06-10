@@ -31,6 +31,7 @@ import {
   summarizeCodeWorkspace,
   writeCodeFile
 } from '../src/main/code'
+import { scanTodos } from '../src/main/code'
 import { clearPendingCode, getPendingCode, setPendingCode } from '../src/main/pending'
 
 let root = ''
@@ -578,5 +579,19 @@ describe('navegação estilo agente — listar/esboço/referências/substituir',
     )
     expect(() => replaceInProject(config(), { find: 'a', replace: 'b' })).toThrow(/2 caracteres/)
     expect(() => replaceInProject(config(), { find: 'igual', replace: 'igual' })).toThrow(/igual/)
+  })
+})
+
+describe('codigo.todo — pendências no código', () => {
+  it('varre o projeto e conta TODO/FIXME com arquivo e linha', () => {
+    writeProjectFile('src/pending.ts', '// TODO: melhorar cobertura\nconst x = 1\n// FIXME corrigir tipo\n')
+    const res = scanTodos(config())
+    expect(res.total).toBeGreaterThanOrEqual(2)
+    expect(res.byTag.TODO).toBeGreaterThanOrEqual(1)
+    expect(res.byTag.FIXME).toBeGreaterThanOrEqual(1)
+    const item = res.items.find((i) => i.file === 'src/pending.ts' && i.tag === 'TODO')
+    expect(item?.line).toBe(1)
+    expect(item?.text).toContain('melhorar cobertura')
+    expect(res.summary).toMatch(/pendências? marcadas?/)
   })
 })

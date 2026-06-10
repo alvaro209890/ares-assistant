@@ -55,6 +55,18 @@ export function detectLintCommand(p: ProjectShape): DetectedCommand | null {
   return null
 }
 
+/** Comando para CHECAR TIPOS do projeto (typecheck). */
+export function detectTypecheckCommand(p: ProjectShape): DetectedCommand | null {
+  const s = p.scripts || {}
+  if (s.typecheck) return { command: pmRun(p.packageManager, 'typecheck'), runner: 'script' }
+  if (s['check:types']) return { command: pmRun(p.packageManager, 'check:types'), runner: 'script' }
+  if (s['type-check']) return { command: pmRun(p.packageManager, 'type-check'), runner: 'script' }
+  if (has(p.files, 'tsconfig.json')) return { command: 'npx tsc --noEmit', runner: 'tsc' }
+  if (has(p.files, 'mypy.ini', '.mypy.ini') && hasExt(p.files, '.py')) return { command: 'mypy .', runner: 'mypy' }
+  if (has(p.files, 'go.mod')) return { command: 'go vet ./...', runner: 'go' }
+  return null
+}
+
 /** Comando para FORMATAR o projeto. */
 export function detectFormatCommand(p: ProjectShape): DetectedCommand | null {
   const s = p.scripts || {}
@@ -124,6 +136,100 @@ export function parseLintCount(output: string): number | undefined {
   return undefined
 }
 
+/** Extrai a contagem de erros do typecheck (tsc, mypy). */
+export function parseTypecheckCount(output: string): number | undefined {
+  const out = output || ''
+  // tsc: "Found 12 errors in 3 files." / "Found 1 error."
+  let m = out.match(/Found\s+(\d+)\s+errors?/)
+  if (m) return Number(m[1])
+  // mypy: "Found 3 errors in 2 files (checked 10 source files)" coberto acima;
+  // "Success: no issues found in 12 source files".
+  if (/Success:\s*no issues found/i.test(out)) return 0
+  return undefined
+}
+
+// ---------------------------------------------------------------------------
+// Dependências: parsing do `npm outdated --json` e `npm audit --json`.
+// ---------------------------------------------------------------------------
+
+export interface OutdatedDep {
+  name: string
+  current: string
+  wanted: string
+  latest: string
+}
+
+/** Converte a saída JSON de `npm outdated --json` numa lista plana e ordenada. */
+export function parseNpmOutdated(json: string): OutdatedDep[] {
+  let data: unknown
+  try {
+    data = JSON.parse(json || '{}')
+  } catch {
+    return []
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return []
+  const out: OutdatedDep[] = []
+  for (const [name, raw] of Object.entries(data as Record<string, unknown>)) {
+    const dep = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+    out.push({
+      name,
+      current: String(dep.current ?? '?'),
+      wanted: String(dep.wanted ?? '?'),
+      latest: String(dep.latest ?? '?')
+    })
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+export interface VulnCounts {
+  critical: number
+  high: number
+  moderate: number
+  low: number
+  total: number
+}
+
+/** Extrai o total de vulnerabilidades de `npm audit --json` (metadata.vulnerabilities). */
+export function parseNpmAudit(json: string): VulnCounts | null {
+  let data: unknown
+  try {
+    data = JSON.parse(json || '{}')
+  } catch {
+    return null
+  }
+  const meta = (data as { metadata?: { vulnerabilities?: Record<string, unknown> } })?.metadata
+  const v = meta?.vulnerabilities
+  if (!v || typeof v !== 'object') return null
+  const n = (key: string): number => {
+    const value = Number((v as Record<string, unknown>)[key])
+    return Number.isFinite(value) && value > 0 ? value : 0
+  }
+  const critical = n('critical')
+  const high = n('high')
+  const moderate = n('moderate')
+  const low = n('low')
+  const declaredTotal = n('total')
+  return { critical, high, moderate, low, total: declaredTotal || critical + high + moderate + low }
+}
+
+// ---------------------------------------------------------------------------
+// Pendências no código (TODO/FIXME/HACK/BUG/XXX em comentários).
+// ---------------------------------------------------------------------------
+
+export type TodoTag = 'TODO' | 'FIXME' | 'HACK' | 'BUG' | 'XXX'
+
+// Exige um marcador de comentário antes da tag para não pegar texto comum
+// ("todo o projeto") nem strings de prosa.
+const TODO_LINE_RE = /(?:\/\/|\/\*|#|<!--|--|;|\*)\s*(TODO|FIXME|HACK|BUG|XXX)\b[:\s-]*(.*)/
+
+/** Reconhece uma pendência numa linha de código; null se a linha não tiver. */
+export function matchTodoLine(line: string): { tag: TodoTag; text: string } | null {
+  const m = String(line || '').match(TODO_LINE_RE)
+  if (!m) return null
+  const text = m[2].replace(/\*\/\s*$|-->\s*$/, '').trim().slice(0, 160)
+  return { tag: m[1] as TodoTag, text }
+}
+
 // ---------------------------------------------------------------------------
 // Resumo falável
 // ---------------------------------------------------------------------------
@@ -132,7 +238,7 @@ const plural = (n: number, one: string, many: string): string => `${n} ${n === 1
 
 /** Frase curta e falável do resultado (sem despejar a saída do runner). */
 export function describeDevResult(input: {
-  kind: 'test' | 'lint' | 'format'
+  kind: 'test' | 'lint' | 'format' | 'typecheck'
   ok: boolean
   timedOut: boolean
   aborted: boolean
@@ -141,6 +247,15 @@ export function describeDevResult(input: {
 }): string {
   if (input.aborted) return 'Interrompido pelo senhor.'
   if (input.timedOut) return 'Demorou demais e foi interrompido por tempo limite.'
+
+  if (input.kind === 'typecheck') {
+    if (typeof input.problems === 'number') {
+      return input.problems === 0
+        ? 'Tipos verificados, sem erros.'
+        : `${plural(input.problems, 'erro de tipo encontrado', 'erros de tipo encontrados')}.`
+    }
+    return input.ok ? 'Tipos verificados, sem erros.' : 'A checagem de tipos apontou erros.'
+  }
 
   if (input.kind === 'test') {
     const c = input.counts || {}
@@ -166,4 +281,34 @@ export function describeDevResult(input: {
 
   // format
   return input.ok ? 'Formatação aplicada.' : 'A formatação falhou.'
+}
+
+/** Frase curta e falável do estado das dependências. */
+export function describeDepsResult(input: {
+  checked: boolean
+  outdated: OutdatedDep[]
+  vulns: VulnCounts | null
+}): string {
+  if (!input.checked) return 'Não consegui consultar o registro de pacotes agora.'
+  const parts: string[] = []
+  parts.push(
+    input.outdated.length === 0
+      ? 'Dependências em dia.'
+      : `${plural(input.outdated.length, 'dependência desatualizada', 'dependências desatualizadas')}.`
+  )
+  if (input.vulns) {
+    const grave = input.vulns.critical + input.vulns.high
+    if (input.vulns.total === 0) parts.push('Sem vulnerabilidades conhecidas.')
+    else if (grave > 0) parts.push(`${plural(input.vulns.total, 'vulnerabilidade', 'vulnerabilidades')}, ${grave} grave${grave === 1 ? '' : 's'}.`)
+    else parts.push(`${plural(input.vulns.total, 'vulnerabilidade leve', 'vulnerabilidades leves')}.`)
+  }
+  return parts.join(' ')
+}
+
+/** Frase curta e falável das pendências encontradas no código. */
+export function describeTodosResult(input: { total: number; byTag: Record<string, number> }): string {
+  if (input.total === 0) return 'Nenhuma pendência marcada no código.'
+  const fix = (input.byTag.FIXME || 0) + (input.byTag.BUG || 0)
+  const base = `${plural(input.total, 'pendência marcada', 'pendências marcadas')} no código`
+  return fix > 0 ? `${base}, ${fix} urgente${fix === 1 ? '' : 's'}.` : `${base}.`
 }

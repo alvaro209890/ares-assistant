@@ -39,6 +39,11 @@ const WEB_END_PER_CHAR_MS = 85
 const WEB_MAX_RETRIES = 2
 const MAX_SPEECH_CHUNK_CHARS = 220
 const MIN_CHUNK_CHARS = 80
+// Teto rígido por FRASE na fila. Todos os caminhos internos já têm timeout próprio
+// (síntese ~8s, reprodução ≤45s, web ≤30s + retries), então isto só dispara em caso
+// patológico — e garante que a fila pula a frase em vez de congelar o turno inteiro
+// (sintoma: o Ares "trava no meio da fala" em tarefas de programação e nunca conclui).
+const SENTENCE_HARD_TIMEOUT_MS = 90_000
 
 export function loadVoices(): Promise<SpeechSynthesisVoice[]> {
   return new Promise((resolve) => {
@@ -504,9 +509,11 @@ async function drainQueue(): Promise<void> {
       startPrefetch(sentenceQueue[i].text, sentenceQueue[i].opts)
     }
     try {
-      await speakInternal(text, opts, false)
+      await withTimeout(speakInternal(text, opts, false), SENTENCE_HARD_TIMEOUT_MS, 'sentence')
     } catch (err) {
       log('error', `drainQueue: uncaught speech error for "${text}"`, err)
+      // Se foi o teto rígido, derruba qualquer áudio pendurado antes de seguir a fila.
+      if (err instanceof Error && err.message.includes('sentence timeout')) cancelSpeech()
       opts.onError?.('Falha inesperada na fala.')
       opts.onEnd?.()
     }

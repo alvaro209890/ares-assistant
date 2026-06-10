@@ -380,11 +380,19 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
       finished = true
     })
     const sens = cfg.ui.micSensitivity ?? 0.5
-    const interrupted = await audio.watchForSpeech({
-      threshold: Math.max(0.1, (0.09 - sens * 0.075) * 2.4 + 0.05),
-      sustainMs: 400,
-      shouldStop: () => finished
-    })
+    // Corre o watcher CONTRA a fila de fala: se o watcher não resolver por qualquer
+    // motivo (mic revogado, timer suspenso em background), o fim da fala destrava o
+    // turno mesmo assim — antes, o await pendurado deixava o Ares "ocupado" para sempre.
+    const interrupted = await Promise.race([
+      audio
+        .watchForSpeech({
+          threshold: Math.max(0.1, (0.09 - sens * 0.075) * 2.4 + 0.05),
+          sustainMs: 400,
+          shouldStop: () => finished
+        })
+        .catch(() => false), // mic indisponível não pode derrubar o turno
+      idle.then(() => false)
+    ])
     if (interrupted && !finished) {
       clearSpeechQueue()
       setStatus('Interrompido — pode falar.')

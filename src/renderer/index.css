@@ -376,6 +376,88 @@ body.simple .ares-orb-reticle {
   cursor: default;
 }
 
+.ares-office-hud {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  border-top: 1px solid rgba(86, 200, 255, 0.16);
+  background: linear-gradient(180deg, rgba(3, 8, 18, 0), rgba(3, 8, 18, 0.78) 38%, rgba(3, 8, 18, 0.92));
+  padding-top: 9px;
+  pointer-events: none;
+}
+
+.ares-office-hud-dot {
+  height: 7px;
+  width: 7px;
+  border-radius: 9999px;
+  background: rgba(125, 240, 255, 0.88);
+  box-shadow: 0 0 10px rgba(56, 225, 255, 0.72);
+}
+
+.ares-office-hud-active .ares-office-hud-dot,
+.ares-office-hud-waiting .ares-office-hud-dot {
+  animation: ares-office-dot-pulse 1.1s ease-in-out infinite;
+}
+
+.ares-office-hud-done .ares-office-hud-dot {
+  background: rgba(110, 231, 183, 0.92);
+  box-shadow: 0 0 10px rgba(110, 231, 183, 0.58);
+}
+
+.ares-office-hud-waiting .ares-office-hud-dot {
+  background: rgba(252, 211, 77, 0.92);
+  box-shadow: 0 0 10px rgba(252, 211, 77, 0.58);
+}
+
+.ares-office-hud-error .ares-office-hud-dot {
+  background: rgba(253, 164, 175, 0.92);
+  box-shadow: 0 0 10px rgba(253, 164, 175, 0.58);
+}
+
+.ares-office-hud-muted .ares-office-hud-dot {
+  background: rgba(252, 211, 77, 0.7);
+  box-shadow: 0 0 8px rgba(252, 211, 77, 0.35);
+}
+
+.ares-office-hud-text {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.ares-office-hud-title {
+  font-size: 9px;
+  line-height: 1;
+  color: rgba(125, 240, 255, 0.58);
+  text-transform: uppercase;
+}
+
+.ares-office-hud-detail,
+.ares-office-hud-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ares-office-hud-detail {
+  font-size: 11px;
+  line-height: 1.1;
+  color: rgba(214, 243, 255, 0.9);
+}
+
+.ares-office-hud-sub {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 9px;
+  line-height: 1.05;
+  color: rgba(167, 235, 255, 0.48);
+}
+
 .ares-office-tooltip {
   position: absolute;
   padding: 4px 8px;
@@ -389,6 +471,18 @@ body.simple .ares-orb-reticle {
   white-space: nowrap;
   z-index: 10;
   text-shadow: 0 0 6px rgba(56, 225, 255, 0.3);
+}
+
+@keyframes ares-office-dot-pulse {
+  0%,
+  100% {
+    opacity: 0.52;
+    transform: scale(0.86);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
 }
 
 /* No modo simples, esconder o escritório */

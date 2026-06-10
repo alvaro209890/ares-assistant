@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  codeVoiceProgressSummary,
+  isDuplicateSpeech,
   rootCauseError,
   sanitizeVoiceCodeFala,
   toolResultsPrompt,
@@ -82,6 +84,79 @@ describe('voz no modo programador', () => {
     expect(prompt).toContain('MODO VOZ PARA CODIGO')
     expect(prompt).toContain('nao leia codigo')
     expect(toolResultsPrompt([], true, false)).not.toContain('MODO VOZ PARA CODIGO')
+  })
+
+  it('gera resumo falavel imediato para analise de diretorio', () => {
+    const summary = codeVoiceProgressSummary([
+      {
+        tipo: 'codigo.workspace',
+        resultado: {
+          name: 'Ares',
+          exists: true,
+          files: ['src/main/agent.ts', 'src/renderer/App.tsx', 'package.json'],
+          languages: { TypeScript: 2, JSON: 1 },
+          hints: ['teste disponível: npm run test'],
+          health: { ok: true, label: 'estrutura em ordem', signals: [] }
+        }
+      }
+    ])
+
+    expect(summary).toContain('diretório Ares')
+    expect(summary).toContain('3 arquivos')
+    expect(summary).toContain('estrutura em ordem')
+    expect(summary.length).toBeLessThan(360)
+  })
+
+  it('detecta falas duplicadas para nao repetir resumo e conclusao', () => {
+    expect(isDuplicateSpeech('Analisei o diretório X: 3 arquivos.', 'analisei o diretório x: 3 arquivos')).toBe(true)
+    expect(isDuplicateSpeech('Analisei o diretório X: 3 arquivos. Estrutura em ordem.', 'Analisei o diretório X: 3 arquivos.')).toBe(true)
+    expect(isDuplicateSpeech('Analisei o diretório X.', 'O projeto usa TypeScript e os testes passam.')).toBe(false)
+    expect(isDuplicateSpeech('', 'qualquer coisa')).toBe(false)
+  })
+
+  it('resume typecheck, dependencias e pendencias de forma falavel', () => {
+    expect(
+      codeVoiceProgressSummary([
+        { tipo: 'codigo.typecheck', resultado: { kind: 'typecheck', summary: 'Tipos verificados, sem erros.' } }
+      ])
+    ).toContain('Tipos verificados')
+
+    expect(
+      codeVoiceProgressSummary([
+        { tipo: 'codigo.deps', resultado: { summary: '3 dependências desatualizadas. Sem vulnerabilidades conhecidas.' } }
+      ])
+    ).toContain('3 dependências desatualizadas')
+
+    const todos = codeVoiceProgressSummary([
+      {
+        tipo: 'codigo.todo',
+        resultado: {
+          total: 2,
+          summary: '2 pendências marcadas no código.',
+          items: [{ file: 'src/main/code.ts', line: 42, tag: 'TODO', text: 'revisar' }]
+        }
+      }
+    ])
+    expect(todos).toContain('2 pendências')
+    expect(todos).toContain('src/main/code.ts:42')
+  })
+
+  it('resume erro de terminal sem ler stack trace', () => {
+    const summary = codeVoiceProgressSummary([
+      {
+        tipo: 'codigo.terminal',
+        resultado: {
+          command: 'npm test',
+          ok: false,
+          code: 1,
+          stderr: 'Error: Cannot find module "vitest"\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1145:15)'
+        }
+      }
+    ])
+
+    expect(summary).toContain('npm test')
+    expect(summary).toContain('Cannot find module')
+    expect(summary).not.toContain('Module._resolveFilename')
   })
 
   it('trunca tool results grandes em modo voz+codigo', () => {

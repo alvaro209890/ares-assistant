@@ -16,7 +16,9 @@ import type {
   CodeProjectIndex,
   CodeScaffoldResult,
   CodeSearchMatch,
+  CodeDepsResult,
   CodeTerminalResult,
+  CodeTodosResult,
   CodeWorkspaceSummary,
   CodeWriteResult,
   CommandClassification,
@@ -29,9 +31,16 @@ import {
   detectTestCommand,
   detectLintCommand,
   detectFormatCommand,
+  detectTypecheckCommand,
   parseTestCounts,
   parseLintCount,
-  describeDevResult
+  parseTypecheckCount,
+  parseNpmOutdated,
+  parseNpmAudit,
+  matchTodoLine,
+  describeDevResult,
+  describeDepsResult,
+  describeTodosResult
 } from './devtools'
 
 export type CodeProgressFn = (event: { stream: 'stdout' | 'stderr'; chunk: string }) => void
@@ -1662,6 +1671,12 @@ async function runDevTool(
     // eslint/ruff saem com código !=0 quando há problemas — considere "rodou ok" se contamos os problemas.
     if (typeof problems === 'number') out.ok = problems === 0 && (res.code === 0 || res.code === 1)
     out.summary = describeDevResult({ kind, ok: out.ok, timedOut: res.timedOut, aborted: res.aborted, problems })
+  } else if (kind === 'typecheck') {
+    const problems = parseTypecheckCount(combined)
+    out.problems = problems
+    // tsc/mypy saem com código !=0 quando há erros — "rodou ok" se contamos zero erros.
+    if (typeof problems === 'number') out.ok = problems === 0 && (res.code === 0 || res.code === 1 || res.code === 2)
+    out.summary = describeDevResult({ kind, ok: out.ok, timedOut: res.timedOut, aborted: res.aborted, problems })
   } else {
     out.summary = describeDevResult({ kind, ok, timedOut: res.timedOut, aborted: res.aborted })
   }
@@ -1681,4 +1696,119 @@ export function runLint(cfg: AppConfig, opts: { root?: string; signal?: AbortSig
 /** Skill `codigo.formatar`: aplica o formatador do projeto. */
 export function runFormat(cfg: AppConfig, opts: { root?: string; signal?: AbortSignal; onProgress?: CodeProgressFn } = {}): Promise<DevToolResult> {
   return runDevTool(cfg, 'format', detectFormatCommand, 'nenhum formatador detectado (sem script "format" nem prettier/ruff/gofmt)', opts)
+}
+
+/** Skill `codigo.typecheck`: checa os tipos do projeto e conta os erros. */
+export function runTypecheck(cfg: AppConfig, opts: { root?: string; signal?: AbortSignal; onProgress?: CodeProgressFn } = {}): Promise<DevToolResult> {
+  return runDevTool(cfg, 'typecheck', detectTypecheckCommand, 'nenhuma checagem de tipos detectada (sem script "typecheck", tsconfig, mypy ou go)', opts)
+}
+
+// ---------------------------------------------------------------------------
+// Skill `codigo.deps`: saúde das dependências (desatualizadas + vulnerabilidades).
+// Só leitura, comandos FIXOS (`npm outdated --json` / `npm audit --json`); exige
+// rede para consultar o registro — sem rede, devolve checked:false com fala honesta.
+// ---------------------------------------------------------------------------
+
+const DEPS_MAX_LISTED = 12
+
+export async function checkDependencies(
+  cfg: AppConfig,
+  opts: { root?: string; signal?: AbortSignal; onProgress?: CodeProgressFn } = {}
+): Promise<CodeDepsResult> {
+  const summary = summarizeCodeWorkspace(cfg, opts.root)
+  const root = summary.root
+  const manager = summary.packageManager || 'npm'
+  const base: CodeDepsResult = {
+    root,
+    manager,
+    checked: false,
+    outdated: [],
+    vulnerabilities: null,
+    summary: ''
+  }
+  if (!summary.exists) return { ...base, summary: 'Workspace não encontrado.', hint: 'workspace não encontrado' }
+  if (!existsSync(join(root, 'package.json'))) {
+    return { ...base, summary: 'Este projeto não usa package.json; não há dependências npm para checar.', hint: 'sem package.json' }
+  }
+
+  const run = (args: string[]) =>
+    spawnAsync('npm', args, {
+      cwd: root,
+      timeoutMs: execTimeout(cfg),
+      signal: opts.signal,
+      onChunk: (stream, chunk) => opts.onProgress?.({ stream, chunk })
+    })
+
+  // `npm outdated` sai com código 1 quando HÁ desatualizadas — não é erro.
+  const outdatedRes = await run(['outdated', '--json'])
+  const outdatedOk = !outdatedRes.timedOut && !outdatedRes.aborted && outdatedRes.stdout.trim().length > 0
+  const outdated = outdatedOk ? parseNpmOutdated(outdatedRes.stdout) : []
+
+  // `npm audit` precisa de lockfile; falha silenciosa vira vulnerabilities:null.
+  let vulnerabilities: CodeDepsResult['vulnerabilities'] = null
+  const hasLock = existsSync(join(root, 'package-lock.json')) || existsSync(join(root, 'npm-shrinkwrap.json'))
+  if (hasLock) {
+    const auditRes = await run(['audit', '--json'])
+    if (!auditRes.timedOut && !auditRes.aborted) vulnerabilities = parseNpmAudit(auditRes.stdout)
+  }
+
+  const checked = outdatedOk || vulnerabilities != null
+  return {
+    ...base,
+    checked,
+    outdated: outdated.slice(0, DEPS_MAX_LISTED),
+    vulnerabilities,
+    summary: describeDepsResult({ checked, outdated, vulns: vulnerabilities }),
+    hint: checked ? undefined : 'sem acesso ao registro npm (offline?)'
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Skill `codigo.todo`: varre o projeto atrás de TODO/FIXME/HACK/BUG/XXX em
+// comentários. Só leitura, sem processos externos.
+// ---------------------------------------------------------------------------
+
+const TODOS_MAX_ITEMS = 40
+
+export function scanTodos(
+  cfg: AppConfig,
+  opts: { root?: string; filter?: string; maxResults?: number } = {}
+): CodeTodosResult {
+  const root = resolveCodeWorkspace(cfg, opts.root)
+  const maxResults = Math.max(1, Math.min(Number(opts.maxResults) || TODOS_MAX_ITEMS, 200))
+  const maxBytes = Math.max(1, codeConfig(cfg).maxFileKB) * 1024
+  const { files, timedOut } = walkFiles(root, 8, 2000)
+  const items: CodeTodosResult['items'] = []
+  const byTag: Record<string, number> = {}
+  let total = 0
+  const deadline = Date.now() + CODE_SCAN_TIMEOUT_MS
+
+  for (const rel of files) {
+    if (Date.now() > deadline) break
+    if (!matchesFilter(rel, opts.filter || '')) continue
+    const abs = resolveCodeFile(cfg, root, rel)
+    if (!isLikelyText(abs, maxBytes)) continue
+    let lines: string[]
+    try {
+      lines = readFileSync(abs, 'utf8').split(/\r?\n/)
+    } catch {
+      continue
+    }
+    for (let i = 0; i < lines.length; i++) {
+      const hit = matchTodoLine(lines[i])
+      if (!hit) continue
+      total++
+      byTag[hit.tag] = (byTag[hit.tag] || 0) + 1
+      if (items.length < maxResults) items.push({ file: rel, line: i + 1, tag: hit.tag, text: hit.text })
+    }
+  }
+
+  return {
+    root,
+    total,
+    byTag,
+    items,
+    truncated: timedOut || Date.now() > deadline || total > items.length,
+    summary: describeTodosResult({ total, byTag })
+  }
 }
