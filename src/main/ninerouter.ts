@@ -39,7 +39,7 @@ export async function chatJSON(cfg: AppConfig, messages: ChatMessage[], wantJson
 
   const call = async (useJson: boolean, withReasoning: boolean): Promise<Response> => {
     const body = buildChatBody(cfg, messages, { stream: false, json: useJson, withReasoning })
-    return fetch(url, { method: 'POST', headers, body: JSON.stringify(body) })
+    return fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(90_000) })
   }
 
   let res: Response
@@ -78,13 +78,16 @@ export async function streamChat(
   // Em localhost o 9 Router não exige chave; só mandamos o header se existir.
   if (cfg.nineRouter.apiKey) headers['Authorization'] = `Bearer ${cfg.nineRouter.apiKey}`
 
-  const open = (withReasoning: boolean): Promise<Response> =>
-    fetch(url, {
+  const open = (withReasoning: boolean): Promise<Response> => {
+    const signals = [AbortSignal.timeout(90_000)]
+    if (signal) signals.push(signal)
+    return fetch(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(buildChatBody(cfg, messages, { stream: true, withReasoning })),
-      signal
+      signal: AbortSignal.any(signals)
     })
+  }
 
   let res: Response
   try {
@@ -108,8 +111,22 @@ export async function streamChat(
   let buffer = ''
   let full = ''
 
+  /** Lê o próximo chunk com timeout — evita travar se o provedor parar de mandar dados. */
+  const readWithTimeout = (ms = 60_000): Promise<ReadableStreamReadResult<Uint8Array>> => {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reader.cancel().catch(() => {})
+        reject(new Error(`O provedor parou de responder por ${ms / 1000}s durante o streaming.`))
+      }, ms)
+      reader.read().then(
+        (result) => { clearTimeout(timer); resolve(result) },
+        (err) => { clearTimeout(timer); reject(err) }
+      )
+    })
+  }
+
   while (true) {
-    const { done, value } = await reader.read()
+    const { done, value } = await readWithTimeout()
     if (done) break
     buffer += decoder.decode(value, { stream: true })
 

@@ -1107,7 +1107,8 @@ async function streamTurn(
   phase: number,
   onDelta?: DeltaFn,
   kind: DeltaKind = 'both',
-  transform?: DeltaTextTransform
+  transform?: DeltaTextTransform,
+  signal?: AbortSignal
 ): Promise<string> {
   if (!onDelta) return chatJSON(cfg, messages, true)
   let cumulative = ''
@@ -1124,7 +1125,7 @@ async function streamTurn(
     const full = await streamChat(cfg, messages, (delta) => {
       cumulative += delta
       pump(cumulative)
-    })
+    }, signal)
     pump(full)
     return full
   } catch (e) {
@@ -1193,7 +1194,7 @@ export async function runTurn(
     { role: 'user', content: voiceAwareUserContent(userText, voice) }
   ]
 
-  const env = parseEnvelope(await streamTurn(cfg, messages, 1, onDelta, 'both', deltaTransform))
+  const env = parseEnvelope(await streamTurn(cfg, messages, 1, onDelta, 'both', deltaTransform, signal))
   let fala = finalFala(env.fala, suppressGreeting)
   let falaVoz: string | undefined
   const allNotes: string[] = []
@@ -1233,7 +1234,7 @@ export async function runTurn(
       // resumo conciso, limpo e GARANTIDAMENTE não-vazio num canal separado. Assim a voz
       // "continua" naturalmente para a resposta (ex.: o que havia no diretório) sem ler
       // código/caminhos/diffs em voz alta, e o chat mantém o conteúdo inteiro.
-      const raw = await streamTurn(cfg, convo, phase, onDelta, 'display', deltaTransform)
+      const raw = await streamTurn(cfg, convo, phase, onDelta, 'display', deltaTransform, signal)
       const envN = parseEnvelope(raw)
       if (envN.fala) {
         fala = finalFala(envN.fala, suppressGreeting) // texto completo permanece no chat
@@ -1245,7 +1246,7 @@ export async function runTurn(
       mutations = mutations.concat(envN.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo)))
       queries = lastRound ? [] : envN.acoes.filter((a) => QUERY_TOOLS.has(a.tipo))
     } else {
-      const raw = await streamTurn(cfg, convo, phase, onDelta, 'both', deltaTransform)
+      const raw = await streamTurn(cfg, convo, phase, onDelta, 'both', deltaTransform, signal)
       const envN = parseEnvelope(raw)
       if (envN.fala) fala = finalFala(envN.fala, suppressGreeting)
       mutations = mutations.concat(envN.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo)))

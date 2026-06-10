@@ -102,7 +102,9 @@ const api = {
     get: (): Promise<DiagnosticsResult> => ipcRenderer.invoke('diagnostics:get')
   },
   logs: {
-    recent: (limit?: number): Promise<string[]> => ipcRenderer.invoke('logs:recent', limit)
+    recent: (limit?: number): Promise<string[]> => ipcRenderer.invoke('logs:recent', limit),
+    write: (level: 'debug' | 'info' | 'warn' | 'error', scope: string, message: string, err?: unknown): Promise<void> =>
+      ipcRenderer.invoke('logs:log', level, scope, message, err)
   },
   lists: {
     load: (): Promise<Checklist[]> => ipcRenderer.invoke('lists:load'),

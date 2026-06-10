@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useAres } from '../lib/store'
+import AresOffice from './AresOffice'
 
 type Screen = 'assistant' | 'tasks' | 'calendar' | 'reminders' | 'lists' | 'memory' | 'models' | 'system'
 
@@ -16,7 +17,7 @@ const tabs: { id: Screen; label: string; hint: string; icon: JSX.Element }[] = [
 ]
 
 export default function TopBar(): JSX.Element {
-  const { screen, navigate, openSettings, openHelp, openPalette, config, saveConfig } = useAres()
+  const { screen, navigate, openSettings, openHelp, openPalette, config, saveConfig, aresState, metrics } = useAres()
   const muted = !config?.tts.enabled
 
   useEffect(() => {
@@ -79,6 +80,11 @@ export default function TopBar(): JSX.Element {
           )
         })}
       </nav>
+
+      {/* Escritório do Ares — cenário interativo */}
+      <div className="my-2 flex min-h-0 flex-1 items-end justify-center overflow-hidden px-1">
+        <AresOffice state={aresState} userName={config?.ui.userName} metrics={metrics ?? undefined} />
+      </div>
 
       <div className="mt-auto grid gap-2">
         {config && (

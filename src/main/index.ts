@@ -264,6 +264,13 @@ function registerIpc(): void {
   ipcMain.handle('tts:status', () => ({ ready: isPiperReady(), voices: listPiperVoices(), platform: process.platform }))
 
   // Logs recentes para a aba Sistema/Diagnóstico
+  ipcMain.handle('logs:log', (_e, level: 'debug' | 'info' | 'warn' | 'error', scope: string, message: string, err?: unknown) => {
+    if (level === 'error') logger.error(scope, message, err)
+    else if (level === 'warn') logger.warn(scope, message, err)
+    else if (level === 'info') logger.info(scope, message, err)
+    else logger.debug(scope, message, err)
+    return true
+  })
   ipcMain.handle('logs:recent', (_e, limit?: number) => getRecentLogs(typeof limit === 'number' ? limit : 200))
 
   // Widgets / consultas diretas

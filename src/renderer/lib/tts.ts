@@ -11,6 +11,17 @@ let currentWebStop: (() => void) | null = null
 let piperStatusCache: { ready: boolean; voices: string[] } | null = null
 let piperStatusAge = 0
 let piperDisabledUntil = 0
+
+function log(level: 'debug' | 'info' | 'warn' | 'error', message: string, err?: unknown): void {
+  const formatted = `[TTS] ${message}`
+  if (level === 'error') console.error(formatted, err)
+  else if (level === 'warn') console.warn(formatted, err)
+  else console.log(formatted, err)
+
+  if (window.ares?.logs?.write) {
+    window.ares.logs.write(level, 'tts-renderer', message, err).catch(() => {})
+  }
+}
 // Pipelining: enquanto uma frase toca, as PRÓXIMAS já são sintetizadas (até 2 adiantadas)
 // — com frases curtas, 1 só não bastava e sobrava um "vão" entre elas.
 const prefetched = new Map<string, Promise<ArrayBuffer>>()
@@ -152,6 +163,7 @@ async function webSpeakOnce(
   opts: SpeakOptions,
   voices: SpeechSynthesisVoice[]
 ): Promise<'ended' | 'cancelled' | 'failed'> {
+  log('debug', `webSpeakOnce: text="${text}"`)
   const u = new SpeechSynthesisUtterance(text)
   u.lang = 'pt-BR'
   const win = window.ares.system.platform === 'win32'
@@ -172,6 +184,7 @@ async function webSpeakOnce(
     let resumeTimer: ReturnType<typeof setInterval> | null = null
     const startTimer = setTimeout(() => {
       if (!started) {
+        log('warn', `webSpeakOnce: SpeechSynthesis start timeout for "${text}"`)
         synth.cancel()
         finish('failed')
       }
@@ -180,6 +193,7 @@ async function webSpeakOnce(
     const finish = (kind: 'ended' | 'cancelled' | 'failed') => {
       if (settled) return
       settled = true
+      log('debug', `webSpeakOnce finished: text="${text}", result=${kind}`)
       clearTimeout(startTimer)
       if (endTimer) clearTimeout(endTimer)
       if (resumeTimer) clearInterval(resumeTimer)
@@ -190,9 +204,11 @@ async function webSpeakOnce(
     currentWebStop = () => finish('cancelled')
     u.onstart = () => {
       started = true
+      log('debug', `webSpeakOnce started speaking: "${text}"`)
       opts.onStart?.()
       resumeTimer = setInterval(() => synth.resume(), 700)
       endTimer = setTimeout(() => {
+        log('warn', `webSpeakOnce: SpeechSynthesis playback timeout for "${text}"`)
         synth.cancel()
         finish('failed')
       }, webEndTimeout(text, u.rate))
@@ -200,6 +216,7 @@ async function webSpeakOnce(
     u.onend = () => finish('ended')
     u.onerror = (e) => {
       const err = (e as SpeechSynthesisErrorEvent).error
+      log('warn', `webSpeakOnce error for "${text}": ${err}`)
       finish(err === 'canceled' || err === 'interrupted' ? 'cancelled' : 'failed')
     }
     synth.speak(u)
@@ -210,8 +227,10 @@ async function webSpeakOnce(
 }
 
 async function webSpeak(text: string, opts: SpeakOptions): Promise<'ok' | 'failed' | 'cancelled'> {
+  log('info', `webSpeak: starting fallback webSpeak for "${text}"`)
   const synth = window.speechSynthesis
   if (!synth) {
+    log('error', 'webSpeak: window.speechSynthesis is not available')
     opts.onError?.('Sintese de voz indisponivel neste sistema.')
     return 'failed'
   }
@@ -220,6 +239,7 @@ async function webSpeak(text: string, opts: SpeakOptions): Promise<'ok' | 'faile
   if (!voices.length) voices = await loadVoices()
 
   for (let attempt = 0; attempt < WEB_MAX_RETRIES; attempt++) {
+    log('debug', `webSpeak: attempt ${attempt + 1} of ${WEB_MAX_RETRIES}`)
     synth.cancel()
     const result = await webSpeakOnce(synth, text, opts, voices)
     if (result === 'ended') {
@@ -228,10 +248,12 @@ async function webSpeak(text: string, opts: SpeakOptions): Promise<'ok' | 'faile
     }
     if (result === 'cancelled') return 'cancelled'
     if (attempt < WEB_MAX_RETRIES - 1) {
+      log('debug', `webSpeak: delay before retry`)
       await delay(140)
       continue
     }
   }
+  log('error', `webSpeak: all ${WEB_MAX_RETRIES} attempts failed for "${text}"`)
   opts.onError?.('Web Speech nao iniciou a fala; tente trocar a voz em Configuracoes.')
   return 'failed'
 }
@@ -302,14 +324,24 @@ async function takePrefetched(cleanText: string, opts: SpeakOptions): Promise<Ar
 }
 
 async function piperSpeak(text: string, opts: SpeakOptions, force = false): Promise<boolean> {
+  log('debug', `piperSpeak: force=${force}, text="${text}"`)
   try {
-    if (!force && Date.now() < piperDisabledUntil) return false
+    if (!force && Date.now() < piperDisabledUntil) {
+      log('debug', `piperSpeak: Piper cooldown active, skipping Piper for now`)
+      return false
+    }
     const status = await getPiperStatus()
-    if (!status.ready || !status.voices.length) return false
+    if (!status.ready || !status.voices.length) {
+      log('debug', `piperSpeak: Piper status is not ready or no voices, skipping Piper`)
+      return false
+    }
+    log('debug', `piperSpeak: status is ready, fetching audio for "${text}"`)
     const wav =
       opts._prefetchedWav ??
       (await takePrefetched(text, opts)) ??
       (await synthesizeWithRetry(text, opts.piperVoice, opts.rate))
+    
+    log('debug', `piperSpeak: audio data received successfully, length=${wav.byteLength}`)
     const blob = new Blob([wav], { type: 'audio/wav' })
     const url = URL.createObjectURL(blob)
     const audio = new Audio(url)
@@ -317,7 +349,10 @@ async function piperSpeak(text: string, opts: SpeakOptions, force = false): Prom
 
     const result = await new Promise<'ended' | 'cancelled'>((resolve, reject) => {
       let settled = false
-      const playbackTimer = setTimeout(() => fail(new Error('Timeout ao reproduzir audio Piper.')), piperPlaybackTimeout(wav))
+      const playbackTimer = setTimeout(() => {
+        log('warn', `piperSpeak: playback timeout for "${text}"`)
+        fail(new Error('Timeout ao reproduzir audio Piper.'))
+      }, piperPlaybackTimeout(wav))
       const finish = (kind: 'ended' | 'cancelled') => {
         if (settled) return
         settled = true
@@ -340,20 +375,33 @@ async function piperSpeak(text: string, opts: SpeakOptions, force = false): Prom
         audio,
         url,
         stop: () => {
+          log('debug', `piperSpeak: stop called for "${text}"`)
           audio.pause()
           audio.src = ''
           finish('cancelled')
         }
       }
-      audio.onended = () => finish('ended')
-      audio.onerror = () => fail(new Error('Falha ao reproduzir audio Piper.'))
+      audio.onended = () => {
+        log('debug', `piperSpeak: audio.onended for "${text}"`)
+        finish('ended')
+      }
+      audio.onerror = () => {
+        log('warn', `piperSpeak: audio.onerror for "${text}"`)
+        fail(new Error('Falha ao reproduzir audio Piper.'))
+      }
       opts.onStart?.()
-      void audio.play().catch((e) => fail(e instanceof Error ? e : new Error(String(e))))
+      log('info', `piperSpeak: playing audio for "${text}"`)
+      void audio.play().catch((e) => {
+        log('warn', `piperSpeak: audio.play failed for "${text}"`, e)
+        fail(e instanceof Error ? e : new Error(String(e)))
+      })
     })
 
     if (result === 'ended') opts.onEnd?.()
+    log('debug', `piperSpeak completed for "${text}" with result: ${result}`)
     return true
-  } catch {
+  } catch (err) {
+    log('warn', `piperSpeak: failed to synthesize or play "${text}"`, err)
     // Evita repetir timeout em todas as frases do mesmo turno.
     piperDisabledUntil = Date.now() + PIPER_FAILURE_COOLDOWN_MS
     return false
@@ -368,22 +416,28 @@ function prefersPiper(opts: SpeakOptions): boolean {
 }
 
 async function speakInternal(text: string, opts: SpeakOptions, cancelBefore: boolean): Promise<void> {
+  log('debug', `speakInternal: text="${text}", cancelBefore=${cancelBefore}`)
   const clean = normalizeSpeechText(text)
   if (!clean) {
+    log('debug', `speakInternal: text normalized to empty, skipping speech`)
     opts.onEnd?.()
     return
   }
   if (cancelBefore) cancelSpeech()
   if (prefersPiper(opts)) {
+    log('debug', `speakInternal: prefers Piper engine`)
     const ok = await piperSpeak(clean, opts)
     if (ok) return
+    log('warn', `speakInternal: Piper failed, trying web fallback`)
     const webResult = await webSpeak(clean, opts)
     if (webResult === 'failed') opts.onEnd?.()
     return
   }
+  log('debug', `speakInternal: prefers Web Speech engine`)
   const webResult = await webSpeak(clean, opts)
   if (webResult === 'ok' || webResult === 'cancelled') return
   if (opts.engine !== 'web') {
+    log('warn', `speakInternal: Web Speech failed, trying Piper fallback`)
     const ok = await piperSpeak(clean, opts, true)
     if (!ok) opts.onEnd?.()
     return
@@ -392,6 +446,7 @@ async function speakInternal(text: string, opts: SpeakOptions, cancelBefore: boo
 }
 
 export async function speak(text: string, opts: SpeakOptions = {}): Promise<void> {
+  log('info', `speak: "${text}"`)
   sentenceQueue = []
   prefetched.clear()
   queueGeneration++
@@ -400,6 +455,7 @@ export async function speak(text: string, opts: SpeakOptions = {}): Promise<void
 }
 
 export function cancelSpeech(): void {
+  log('info', 'cancelSpeech called')
   currentWebStop?.()
   currentWebStop = null
   window.speechSynthesis?.cancel()
@@ -415,31 +471,45 @@ let queueGeneration = 0
 function resolveIdle(): void {
   const waiters = idleWaiters
   idleWaiters = []
+  log('debug', `resolveIdle: resolving ${waiters.length} idle waiters`)
   waiters.forEach((fn) => fn())
 }
 
 async function drainQueue(): Promise<void> {
-  if (draining) return
+  if (draining) {
+    log('debug', 'drainQueue: already draining, returning')
+    return
+  }
   draining = true
   const generation = queueGeneration
+  log('debug', `drainQueue started: queue size=${sentenceQueue.length}, generation=${generation}`)
   while (sentenceQueue.length && generation === queueGeneration) {
     const { text, opts } = sentenceQueue.shift()!
+    log('debug', `drainQueue: speaking sentence: "${text}", remaining queue=${sentenceQueue.length}`)
     // Adianta a síntese das PRÓXIMAS frases enquanto esta toca -> fala quase contínua
     // mesmo quando as frases são curtas (a reprodução não espera a síntese).
     for (let i = 0; i < PREFETCH_DEPTH && i < sentenceQueue.length; i++) {
       startPrefetch(sentenceQueue[i].text, sentenceQueue[i].opts)
     }
     await speakInternal(text, opts, false)
-    if (generation !== queueGeneration) break
+    if (generation !== queueGeneration) {
+      log('debug', 'drainQueue: generation changed, breaking')
+      break
+    }
   }
-  if (generation === queueGeneration) draining = false
-  else draining = false
+  if (generation === queueGeneration) {
+    draining = false
+  } else {
+    draining = false
+  }
+  log('debug', 'drainQueue: finished loop, resolving idle')
   resolveIdle()
 }
 
 export function enqueueSentence(text: string, opts: SpeakOptions): void {
   const t = text.trim()
   if (!t) return
+  log('info', `enqueueSentence: "${t}"`)
   sentenceQueue.push({ text: t, opts })
   void drainQueue()
 }
@@ -450,6 +520,7 @@ export function whenSpeechQueueIdle(): Promise<void> {
 }
 
 export function clearSpeechQueue(): void {
+  log('info', 'clearSpeechQueue called')
   sentenceQueue = []
   prefetched.clear()
   // Reset hard do subsistema de fala (barge-in / novo turno): zera também o "cooldown" do
@@ -461,7 +532,7 @@ export function clearSpeechQueue(): void {
   resolveIdle()
 }
 
-const SENTENCE_RE = /[^.!?…\n]*[.!?…\n]+/g
+const SENTENCE_RE = /.*?(?:[.!?…]+(?=\s|["')\]}*_]|$)|[\n]+)["')\]}*_]*/g
 
 // Partida rápida: quando NADA foi falado ainda neste turno, vale a pena cortar a
 // primeira oração na vírgula/conector para a voz começar ~1 frase antes. Só o
@@ -500,6 +571,7 @@ export function splitSentences(
   final: boolean,
   opts: { eager?: boolean } = {}
 ): { sentences: string[]; rest: string } {
+  log('debug', `splitSentences: input length=${buffer.length}, final=${final}, eager=${!!opts.eager}`)
   const sentences: string[] = []
   let lastIndex = 0
   let m: RegExpExecArray | null
@@ -507,7 +579,10 @@ export function splitSentences(
   while ((m = SENTENCE_RE.exec(buffer))) {
     const s = m[0].trim()
     // Apenas enfileira frases que tenham pelo menos uma letra ou número
-    if (s && /[\p{L}\p{N}]/u.test(s)) sentences.push(s)
+    if (s && /[\p{L}\p{N}]/u.test(s)) {
+      sentences.push(s)
+      log('debug', `splitSentences: matched regex sentence="${s}"`)
+    }
     lastIndex = SENTENCE_RE.lastIndex
   }
   let rest = buffer.slice(lastIndex)
@@ -517,7 +592,10 @@ export function splitSentences(
     const idx = eagerSplitIndex(rest)
     if (idx > 0) {
       const head = rest.slice(0, idx).trim()
-      if (head && /[\p{L}\p{N}]/u.test(head)) sentences.push(head)
+      if (head && /[\p{L}\p{N}]/u.test(head)) {
+        sentences.push(head)
+        log('debug', `splitSentences: eager split sentence="${head}"`)
+      }
       rest = rest.slice(idx)
     }
   }
@@ -525,7 +603,10 @@ export function splitSentences(
     const idx = chunkSplitIndex(rest)
     if (idx < 0) break
     const chunk = rest.slice(0, idx).trim()
-    if (chunk && /[\p{L}\p{N}]/u.test(chunk)) sentences.push(chunk)
+    if (chunk && /[\p{L}\p{N}]/u.test(chunk)) {
+      sentences.push(chunk)
+      log('debug', `splitSentences: chunk split non-final sentence="${chunk}"`)
+    }
     rest = rest.slice(idx)
   }
   if (final && rest.trim()) {
@@ -534,11 +615,18 @@ export function splitSentences(
       const idx = chunkSplitIndex(pending)
       if (idx < 0) break
       const chunk = pending.slice(0, idx).trim()
-      if (chunk && /[\p{L}\p{N}]/u.test(chunk)) sentences.push(chunk)
+      if (chunk && /[\p{L}\p{N}]/u.test(chunk)) {
+        sentences.push(chunk)
+        log('debug', `splitSentences: chunk split final sentence="${chunk}"`)
+      }
       pending = pending.slice(idx).trim()
     }
-    if (pending && /[\p{L}\p{N}]/u.test(pending)) sentences.push(pending)
+    if (pending && /[\p{L}\p{N}]/u.test(pending)) {
+      sentences.push(pending)
+      log('debug', `splitSentences: final remaining sentence="${pending}"`)
+    }
     rest = ''
   }
+  log('debug', `splitSentences result: sentences count=${sentences.length}, rest length=${rest.length}`)
   return { sentences, rest }
 }

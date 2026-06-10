@@ -162,6 +162,16 @@ describe('tts', () => {
     expect(split.rest).toBe(' Tudo certo')
   })
 
+  it('nao quebra fala em extensoes de arquivo e pontos internos a palavras', () => {
+    installSpeechMock()
+    const split = splitSentences('arquivos de layout do ArcGIS (PQC_Area_da_queima.mxd, Distancia_T_I.mxd, etc.), usados para montar mapas finais.', false)
+    expect(split.sentences).toEqual([
+      'arquivos de layout do ArcGIS (PQC_Area_da_queima.mxd, Distancia_T_I.mxd, etc.)',
+      ', usados para montar mapas finais.'
+    ])
+    expect(split.rest).toBe('')
+  })
+
   it('limpa markdown/ruído mas PRESERVA vírgulas e números para a prosódia', () => {
     installSpeechMock()
 
