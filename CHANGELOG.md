@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.31.0 - 2026-06-10
+
+Foco: agente de programação com mais ferramentas (inspiradas nas tools Glob/Outline/Grep/MultiEdit de agentes como Claude Code/openclaude), voz que acompanha o trabalho e conversa contínua que segue viva durante tarefas longas.
+
+- **4 ferramentas novas de programação** (validadas no repo real do Ares):
+  - `codigo.listar {padrao}` — lista arquivos por glob ("src/main/*.ts") sem precisar ler nada.
+  - `codigo.esboco {arquivo}` — o "mapa" do arquivo: funções, classes, tipos, interfaces e arrow functions com a linha onde começam (TS/JS/Python/Go). O agente vai direto ao trecho certo em vez de ler arquivos inteiros.
+  - `codigo.referencias {simbolo}` — onde um símbolo é usado no projeto, com contagem por arquivo e amostra — base segura para renomear/refatorar.
+  - `codigo.substituir {de, para, filtro?, confirmado?}` — substituição em todo o projeto: sem `confirmado` devolve só a PRÉVIA (arquivos + contagens) para o usuário aprovar por voz; com `confirmado` aplica (exige "Permitir aplicar patches", respeita bloqueios de caminho sensível e limite de 40 arquivos).
+- **Voz acompanha a programação ("heartbeat")**: se um comando/build/teste passa de ~15 s, o Ares fala uma atualização curta ("Ainda trabalhando nisso, senhor.") e repete a cada ~30 s com frases variadas — nunca mais silêncio sem saber se travou. O aviso "iniciando a tarefa" também ganhou variações e agora usa a FASE correta do streaming (corrige reset indevido da tela no loop multi-rodadas).
+- **Conversa contínua durante o trabalho**: no modo contínuo, o microfone segue ouvindo ENQUANTO o Ares programa ou fala:
+  - "para / cancela / pode parar" (curto, mesmo sem a palavra de ativação) **aborta a execução na hora**;
+  - "Ares, depois rode os testes" entra na **fila** e roda assim que a tarefa atual terminar;
+  - fala alheia/ruído é ignorada (limiar mais alto + exigência de wake word para comandos).
+  - A interpretação é pura e testada (`src/renderer/lib/voiceControl.ts`), que também passou a abrigar a palavra de ativação usada pelo modo contínuo.
+- 263 testes (eram 248).
+
+## 0.30.0 - 2026-06-10
+
+Foco: fala muito mais fluida e humana, IA mais inteligente (encadeia ferramentas) e abertura de QUALQUER app por voz no Windows. Validado neste PC com o Piper e o Menu Iniciar reais.
+
+- **Fala emendada, sem "vão" entre frases**: o Piper anexa ~300 ms de silêncio ao fim de cada locução (medido no WAV real deste PC); agora esse rabo é aparado (`tightenWavSilence`, mantendo um respiro de 130 ms), e a síntese adianta **2 frases** durante a reprodução (antes 1) — frases curtas não abrem mais buraco na fala.
+- **Voz começa mais cedo**: no streaming, a primeira oração é cortada na vírgula (modo *eager*, só para o primeiro trecho do turno) — a fala inicia ~1 frase antes, sem prejudicar a prosódia do resto.
+- **Entonação de pergunta**: frases terminadas em "?" ganham ritmo levemente mais pausado e mais variação melódica (noise_w) — confirmações como "Confirma que aplico?" soam como pergunta de verdade.
+- **Pronúncia pt-BR ainda melhor**: datas por extenso (`2026-06-10` e `10/06/2026` → "dez de junho de dois mil e vinte e seis"), unidades de dados/tempo ("16 GB" → "dezesseis gigabytes", "120 ms" → "milissegundos") e mais siglas (PDF, USB, SSD, IP, IA, LLM, Wi-Fi, GIF...).
+- **IA mais inteligente — encadeamento de ferramentas (loop agêntico)**: o Ares agora pode usar os resultados de uma rodada de ferramentas para chamar NOVAS ferramentas no mesmo turno (até 3 rodadas): buscar → ler → editar → testar, sem o usuário pedir de novo. Antes, ações de consulta da 2ª fase eram simplesmente ignoradas.
+- **Persona mais humana**: fraseado variado (sem repetir a mesma fórmula), responde primeiro o que foi perguntado, resolve "ele/isso/aquele arquivo" pelo histórico (janela de contexto ampliada de 12 para 16 mensagens) e escreve a fala "para ser ouvida".
+- **Abrir qualquer app por voz (Windows)**: novo índice do Menu Iniciar (`src/main/apps.ts`) com casamento tolerante a acentos, palavras parciais e erros de transcrição ("abra o whatsapp", "abre o qgis", "abra o obs"). Validado com os 283 atalhos reais deste PC (Word, Excel, Chrome, Edge, OBS, VLC, WhatsApp, QGIS, AutoCAD, CapCut...). Também: "configurações" abre o painel via `ms-settings:` e mais apelidos (bloco de notas, paint, gerenciador de tarefas, edge, word, excel...).
+- **Programação por voz**: mais extensões ditadas (".txt", ".sql", ".toml", ".sh", ".svg", ".vue") e termos ("use effect", "git commit/push/pull/diff", "interface", "generic").
+- 248 testes (eram 206), incluindo casos novos de trim de WAV, datas, tom de pergunta, eager split, matching de apps e encadeamento/limite de rodadas do agente.
+
 ## 0.29.0 - 2026-06-09
 
 - **Memoria estilo Hermes Agent oficial**: a memoria agora segue a logica do repositorio `NousResearch/hermes-agent`: fatos curtos, duradouros, com alvo (`perfil do usuario` ou `notas do agente`), limite de tamanho, evidencia, confianca e revisao. Fatos contraditorios ou fracos entram como pendentes, em vez de sobrescrever memoria boa.

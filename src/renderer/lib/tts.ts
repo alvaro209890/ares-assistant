@@ -11,8 +11,11 @@ let currentWebStop: (() => void) | null = null
 let piperStatusCache: { ready: boolean; voices: string[] } | null = null
 let piperStatusAge = 0
 let piperDisabledUntil = 0
-// Pipelining: enquanto uma frase toca, a próxima já é sintetizada (1 item adiantado).
-let prefetched: { key: string; promise: Promise<ArrayBuffer> } | null = null
+// Pipelining: enquanto uma frase toca, as PRÓXIMAS já são sintetizadas (até 2 adiantadas)
+// — com frases curtas, 1 só não bastava e sobrava um "vão" entre elas.
+const prefetched = new Map<string, Promise<ArrayBuffer>>()
+const PREFETCH_DEPTH = 2
+const PREFETCH_MAX = 4
 
 const PIPER_STATUS_TIMEOUT_MS = 1200
 const PIPER_ATTEMPT_TIMEOUT_MS = 3500
@@ -262,23 +265,28 @@ function prefetchKey(cleanText: string, opts: SpeakOptions): string {
   return `${opts.piperVoice || ''}|${opts.rate ?? ''}|${cleanText}`
 }
 
-/** Dispara a síntese da próxima frase (Piper) durante a reprodução da atual. */
+/** Dispara a síntese de uma frase futura (Piper) durante a reprodução da atual. */
 function startPrefetch(text: string, opts: SpeakOptions): void {
   if (!prefersPiper(opts) || Date.now() < piperDisabledUntil) return
   const clean = normalizeSpeechText(text)
   if (!clean) return
   const key = prefetchKey(clean, opts)
-  if (prefetched?.key === key) return
+  if (prefetched.has(key)) return
+  if (prefetched.size >= PREFETCH_MAX) {
+    const oldest = prefetched.keys().next().value
+    if (oldest !== undefined) prefetched.delete(oldest)
+  }
   const promise = synthesizeWithRetry(clean, opts.piperVoice, opts.rate)
   promise.catch(() => {}) // evita unhandledRejection; o consumidor relança se precisar
-  prefetched = { key, promise }
+  prefetched.set(key, promise)
 }
 
 /** Consome a síntese pré-buscada para este texto, se existir e bater a chave. */
 async function takePrefetched(cleanText: string, opts: SpeakOptions): Promise<ArrayBuffer | null> {
-  if (!prefetched || prefetched.key !== prefetchKey(cleanText, opts)) return null
-  const p = prefetched.promise
-  prefetched = null
+  const key = prefetchKey(cleanText, opts)
+  const p = prefetched.get(key)
+  if (!p) return null
+  prefetched.delete(key)
   try {
     return await p
   } catch {
@@ -378,7 +386,7 @@ async function speakInternal(text: string, opts: SpeakOptions, cancelBefore: boo
 
 export async function speak(text: string, opts: SpeakOptions = {}): Promise<void> {
   sentenceQueue = []
-  prefetched = null
+  prefetched.clear()
   queueGeneration++
   await speakInternal(text, opts, true)
   resolveIdle()
@@ -409,9 +417,11 @@ async function drainQueue(): Promise<void> {
   const generation = queueGeneration
   while (sentenceQueue.length && generation === queueGeneration) {
     const { text, opts } = sentenceQueue.shift()!
-    // Adianta a síntese da próxima frase enquanto esta toca -> fala quase contínua.
-    const next = sentenceQueue[0]
-    if (next) startPrefetch(next.text, next.opts)
+    // Adianta a síntese das PRÓXIMAS frases enquanto esta toca -> fala quase contínua
+    // mesmo quando as frases são curtas (a reprodução não espera a síntese).
+    for (let i = 0; i < PREFETCH_DEPTH && i < sentenceQueue.length; i++) {
+      startPrefetch(sentenceQueue[i].text, sentenceQueue[i].opts)
+    }
     await speakInternal(text, opts, false)
     if (generation !== queueGeneration) break
   }
@@ -434,7 +444,7 @@ export function whenSpeechQueueIdle(): Promise<void> {
 
 export function clearSpeechQueue(): void {
   sentenceQueue = []
-  prefetched = null
+  prefetched.clear()
   // Reset hard do subsistema de fala (barge-in / novo turno): zera também o "cooldown" do
   // Piper para não carregar penalidade transitória de um turno anterior ao começar outro.
   piperDisabledUntil = 0
@@ -445,6 +455,19 @@ export function clearSpeechQueue(): void {
 }
 
 const SENTENCE_RE = /[^.!?…\n]*[.!?…\n]+/g
+
+// Partida rápida: quando NADA foi falado ainda neste turno, vale a pena cortar a
+// primeira oração na vírgula/conector para a voz começar ~1 frase antes. Só o
+// primeiro trecho usa isso — o resto espera pontuação final, preservando a prosódia.
+const EAGER_MIN_CHARS = 48
+const EAGER_MAX_CHARS = 140
+
+function eagerSplitIndex(buffer: string): number {
+  if (buffer.length < EAGER_MAX_CHARS) return -1
+  const windowText = buffer.slice(EAGER_MIN_CHARS, EAGER_MAX_CHARS)
+  const comma = Math.max(windowText.lastIndexOf(','), windowText.lastIndexOf(';'), windowText.lastIndexOf(':'))
+  return comma >= 0 ? EAGER_MIN_CHARS + comma + 1 : -1
+}
 
 function chunkSplitIndex(text: string): number {
   if (text.length <= MAX_SPEECH_CHUNK_CHARS) return -1
@@ -465,7 +488,11 @@ function chunkSplitIndex(text: string): number {
   return soft >= 0 ? MIN_CHUNK_CHARS + soft + 1 : MAX_SPEECH_CHUNK_CHARS
 }
 
-export function splitSentences(buffer: string, final: boolean): { sentences: string[]; rest: string } {
+export function splitSentences(
+  buffer: string,
+  final: boolean,
+  opts: { eager?: boolean } = {}
+): { sentences: string[]; rest: string } {
   const sentences: string[] = []
   let lastIndex = 0
   let m: RegExpExecArray | null
@@ -476,6 +503,16 @@ export function splitSentences(buffer: string, final: boolean): { sentences: str
     lastIndex = SENTENCE_RE.lastIndex
   }
   let rest = buffer.slice(lastIndex)
+  // Sem frase completa ainda E nada falado neste turno: corta a primeira oração
+  // na vírgula para reduzir a latência até o primeiro som.
+  if (!final && opts.eager && sentences.length === 0) {
+    const idx = eagerSplitIndex(rest)
+    if (idx > 0) {
+      const head = rest.slice(0, idx).trim()
+      if (head) sentences.push(head)
+      rest = rest.slice(idx)
+    }
+  }
   while (!final) {
     const idx = chunkSplitIndex(rest)
     if (idx < 0) break

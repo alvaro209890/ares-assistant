@@ -23,7 +23,10 @@ const LETTER_PT: Record<string, string> = {
 // Siglas com pronúncia consagrada (lidas como palavra, não soletradas).
 const ACRONYM_OVERRIDE: Record<string, string> = {
   JSON: 'jêison',
-  RAM: 'ram'
+  RAM: 'ram',
+  WIFI: 'uai fai',
+  LINUX: 'línux',
+  GIF: 'guife'
 }
 
 // Siglas técnicas que devem ser pronunciadas corretamente em vez de "engolidas".
@@ -31,7 +34,8 @@ const ACRONYM_OVERRIDE: Record<string, string> = {
 // palavras comuns (ex.: "as", "os", o "ts"/"js" minúsculos de extensões de arquivo).
 const TECH_ACRONYMS = [
   'API', 'JSON', 'HTML', 'CSS', 'SQL', 'URL', 'HTTPS', 'HTTP', 'NPM', 'CLI',
-  'SDK', 'CPU', 'GPU', 'RAM', 'UI', 'ID', 'TSX', 'JSX', 'TS', 'JS', 'XML', 'JWT'
+  'SDK', 'CPU', 'GPU', 'RAM', 'UI', 'ID', 'TSX', 'JSX', 'TS', 'JS', 'XML', 'JWT',
+  'PDF', 'USB', 'IP', 'HD', 'SSD', 'CSV', 'PNG', 'SVG', 'IDE', 'LLM', 'IA', 'WIFI', 'GIF'
 ]
 
 function spellAcronym(token: string): string {
@@ -50,7 +54,7 @@ export function expandTechAcronyms(text: string): string {
   return text.replace(ACRONYM_RE, (_m, core: string) => spellAcronym(core))
 }
 
-export type SpeechTone = 'erro' | 'sucesso' | 'neutro'
+export type SpeechTone = 'erro' | 'sucesso' | 'pergunta' | 'neutro'
 
 const ERROR_SIGNALS =
   /\b(erro|erros|falh\w*|imposs[ií]vel|exce[cç][aã]o|inv[aá]lid\w*|recus\w*|negad\w*|bloquead\w*|cancelad\w*|problema\w*|desculpe|lamento|infelizmente|n[aã]o (consegui|foi poss[ií]vel|encontrei|deu certo|funcionou))\b/i
@@ -59,12 +63,14 @@ const SUCCESS_SIGNALS =
   /\b(pronto|conclu[ií]\w*|feito|sucesso|tudo certo|passou|passaram|aplicad\w*|criad\w*|salv\w*|atualizad\w*|removid\w*|funcionou|perfeito|excelente|com prazer|à\s+disposi[cç][aã]o)\b/i
 
 /**
- * Decide o "tom" da fala a partir do conteúdo. Erro tem precedência sobre sucesso
- * (uma frase pode ter as duas pistas, e o aviso de erro é o que importa primeiro).
+ * Decide o "tom" da fala a partir do conteúdo. Erro tem precedência sobre os demais
+ * (uma frase pode ter várias pistas, e o aviso de erro é o que importa primeiro);
+ * pergunta vem antes de sucesso ("Confirma que aplico?" deve soar como pergunta).
  */
 export function detectTone(text: string): SpeechTone {
   const t = String(text || '')
   if (ERROR_SIGNALS.test(t)) return 'erro'
+  if (/\?\s*$/.test(t.trim())) return 'pergunta'
   if (SUCCESS_SIGNALS.test(t)) return 'sucesso'
   return 'neutro'
 }
@@ -86,6 +92,7 @@ export function computeLengthScale(rate: number | undefined, tone: SpeechTone = 
   let ls = 1 / r
   if (tone === 'erro') ls *= 0.96
   else if (tone === 'sucesso') ls *= 1.04
+  else if (tone === 'pergunta') ls *= 1.02 // pergunta: um tiquinho mais pausada, soa atenciosa
   return clamp(ls, 0.45, 2.2)
 }
 
@@ -173,12 +180,49 @@ function moneyPtBR(intPart: string, centavos: string | undefined): string {
   return out
 }
 
+const MONTHS_PT = [
+  '', 'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho',
+  'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'
+]
+
+/** Data por extenso ("10 de junho de 2026"); null se dia/mês inválidos. */
+function dateToPtBR(year: number, month: number, day: number): string | null {
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null
+  const dayWords = day === 1 ? 'primeiro' : intToPtBR(day)
+  const yearWords = intToPtBR(year)
+  if (!dayWords || !yearWords) return null
+  return `${dayWords} de ${MONTHS_PT[month]} de ${yearWords}`
+}
+
+// Unidades de dados/tempo após número: "16 GB" -> "dezesseis gigabytes".
+const DATA_UNIT_WORDS: Record<string, [string, string]> = {
+  TB: ['terabyte', 'terabytes'],
+  GB: ['gigabyte', 'gigabytes'],
+  MB: ['megabyte', 'megabytes'],
+  KB: ['kilobyte', 'kilobytes'],
+  MS: ['milissegundo', 'milissegundos']
+}
+
 /**
  * Normaliza números e construções numéricas comuns para pt-BR falado. A ordem importa:
- * moeda/versão/hora antes do decimal genérico, e o inteiro simples por último.
+ * data/moeda/versão/hora antes do decimal genérico, e o inteiro simples por último.
  */
 export function normalizePtNumbers(text: string): string {
   let t = String(text || '')
+  // Data ISO (2026-06-10) e brasileira (10/06/2026) por extenso.
+  t = t.replace(/\b(20\d{2})-(\d{2})-(\d{2})\b/g, (m, y: string, mo: string, d: string) => {
+    return dateToPtBR(Number(y), Number(mo), Number(d)) || m
+  })
+  t = t.replace(/\b(\d{1,2})\/(\d{1,2})\/(20\d{2})\b/g, (m, d: string, mo: string, y: string) => {
+    return dateToPtBR(Number(y), Number(mo), Number(d)) || m
+  })
+  // Unidades de dados/tempo: 16 GB, 512MB, 120 ms.
+  t = t.replace(/\b(\d+(?:,\d+)?)\s?(TB|GB|MB|KB|ms)\b/g, (m, num: string, unit: string) => {
+    const words = DATA_UNIT_WORDS[unit.toUpperCase()]
+    if (!words) return m
+    const plural = !(num === '1' || num === '1,0')
+    return `${num} ${plural ? words[1] : words[0]}`
+  })
   // Moeda: R$ 1.250,90
   t = t.replace(/R\$\s?(\d{1,3}(?:\.\d{3})*|\d+)(?:,(\d{2}))?/g, (m, int: string, cents?: string) => {
     const words = moneyPtBR(int, cents)
@@ -307,9 +351,72 @@ export function computeNoise(tone: SpeechTone = 'neutro'): SpeechNoise {
   } else if (tone === 'sucesso') {
     noiseScale = 0.64
     noiseW = 0.78
+  } else if (tone === 'pergunta') {
+    // pergunta: mais variação de ritmo/timbre -> entonação mais "curiosa"/melódica.
+    noiseScale = 0.65
+    noiseW = 0.8
   }
   return {
     noiseScale: clamp(noiseScale, 0.55, 0.68),
     noiseW: clamp(noiseW, 0.68, 0.82)
   }
+}
+
+// ---------------------------------------------------------------------------
+// Aparar silêncio do WAV (PCM 16-bit mono do Piper).
+// O Piper anexa o sentence_silence também ao FIM da locução; como o Ares fala
+// frase a frase (uma locução por frase), esse rabo de silêncio vira um "vão"
+// audível entre frases. Aparar o excesso deixa a fala encadeada e fluida — a
+// pausa entre frases passa a ser controlada por nós, não pelo resíduo do WAV.
+// ---------------------------------------------------------------------------
+
+const WAV_HEADER_BYTES = 44
+// ~1% do fundo de escala: abaixo disso é silêncio (ruído de fundo do vocoder).
+const SILENCE_AMPLITUDE = 330
+
+export interface WavTrimOptions {
+  maxLeadingMs?: number
+  maxTrailingMs?: number
+  sampleRate?: number
+}
+
+/**
+ * Apara silêncio no início/fim de um WAV PCM16 mono, mantendo no máximo
+ * `maxLeadingMs`/`maxTrailingMs` de respiro. Devolve o buffer original se o
+ * formato não for o esperado (não-WAV, estéreo, float) — nunca lança.
+ */
+export function tightenWavSilence(wav: Buffer, opts: WavTrimOptions = {}): Buffer {
+  const maxLeadingMs = opts.maxLeadingMs ?? 60
+  const maxTrailingMs = opts.maxTrailingMs ?? 130
+  if (!wav || wav.length <= WAV_HEADER_BYTES) return wav
+  if (wav.toString('ascii', 0, 4) !== 'RIFF' || wav.toString('ascii', 8, 12) !== 'WAVE') return wav
+  // Só o layout canônico do Piper (fmt PCM16 mono + data no offset 36) é tratado.
+  if (wav.readUInt16LE(20) !== 1 || wav.readUInt16LE(22) !== 1 || wav.readUInt16LE(34) !== 16) return wav
+  if (wav.toString('ascii', 36, 40) !== 'data') return wav
+  const sampleRate = opts.sampleRate ?? wav.readUInt32LE(24)
+  if (!sampleRate) return wav
+
+  const totalSamples = Math.floor((wav.length - WAV_HEADER_BYTES) / 2)
+  let firstLoud = -1
+  let lastLoud = -1
+  for (let i = 0; i < totalSamples; i++) {
+    const v = wav.readInt16LE(WAV_HEADER_BYTES + i * 2)
+    if (v > SILENCE_AMPLITUDE || v < -SILENCE_AMPLITUDE) {
+      if (firstLoud === -1) firstLoud = i
+      lastLoud = i
+    }
+  }
+  if (firstLoud === -1) return wav // tudo silêncio: melhor não mexer
+
+  const keepLeading = Math.round((maxLeadingMs / 1000) * sampleRate)
+  const keepTrailing = Math.round((maxTrailingMs / 1000) * sampleRate)
+  const start = Math.max(0, firstLoud - keepLeading)
+  const end = Math.min(totalSamples, lastLoud + 1 + keepTrailing)
+  if (start === 0 && end === totalSamples) return wav
+
+  const body = wav.subarray(WAV_HEADER_BYTES + start * 2, WAV_HEADER_BYTES + end * 2)
+  const out = Buffer.concat([wav.subarray(0, WAV_HEADER_BYTES), body])
+  out.writeUInt32LE(36 + body.length, 4) // tamanho RIFF
+  out.writeUInt32LE(body.length, 40) // tamanho do chunk data
+  return out
 }

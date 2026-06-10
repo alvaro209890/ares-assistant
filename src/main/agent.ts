@@ -90,11 +90,15 @@ import {
   searchCode,
   summarizeCodeWorkspace,
   writeCodeFile,
-  editCodeFile
+  editCodeFile,
+  listCodeFiles,
+  outlineCodeFile,
+  findCodeReferences,
+  replaceInProject
 } from './code'
 import { clearPendingCode, getPendingCode, setPendingCode } from './pending'
 import { registerRun } from './running'
-import { hasCodeAction, sanitizeVoiceCodeFala, toolResultsPrompt, voiceAwareUserContent } from './voiceCode'
+import { hasCodeAction, sanitizeVoiceCodeFala, startHeartbeat, toolResultsPrompt, voiceAwareUserContent } from './voiceCode'
 
 const norm = (s: unknown) => String(s ?? '').toLowerCase().trim()
 const uid = (p: string) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
@@ -131,11 +135,12 @@ function normBrightnessAction(raw: unknown): BrightnessAction {
   return 'set'
 }
 
-const PERSONA = `Você é o Ares, assistente de IA pessoal inspirado no JARVIS. Fala português do Brasil de forma educada, formal, precisa e muito competente. Trata o usuário com respeito, mas sem repetir "senhor", o nome dele ou saudações a cada resposta. Seja natural e direto, nunca robótico. Use o CONTEXTO (memória, agenda, tarefas, localização) para responder de forma pessoal e útil, sem repetir dados que o usuário não pediu.
+const PERSONA = `Você é o Ares, assistente de IA pessoal inspirado no JARVIS. Fala português do Brasil de forma educada, formal, precisa e muito competente. Trata o usuário com respeito, mas sem repetir "senhor", o nome dele ou saudações a cada resposta. Soe como um humano competente conversando, nunca robótico: frases com ritmo natural, fraseado VARIADO (não repita a mesma fórmula de abertura ou confirmação duas vezes seguidas) e, quando couber, um conector leve ("certo", "perfeito", "veja só") — com parcimônia.
+Responda primeiro o que foi perguntado; ressalvas vêm depois, e só se importarem. Resolva pronomes e referências ("ele", "isso", "aquele arquivo", "lá") pelo histórico da conversa e pelo CONTEXTO, sem pedir que o usuário repita o que já disse. Use o CONTEXTO (memória, agenda, tarefas, localização) para responder de forma pessoal e útil, sem despejar dados que o usuário não pediu. Se não souber ou a ferramenta falhar, diga claramente e proponha o próximo passo — nunca invente.
 Em assuntos de programação você é um engenheiro de software sênior: fala com precisão técnica mas em linguagem clara e falável, sem ler código longo nem despejar logs inteiros — resume e cita arquivo:linha. ANTES de executar no terminal qualquer comando que altere o sistema, instale dependências, crie/apague arquivos ou mexa no Git (commit/push), você PEDE AUTORIZAÇÃO ao usuário de forma natural ("Senhor, isso vai rodar tal comando — autoriza?") e só age após o aceite. Nunca tenta burlar bloqueios de segurança nem usar sudo.`
 
 const VOICE_HINT =
-  'A resposta será OUVIDA em voz alta: seja MUITO conciso (1-2 frases), formal, claro, sem listas, sem markdown, sem URLs longas e sem saudações repetidas. Diga o essencial.'
+  'A resposta será OUVIDA em voz alta: escreva a "fala" como se estivesse FALANDO — frases curtas e naturais (1 a 3), com vírgulas e pontos que dão ritmo, sem listas, sem markdown, sem URLs longas, sem emojis e sem saudações repetidas. O essencial vem primeiro. Números, horários e valores podem ser escritos normalmente: o sintetizador os lê por extenso.'
 const TEXT_HINT = 'Pode ser um pouco mais detalhado quando ajudar, mas evite enrolação e listas longas desnecessárias.'
 const CODE_VOICE_HINT =
   'Modo voz em programação: interprete ditados como "barra", "ponto ts", "traço", "underline", "npm run" e "git status" como caminhos/comandos quando fizer sentido. Nunca leia código, diffs, JSON, stdout ou stderr em voz; diga só o arquivo, a ação feita, se passou/falhou e o próximo passo. Se precisar autorização para terminal, fale o comando uma vez e peça sim ou não.'
@@ -186,7 +191,8 @@ AÇÕES DE MUTAÇÃO (aplique quando o usuário pedir):
   · "põe um timer de 10 minutos" -> lembrete.criar {texto:"timer", emMinutos:10, modo:"timer"}
   · "me acorda às 6h" -> lembrete.criar {texto:"despertador", quando ISO 06:00, modo:"alarm"}
 
-FERRAMENTAS DE CONSULTA (dê uma fala curta tipo "Deixe-me verificar." e AGUARDE os resultados para então responder):
+FERRAMENTAS DE CONSULTA (dê uma fala curta e específica tipo "Vou verificar o clima." e AGUARDE os resultados para então responder):
+ENCADEAMENTO: após receber os resultados, você PODE chamar novas ferramentas de consulta se ainda faltar informação (ex.: codigo.buscar -> codigo.ler -> codigo.editar -> codigo.testar), até um limite de 3 rodadas. Na fala de cada rodada intermediária, diga em uma frase natural o que vai fazer agora ("Achei a função; vou ler o arquivo."). Quando tiver tudo, responda sem novas ações de consulta.
 - clima.consultar {cidade?}   (sem cidade = usa a localização aproximada)
 - web.buscar {consulta}
 - noticias.listar {tema?}
@@ -200,7 +206,7 @@ FERRAMENTAS DE CONSULTA (dê uma fala curta tipo "Deixe-me verificar." e AGUARDE
 - sistema.status {}   (uso de CPU, memória e tempo ligado do computador — "como está o sistema?", "quanta memória livre?")
 - area.ler {}   (lê o texto da área de transferência para resumir/traduzir/explicar o que o usuário copiou — "resuma o que eu copiei")
 - area.escrever {texto}   (copia um texto para a área de transferência — "copie isso", "põe esse texto na área de transferência")
-- sistema.abrir {alvo}   (abre app/site/arquivo no computador — "abra o Firefox", "abra youtube.com", "abra ~/Documentos"; use nomes comuns: firefox, chrome, vscode, calculadora, arquivos, terminal)
+- sistema.abrir {alvo}   (abre app/site/arquivo no computador — "abra o Firefox", "abra youtube.com", "abra ~/Documentos". Aceita QUALQUER aplicativo instalado pelo nome falado: Spotify, WhatsApp, Word, Discord, Steam... — no Windows o Ares procura no Menu Iniciar com tolerância a erros. Passe o nome como o usuário disse; também: calculadora, arquivos, terminal, bloco de notas, configurações)
 - sistema.volume {acao(set|up|down|mute|unmute|toggle), nivel?(0-100)}   (controla o volume — "aumenta o volume", "volume em 30", "muda pro mudo")
 - sistema.bloquear {}   (bloqueia a tela do computador — "bloqueie a tela", "trave o pc")
 - sistema.captura {}   (tira uma captura de tela e salva em arquivo — "tire um print da tela")
@@ -211,6 +217,10 @@ FERRAMENTAS DE CONSULTA (dê uma fala curta tipo "Deixe-me verificar." e AGUARDE
 - desfazer {}   (desfaz a ÚLTIMA alteração de dados — tarefa/lista/nota/lembrete/evento/memória; use quando o usuário disser "desfaz", "cancela isso", "volta atrás")
 - codigo.workspace {path?}   (resume um projeto/workspace local: stack, scripts, árvore, git, linguagens)
 - codigo.buscar {path?, consulta, filtro?}   (busca texto/símbolo no código; use antes de explicar funções ou localizar implementação)
+- codigo.listar {path?, padrao?, limite?}   (lista arquivos do projeto por padrão glob — "*.ts", "src/*"; use para conhecer a estrutura sem ler tudo)
+- codigo.esboco {path?, arquivo}   (o "mapa" do arquivo: funções, classes, tipos e a linha onde começam — use ANTES de ler um arquivo grande para ir direto ao trecho certo)
+- codigo.referencias {path?, simbolo, limite?}   (onde um símbolo/função/classe é usado no projeto, com contagem por arquivo — use antes de renomear/refatorar)
+- codigo.substituir {path?, de, para, filtro?, confirmado?}   (substituição literal em TODO o projeto — renomear função, trocar import. SEM "confirmado" devolve só a PRÉVIA com arquivos e contagens: mostre ao usuário e peça o sim; com confirmado:true aplica de verdade. Precisa de "Permitir aplicar patches")
 - codigo.ler {path?, arquivo, inicio?, linhas?}   (lê trecho de arquivo local com números de linha; use para responder com precisão)
 - codigo.comando {path?, comando}   (executa comando de dev da allowlist, sem shell, com timeout; use para testes/build/typecheck)
 - codigo.terminal {path?, comando, confirmado?}   (TERMINAL completo via shell, com pipes/&&/redirecionamento. Comando seguro/allowlist roda direto; qualquer outro EXIGE autorização: chame SEM "confirmado" para propor — vem requiresApproval — explique e peça o "sim"; comandos catastróficos/sudo são bloqueados)
@@ -231,6 +241,8 @@ FERRAMENTAS DE CONSULTA (dê uma fala curta tipo "Deixe-me verificar." e AGUARDE
 
 MODO PROGRAMADOR:
 - Para perguntas de código, não chute: use codigo.workspace/codigo.buscar/codigo.ler quando houver path, arquivo, símbolo ou repo mencionado.
+- NAVEGUE como um engenheiro: codigo.listar para a estrutura, codigo.esboco para o mapa de um arquivo grande, codigo.referencias antes de renomear/mover algo. Encadeie: esboço -> ler só o trecho -> editar.
+- RENOMEAR/REFATORAR em vários arquivos: codigo.substituir sem confirmado primeiro (prévia), fale quantos arquivos/ocorrências serão alterados e peça o sim; depois repita com confirmado:true.
 - Se o usuário pedir edição/refatoração/debug/testes em projeto real, trabalhe com as ferramentas nativas: localize contexto, leia os arquivos, use codigo.editar para alteração localizada, codigo.criar para arquivo novo, codigo.patch.aplicar para diff maior ou codigo.projeto para mudanças maiores.
 - Para patches, primeiro use codigo.patch.preview. Só use codigo.patch.aplicar se o usuário pedir claramente para aplicar e a config permitir.
 - Para validar mudanças, use codigo.comando com scripts permitidos (ex.: npm test, npm run build, npm run typecheck) e reporte stdout/stderr relevantes.
@@ -453,15 +465,25 @@ function buildSystemPrompt(ctx: {
     .join('\n\n')
 }
 
+// Frases variadas (rotação) para não soar robótico repetindo sempre o mesmo aviso.
+const LONG_TASK_ANNOUNCES = [
+  ' Iniciando a tarefa, senhor. Um momento.',
+  ' Certo, executando agora. Isso pode levar um instante.',
+  ' Em andamento. Aviso assim que terminar.'
+]
+let announceIdx = 0
+
 /**
- * Avisa em voz "iniciando a tarefa, senhor" ANTES de bloquear num comando de longa
- * duração (build/install/test), para não deixar o usuário no vácuo. Só fala quando o
- * comando realmente vai rodar (já autorizado ou seguro) — nunca antes de pedir o "sim".
+ * Avisa em voz "iniciando a tarefa" ANTES de bloquear num comando de longa duração
+ * (build/install/test), para não deixar o usuário no vácuo. Só fala quando o comando
+ * realmente vai rodar (já autorizado ou seguro) — nunca antes de pedir o "sim".
+ * `phase` deve ser a fase de streaming ATUAL (com o loop de rodadas, não é sempre 1).
  */
-function announceLongTask(onDelta: DeltaFn | undefined, cfg: AppConfig, command: string, willRun: boolean): void {
+function announceLongTask(onDelta: DeltaFn | undefined, cfg: AppConfig, command: string, willRun: boolean, phase: number): void {
   if (!onDelta || !willRun || !isLongRunningCommand(command)) return
-  onDelta(' Iniciando a tarefa, senhor. Um momento.', 1)
+  onDelta(LONG_TASK_ANNOUNCES[announceIdx++ % LONG_TASK_ANNOUNCES.length], phase)
 }
+
 
 async function runQuery(
   a: Acao,
@@ -469,11 +491,21 @@ async function runQuery(
   sessionId: string,
   onDelta?: DeltaFn,
   signal?: AbortSignal,
-  onActivity?: ActivityFn
+  onActivity?: ActivityFn,
+  phase = 1
 ): Promise<unknown> {
   const integrations = cfg.integrations
   const activity = codeActivityMeta(a)
   const progress = createProgressActivity(onActivity, activity)
+  // Tarefas potencialmente longas falam um "batimento" periódico enquanto rodam.
+  const beating = async <T>(work: Promise<T>): Promise<T> => {
+    const stop = startHeartbeat(onDelta, phase)
+    try {
+      return await work
+    } finally {
+      stop()
+    }
+  }
   const done = <T>(result: T): T => {
     const r = result as { resultado?: Record<string, unknown>; erro?: string }
     if (r.erro) emitActivity(onActivity, activity, { status: 'error', detail: r.erro, ok: false })
@@ -605,20 +637,20 @@ async function runQuery(
       case 'codigo.comando':
         return done({
           tipo: a.tipo,
-          resultado: await runCodeCommand(cfg, {
+          resultado: await beating(runCodeCommand(cfg, {
             root: String(a.path || a.raiz || a.workspace || ''),
             command: String(a.comando || a.command || ''),
             signal,
             onProgress: progress
-          })
+          }))
         })
       case 'codigo.terminal': {
         const root = String(a.path || a.raiz || a.workspace || '')
         const command = String(a.comando || a.command || '')
         const approved = a.confirmado === true || a.autorizado === true || a.confirm === true || a.approved === true
         // Só anuncia se o comando for de fato rodar agora (autorizado ou já seguro).
-        announceLongTask(onDelta, cfg, command, approved || classifyCommand(cfg, command).tier === 'allowed')
-        const result = await runCodeTerminal(cfg, { root, command, approved, signal, onProgress: progress })
+        announceLongTask(onDelta, cfg, command, approved || classifyCommand(cfg, command).tier === 'allowed', phase)
+        const result = await beating(runCodeTerminal(cfg, { root, command, approved, signal, onProgress: progress }))
         if (result.requiresApproval) {
           setPendingCode(sessionId, { kind: 'terminal', command: result.command, root, reason: result.reason })
         } else if (result.ran) {
@@ -631,8 +663,8 @@ async function runQuery(
         const pend = getPendingCode(sessionId)
         if (!pend) return done({ tipo: a.tipo, erro: 'Não há nenhum comando pendente de autorização.' })
         if (activity && !activity.command) activity.command = pend.command
-        announceLongTask(onDelta, cfg, pend.command, true)
-        const result = await runCodeTerminal(cfg, { root: pend.root, command: pend.command, approved: true, signal, onProgress: progress })
+        announceLongTask(onDelta, cfg, pend.command, true, phase)
+        const result = await beating(runCodeTerminal(cfg, { root: pend.root, command: pend.command, approved: true, signal, onProgress: progress }))
         if (result.ran) {
           clearPendingCode(sessionId)
           if (result.ok) setLastTerminalCommand(result.command, result.root)
@@ -705,24 +737,62 @@ async function runQuery(
       case 'codigo.diagnostico':
         return done({
           tipo: a.tipo,
-          resultado: await diagnoseProject(cfg, { root: String(a.path || a.raiz || a.workspace || ''), signal, onProgress: progress })
+          resultado: await beating(diagnoseProject(cfg, { root: String(a.path || a.raiz || a.workspace || ''), signal, onProgress: progress }))
         })
       case 'codigo.testar':
-        return done({ tipo: a.tipo, resultado: await runTests(cfg, { root: String(a.path || a.raiz || a.workspace || ''), signal, onProgress: progress }) })
+        return done({ tipo: a.tipo, resultado: await beating(runTests(cfg, { root: String(a.path || a.raiz || a.workspace || ''), signal, onProgress: progress })) })
       case 'codigo.lint':
-        return done({ tipo: a.tipo, resultado: await runLint(cfg, { root: String(a.path || a.raiz || a.workspace || ''), signal, onProgress: progress }) })
+        return done({ tipo: a.tipo, resultado: await beating(runLint(cfg, { root: String(a.path || a.raiz || a.workspace || ''), signal, onProgress: progress })) })
       case 'codigo.formatar':
-        return done({ tipo: a.tipo, resultado: await runFormat(cfg, { root: String(a.path || a.raiz || a.workspace || ''), signal, onProgress: progress }) })
+        return done({ tipo: a.tipo, resultado: await beating(runFormat(cfg, { root: String(a.path || a.raiz || a.workspace || ''), signal, onProgress: progress })) })
       case 'codigo.projeto':
         return done({
           tipo: a.tipo,
-          resultado: await runCoderTask(cfg, {
+          resultado: await beating(runCoderTask(cfg, {
             objetivo: String(a.objetivo || a.tarefa || a.descricao || a.texto || ''),
             root: String(a.path || a.raiz || a.destino || a.onde || a.nome || ''),
             passos: Number(a.passos || a.steps || 0) || undefined,
             signal
+          }))
+        })
+      case 'codigo.listar':
+        return done({
+          tipo: a.tipo,
+          resultado: listCodeFiles(cfg, {
+            root: String(a.path || a.raiz || a.workspace || ''),
+            pattern: String(a.padrao || a.pattern || a.filtro || a.glob || ''),
+            maxResults: Number(a.limite || a.max || 0) || undefined
           })
         })
+      case 'codigo.esboco':
+        return done({
+          tipo: a.tipo,
+          resultado: outlineCodeFile(cfg, {
+            root: String(a.path || a.raiz || a.workspace || ''),
+            file: String(a.arquivo || a.file || '')
+          })
+        })
+      case 'codigo.referencias':
+        return done({
+          tipo: a.tipo,
+          resultado: findCodeReferences(cfg, {
+            root: String(a.path || a.raiz || a.workspace || ''),
+            symbol: String(a.simbolo || a.symbol || a.nome || a.consulta || ''),
+            maxResults: Number(a.limite || a.max || 0) || undefined
+          })
+        })
+      case 'codigo.substituir': {
+        const apply = a.confirmado === true || a.aplicar === true || a.apply === true
+        const resultado = replaceInProject(cfg, {
+          root: String(a.path || a.raiz || a.workspace || ''),
+          find: String(a.de ?? a.find ?? a.antigo ?? ''),
+          replace: String(a.para ?? a.replace ?? a.novo ?? ''),
+          filter: a.filtro || a.filter ? String(a.filtro || a.filter) : undefined,
+          apply
+        })
+        if (resultado.applied && resultado.files[0]) setLastEditedFile(resultado.files[0].file, resultado.root)
+        return done({ tipo: a.tipo, resultado })
+      }
       case 'codigo.patch.preview':
         return done({
           tipo: a.tipo,
@@ -939,6 +1009,19 @@ function codeActivityMeta(a: Acao): ActivityMeta | null {
       return { ...base, kind: 'workspace', title: 'Analisando workspace', detail: path || undefined }
     case 'codigo.buscar':
       return { ...base, kind: 'search', title: 'Buscando no código', detail: query || undefined }
+    case 'codigo.listar':
+      return { ...base, kind: 'search', title: 'Listando arquivos', detail: String(a.padrao || a.pattern || a.filtro || '') || undefined }
+    case 'codigo.esboco':
+      return { ...base, kind: 'read', title: 'Mapeando arquivo', detail: file || undefined }
+    case 'codigo.referencias':
+      return { ...base, kind: 'search', title: 'Procurando referências', detail: String(a.simbolo || a.symbol || a.nome || '') || undefined }
+    case 'codigo.substituir':
+      return {
+        ...base,
+        kind: 'write',
+        title: a.confirmado === true || a.aplicar === true ? 'Substituindo no projeto' : 'Prévia de substituição',
+        detail: `${String(a.de ?? a.find ?? a.antigo ?? '')} -> ${String(a.para ?? a.replace ?? a.novo ?? '')}`.slice(0, 120)
+      }
     case 'codigo.ler':
       return { ...base, kind: 'read', title: 'Lendo arquivo', detail: file || undefined }
     case 'codigo.comando':
@@ -1065,6 +1148,9 @@ function validateActions(acoes: Acao[]): { valid: Acao[]; notes: string[] } {
   return { valid, notes }
 }
 
+// Máximo de rodadas de ferramentas encadeadas por turno (buscar -> ler -> validar...).
+const MAX_TOOL_ROUNDS = 3
+
 /** Executa um turno completo de conversa + ações, com fala transmitida em streaming. */
 export async function runTurn(
   sessionId: string,
@@ -1080,7 +1166,9 @@ export async function runTurn(
   const unregisterRun = registerRun(sessionId, controller)
   const signal = controller.signal
   const session = getSession(sessionId)
-  const recent = (session?.messages || []).slice(-12)
+  // 16 mensagens recentes (era 12): melhora a continuidade de referências ("ele",
+  // "aquele arquivo") sem pesar — o resumo automático cobre o histórico mais antigo.
+  const recent = (session?.messages || []).slice(-16)
   const hasPriorAssistant = recent.some((m) => m.role === 'assistant')
   const suppressGreeting = hasPriorAssistant
   const deltaTransform: DeltaTextTransform | undefined = suppressGreeting
@@ -1110,45 +1198,58 @@ export async function runTurn(
   let falaVoz: string | undefined
   const allNotes: string[] = []
   let mutations = env.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo))
-  const queries = env.acoes.filter((a) => QUERY_TOOLS.has(a.tipo))
+  let queries = env.acoes.filter((a) => QUERY_TOOLS.has(a.tipo))
 
-  if (queries.length) {
-    // Ferramentas de consulta rodam em PARALELO (são, em geral, independentes:
-    // clima, notícias, web, código). Promise.all preserva a ordem dos resultados.
-    const results = await Promise.all(queries.map((q) => runQuery(q, cfg, sessionId, onDelta, signal, onActivity)))
+  // Loop agêntico: o LLM pode ENCADEAR rodadas de ferramentas (buscar -> ler ->
+  // editar -> validar) num único turno. Cada rodada roda as consultas em PARALELO
+  // (Promise.all preserva a ordem), devolve os resultados e abre uma nova fase de
+  // streaming (fase nova = reset no cliente). Limitado a MAX_TOOL_ROUNDS para
+  // nunca entrar em ciclo; na última rodada o LLM é instruído a concluir.
+  let convo: ChatMessage[] = messages
+  let phase = 1
+  for (let round = 0; queries.length && round < MAX_TOOL_ROUNDS; round++) {
+    const results = await Promise.all(queries.map((q) => runQuery(q, cfg, sessionId, onDelta, signal, onActivity, phase)))
     const codeMode = hasCodeAction(queries)
     // Proatividade de engenheiro: após editar com sucesso, oferece validar (teste/build).
     const proactive = proactiveCodeFollowup(cfg, results)
     if (proactive) allNotes.push(proactive.note)
-    const followup: ChatMessage[] = [
-      ...messages,
+    const lastRound = round === MAX_TOOL_ROUNDS - 1
+    convo = [
+      ...convo,
       { role: 'assistant', content: fala || '...' },
       {
         role: 'system',
-        content: toolResultsPrompt(results, voice, codeMode) + (proactive ? `\n${proactive.instruction}` : '')
+        content:
+          toolResultsPrompt(results, voice, codeMode) +
+          (proactive ? `\n${proactive.instruction}` : '') +
+          (lastRound
+            ? '\nLimite de rodadas de ferramentas atingido: responda AGORA ao usuário com o que tem, sem chamar novas ferramentas de consulta.'
+            : '')
       }
     ]
-    // Fase 2 (resposta final após as ferramentas): fase 2 = reset no cliente.
+    phase++
     if (voice && codeMode) {
       // VOZ + CÓDIGO: streama a resposta COMPLETA na tela (token a token) e fala um
       // resumo conciso, limpo e GARANTIDAMENTE não-vazio num canal separado. Assim a voz
       // "continua" naturalmente para a resposta (ex.: o que havia no diretório) sem ler
       // código/caminhos/diffs em voz alta, e o chat mantém o conteúdo inteiro.
-      const raw2 = await streamTurn(cfg, followup, 2, onDelta, 'display', deltaTransform)
-      const env2 = parseEnvelope(raw2)
-      if (env2.fala) {
-        fala = finalFala(env2.fala, suppressGreeting) // texto completo permanece no chat
+      const raw = await streamTurn(cfg, convo, phase, onDelta, 'display', deltaTransform)
+      const envN = parseEnvelope(raw)
+      if (envN.fala) {
+        fala = finalFala(envN.fala, suppressGreeting) // texto completo permanece no chat
         const spoken =
           sanitizeVoiceCodeFala(fala) || 'Análise concluída. Os detalhes principais estão na tela.'
         falaVoz = spoken
-        onDelta?.(` ${spoken}`, 2, 'speak')
+        onDelta?.(` ${spoken}`, phase, 'speak')
       }
-      mutations = mutations.concat(env2.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo)))
+      mutations = mutations.concat(envN.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo)))
+      queries = lastRound ? [] : envN.acoes.filter((a) => QUERY_TOOLS.has(a.tipo))
     } else {
-      const raw2 = await streamTurn(cfg, followup, 2, onDelta, 'both', deltaTransform)
-      const env2 = parseEnvelope(raw2)
-      if (env2.fala) fala = finalFala(env2.fala, suppressGreeting)
-      mutations = mutations.concat(env2.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo)))
+      const raw = await streamTurn(cfg, convo, phase, onDelta, 'both', deltaTransform)
+      const envN = parseEnvelope(raw)
+      if (envN.fala) fala = finalFala(envN.fala, suppressGreeting)
+      mutations = mutations.concat(envN.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo)))
+      queries = lastRound ? [] : envN.acoes.filter((a) => QUERY_TOOLS.has(a.tipo))
     }
   }
 

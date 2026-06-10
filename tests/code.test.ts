@@ -11,6 +11,11 @@ import {
   classifyCommand,
   diagnoseProject,
   editCodeFile,
+  findCodeReferences,
+  listCodeFiles,
+  outlineCodeFile,
+  outlineSource,
+  replaceInProject,
   isLongRunningCommand,
   planDiagnosis,
   previewCodePatch,
@@ -450,5 +455,97 @@ describe('hardening de segurança do terminal', () => {
   it('detecta escalonamento mesmo encadeado (defesa em profundidade)', () => {
     expect(classifyCommand(config(), 'echo oi && sudo reboot').tier).toBe('blocked')
     expect(classifyCommand(config(), 'true || su').tier).toBe('blocked')
+  })
+})
+
+describe('navegação estilo agente — listar/esboço/referências/substituir', () => {
+  it('codigo.listar filtra por padrão glob e respeita o limite', () => {
+    const all = listCodeFiles(config())
+    expect(all.files).toContain('src/main.ts')
+    expect(all.files).toContain('package.json')
+
+    const ts = listCodeFiles(config(), { pattern: '*.ts' })
+    expect(ts.files.length).toBeGreaterThanOrEqual(2)
+    expect(ts.files.every((f) => f.endsWith('.ts'))).toBe(true)
+
+    const limited = listCodeFiles(config(), { pattern: '*.ts', maxResults: 1 })
+    expect(limited.files).toHaveLength(1)
+    expect(limited.truncated).toBe(true)
+    expect(limited.total).toBeGreaterThan(1)
+  })
+
+  it('outlineSource mapeia funções, classes, tipos e arrow functions (TS)', () => {
+    const code = [
+      'export function greet(name: string): string { return name }',
+      'export const soma = (a: number, b: number): number => a + b',
+      'export class Robo {',
+      '  falar(): void {}',
+      '}',
+      'export interface Opts { x: number }',
+      'export type Par = [number, number]',
+      'enum Cor { Azul }'
+    ].join('\n')
+    const items = outlineSource(code, '.ts')
+    const byName = Object.fromEntries(items.map((i) => [i.name, i]))
+    expect(byName.greet).toMatchObject({ kind: 'function', line: 1 })
+    expect(byName.soma).toMatchObject({ kind: 'function', line: 2 })
+    expect(byName.Robo).toMatchObject({ kind: 'class', line: 3 })
+    expect(byName.Opts.kind).toBe('interface')
+    expect(byName.Par.kind).toBe('type')
+    expect(byName.Cor.kind).toBe('enum')
+  })
+
+  it('outlineSource entende Python e Go', () => {
+    const py = outlineSource('class Robo:\n    def falar(self):\n        pass\nasync def main():\n    pass\n', '.py')
+    expect(py.map((i) => i.name)).toEqual(['Robo', 'falar', 'main'])
+    const go = outlineSource('func main() {}\nfunc (r *Robo) Falar() {}\ntype Robo struct{}\n', '.go')
+    expect(go.map((i) => `${i.kind}:${i.name}`)).toEqual(['function:main', 'function:Falar', 'type:Robo'])
+  })
+
+  it('codigo.esboco lê o arquivo real do workspace', () => {
+    const out = outlineCodeFile(config(), { file: 'src/main.ts' })
+    expect(out.file).toBe('src/main.ts')
+    expect(out.items.some((i) => i.name === 'greet' && i.kind === 'function')).toBe(true)
+    expect(out.totalLines).toBeGreaterThan(1)
+  })
+
+  it('codigo.referencias conta usos por arquivo (palavra inteira)', () => {
+    const refs = findCodeReferences(config(), { symbol: 'greet' })
+    const files = Object.fromEntries(refs.files.map((f) => [f.file, f.count]))
+    expect(files['src/main.ts']).toBeGreaterThanOrEqual(1)
+    expect(files['src/feature.ts']).toBe(2) // import + uso
+    expect(refs.total).toBeGreaterThanOrEqual(3)
+    expect(refs.files[0].sample.length).toBeGreaterThan(0)
+    // não casa substring de outro identificador
+    expect(() => findCodeReferences(config(), { symbol: 'x' })).toThrow(/símbolo/i)
+  })
+
+  it('codigo.substituir: prévia não altera nada; apply troca em todos os arquivos', () => {
+    writeProjectFile('src/ren-a.ts', 'export const renomeAlvo = 1\n')
+    writeProjectFile('src/ren-b.ts', 'import { renomeAlvo } from "./ren-a"\nexport const dobro = renomeAlvo * 2\n')
+
+    const preview = replaceInProject(config(), { find: 'renomeAlvo', replace: 'novoNome' })
+    expect(preview.applied).toBe(false)
+    expect(preview.totalMatches).toBe(3)
+    expect(preview.files.map((f) => f.file).sort()).toEqual(['src/ren-a.ts', 'src/ren-b.ts'])
+    expect(readFileSync(join(root, 'src/ren-a.ts'), 'utf8')).toContain('renomeAlvo') // intocado
+
+    const applied = replaceInProject(config(), { find: 'renomeAlvo', replace: 'novoNome', apply: true })
+    expect(applied.applied).toBe(true)
+    expect(readFileSync(join(root, 'src/ren-a.ts'), 'utf8')).toContain('novoNome')
+    expect(readFileSync(join(root, 'src/ren-b.ts'), 'utf8')).not.toContain('renomeAlvo')
+  })
+
+  it('codigo.substituir respeita filtro, bloqueios e config de escrita', () => {
+    writeProjectFile('docs/nota.md', 'renomeFiltro aqui\n')
+    writeProjectFile('src/so-aqui.ts', 'renomeFiltro tambem\n')
+    const filtered = replaceInProject(config(), { find: 'renomeFiltro', replace: 'trocado', filter: '*.ts' })
+    expect(filtered.files.map((f) => f.file)).toEqual(['src/so-aqui.ts'])
+
+    expect(() => replaceInProject(config({ allowPatchApply: false }), { find: 'renomeFiltro', replace: 'x', apply: true })).toThrow(
+      /patches/i
+    )
+    expect(() => replaceInProject(config(), { find: 'a', replace: 'b' })).toThrow(/2 caracteres/)
+    expect(() => replaceInProject(config(), { find: 'igual', replace: 'igual' })).toThrow(/igual/)
   })
 })

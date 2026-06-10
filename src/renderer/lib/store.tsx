@@ -24,6 +24,7 @@ import type {
 import * as audio from './audio'
 import type { SpeakOptions } from './tts'
 import { cancelSpeech, loadVoices, enqueueSentence, whenSpeechQueueIdle, clearSpeechQueue, splitSentences } from './tts'
+import { interpretBusySpeech, stripWakeWord } from './voiceControl'
 
 export interface ConvMsg {
   id: string
@@ -45,10 +46,10 @@ export function mergeActivityEvent(events: AgentActivityEvent[] = [], event: Age
 export function finalSpeechFallback(
   result: Pick<AgentTurnResult, 'fala' | 'falaVoz'>,
   queuedSpeech: boolean,
-  phase2QueuedSpeech: boolean
+  finalPhaseQueuedSpeech: boolean
 ): string {
   const voiceSummary = result.falaVoz?.trim()
-  if (voiceSummary && !phase2QueuedSpeech) return voiceSummary
+  if (voiceSummary && !finalPhaseQueuedSpeech) return voiceSummary
   const fullSpeech = result.fala.trim()
   if (!queuedSpeech && fullSpeech) return fullSpeech
   return ''
@@ -147,51 +148,6 @@ const uid = (p = 'id') => `${p}-${Date.now().toString(36)}-${Math.random().toStr
 const toConv = (session: ChatSession | null): ConvMsg[] =>
   (session?.messages || []).map((m) => ({ id: m.id, role: m.role, content: m.content }))
 
-const normWake = (s: string): string =>
-  s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[.,!?;:]/g, '')
-
-// Distância de edição pequena (tolera erros de transcrição da palavra de ativação).
-function lev(a: string, b: string): number {
-  const m = a.length
-  const n = b.length
-  if (!m) return n
-  if (!n) return m
-  let prev = Array.from({ length: n + 1 }, (_, i) => i)
-  for (let i = 1; i <= m; i++) {
-    const cur = [i]
-    for (let j = 1; j <= n; j++) {
-      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1))
-    }
-    prev = cur
-  }
-  return prev[n]
-}
-
-/**
- * Verifica se a transcrição começa com a palavra de ativação (nas 2 primeiras
- * palavras, tolerando erros). Retorna o comando sem a palavra-chave, '' se só a
- * palavra foi dita, ou null se a palavra de ativação não apareceu.
- */
-function stripWakeWord(text: string, wakeWord: string): string | null {
-  const w = normWake(wakeWord || 'ares')
-  const variants = w === 'ares' ? ['ares', 'aris', 'aries', 'arez', 'aress', 'harris', 'ariz'] : [w]
-  const tokens = text.trim().split(/\s+/)
-  const firstTwo = tokens.slice(0, 2).map(normWake)
-  let hit = -1
-  for (let k = 0; k < firstTwo.length; k++) {
-    if (variants.some((v) => firstTwo[k] === v || lev(firstTwo[k], v) <= 1)) {
-      hit = k
-      break
-    }
-  }
-  if (hit === -1) return null
-  return tokens
-    .slice(hit + 1)
-    .join(' ')
-    .replace(/^[\s,.:;-]+/, '')
-    .trim()
-}
-
 export function AresProvider({ children }: { children: React.ReactNode }): JSX.Element {
   const [ready, setReady] = useState(false)
   const [config, setConfig] = useState<AppConfig | null>(null)
@@ -231,6 +187,8 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   const busyRef = useRef(false)
   const loopRef = useRef(false)
   const wakeArmedUntilRef = useRef(0) // janela em que o comando é aceito sem repetir a palavra
+  // Comando dito ENQUANTO o Ares trabalhava: roda assim que a tarefa atual terminar.
+  const pendingVoiceCmdRef = useRef<string | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const showToast = useCallback((msg: string) => {
@@ -485,7 +443,9 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
           sentenceBuf = ''
           return
         }
-        const { sentences, rest } = splitSentences(sentenceBuf, final)
+        // eager: nada foi falado nesta fase ainda -> corta a primeira oração na vírgula
+        // para a voz começar mais cedo (menor latência percebida).
+        const { sentences, rest } = splitSentences(sentenceBuf, final, { eager: !queuedSpeechByPhase[phase] })
         sentenceBuf = rest
         for (const s of sentences) {
           queueSpeech(s)
@@ -540,7 +500,9 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
         setConversation((prev) =>
           prev.map((m) => (m.id === assistantId ? { ...m, content: result.fala, pending: false } : m))
         )
-        const fallbackSpeech = finalSpeechFallback(result, queuedSpeech, !!queuedSpeechByPhase[2])
+        // A fase final pode ser 2, 3 ou 4 (o agente encadeia rodadas de ferramentas);
+        // o fallback de voz olha a ÚLTIMA fase vista no streaming.
+        const fallbackSpeech = finalSpeechFallback(result, queuedSpeech, !!queuedSpeechByPhase[phase])
         if (speak && fallbackSpeech) queueSpeech(fallbackSpeech)
         if (result.notes.length) showToast(result.notes.join('   ·   '))
         await refreshSessions()
@@ -667,13 +629,67 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     return off
   }, [voiceCommandOnce])
 
+  // Escuta o microfone ENQUANTO o Ares trabalha (programa, roda build/testes ou fala
+  // a resposta): "para/cancela" aborta a execução na hora; qualquer outro pedido entra
+  // na fila e roda assim que a tarefa terminar. É o que mantém a conversa contínua viva
+  // durante tarefas longas, em vez de o microfone ficar surdo até o fim.
+  const listenWhileBusy = useCallback(async (): Promise<void> => {
+    const cfg = configRef.current
+    if (cfg?.ui.bargeIn === false) {
+      await new Promise((r) => setTimeout(r, 200))
+      return
+    }
+    try {
+      const res = await audio.recordUntilSilence({
+        shouldStop: () => !busyRef.current || !continuousRef.current,
+        // Limiar mais alto que a escuta normal: com echoCancellation, a própria voz do
+        // Ares some; isto filtra ruído ambiente para não transcrever à toa.
+        threshold: Math.max(0.09, micThreshold() * 2),
+        silenceMs: 900,
+        maxWaitMs: 6000,
+        maxMs: 12000
+      })
+      if (!res.spoke || !continuousRef.current) return
+      const text = (await transcribeBlob(res.blob, res.mimeType)).trim()
+      if (!text || !busyRef.current) {
+        // A tarefa acabou enquanto transcrevia: trata como comando normal da fila.
+        if (text) pendingVoiceCmdRef.current = text
+        return
+      }
+      const intent = interpretBusySpeech(text, cfg?.ui.wakeWord || 'ares', !!cfg?.ui.wakeWordEnabled)
+      if (intent.kind === 'cancel') {
+        clearSpeechQueue()
+        const sid = currentSessionRef.current
+        if (sid) void window.ares.code?.cancel(sid)
+        pendingVoiceCmdRef.current = null
+        setStatus('Cancelado por voz.')
+        showToast('execução cancelada por voz')
+      } else if (intent.kind === 'command') {
+        pendingVoiceCmdRef.current = intent.text
+        setStatus(`Anotado: "${intent.text}" — executo ao terminar a tarefa atual.`)
+        showToast('comando na fila para depois da tarefa')
+      }
+    } catch {
+      // Microfone indisponível neste instante: espera um pouco para não travar o loop.
+      await new Promise((r) => setTimeout(r, 300))
+    }
+  }, [micThreshold, transcribeBlob, showToast])
+
   const continuousLoop = useCallback(async () => {
     if (loopRef.current) return
     loopRef.current = true
     try {
       while (continuousRef.current) {
         if (busyRef.current) {
-          await new Promise((r) => setTimeout(r, 150))
+          await listenWhileBusy()
+          continue
+        }
+        // Comando captado durante a tarefa anterior: executa antes de voltar a ouvir.
+        const queued = pendingVoiceCmdRef.current
+        if (queued) {
+          pendingVoiceCmdRef.current = null
+          setStatus('')
+          await runTurn(queued, true)
           continue
         }
         setAresState('listening')
@@ -747,7 +763,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
       setRecording(false)
       if (!busyRef.current) setAresState('idle')
     }
-  }, [runTurn, transcribeBlob, micThreshold, speakText])
+  }, [runTurn, transcribeBlob, micThreshold, speakText, listenWhileBusy])
 
   const toggleContinuous = useCallback(() => {
     const next = !continuousRef.current

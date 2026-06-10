@@ -13,7 +13,16 @@ const CODE_TERMS: Array<[RegExp, string]> = [
   [/\b(try\s*catch|trai\s*cat(ch|chi)?|tente\s+(e\s+)?capture|tratamento\s+de\s+erro)\b/gi, 'try catch'],
   [/\b(call\s*back|fun[cç][aã]o\s+de\s+retorno)\b/gi, 'callback'],
   [/\b(promessa|promise)\b/gi, 'promise'],
-  [/\b(fun[cç][aã]o\s+an[oô]nima|lambda)\b/gi, 'arrow function']
+  [/\b(fun[cç][aã]o\s+an[oô]nima|lambda)\b/gi, 'arrow function'],
+  [/\binterface\s+de\s+tipos?\b/gi, 'interface'],
+  [/\b(use\s*efeito|use\s*effect)\b/gi, 'useEffect'],
+  [/\b(use\s*estado|use\s*state)\b/gi, 'useState'],
+  [/\b(tipo\s+gen[eé]rico|generics?)\b/gi, 'generic'],
+  [/\b(la[cç]o\s+for|loop\s+for)\b/gi, 'for'],
+  [/\b(guit|git)\s+(comite|commit|comit)\b/gi, 'git commit'],
+  [/\b(guit|git)\s+(push|puxe|pux)\b/gi, 'git push'],
+  [/\b(guit|git)\s+(pull|pul)\b/gi, 'git pull'],
+  [/\b(guit|git)\s+(diff|dife|difi)\b/gi, 'git diff']
 ]
 
 const EXTENSIONS: Array<[RegExp, string]> = [
@@ -28,7 +37,14 @@ const EXTENSIONS: Array<[RegExp, string]> = [
   [/\bponto\s+(p\s*y|py)\b/gi, '.py'],
   [/\bponto\s+(y\s*a\s*m\s*l|yaml)\b/gi, '.yaml'],
   [/\bponto\s+(y\s*m\s*l|yml)\b/gi, '.yml'],
-  [/\bponto\s+(e\s*n\s*v|env)\b/gi, '.env']
+  [/\bponto\s+(e\s*n\s*v|env)\b/gi, '.env'],
+  [/\bponto\s+(t\s*x\s*t|txt)\b/gi, '.txt'],
+  [/\bponto\s+(s\s*q\s*l|sql)\b/gi, '.sql'],
+  [/\bponto\s+(t\s*o\s*m\s*l|toml)\b/gi, '.toml'],
+  [/\bponto\s+(s\s*v\s*g|svg)\b/gi, '.svg'],
+  [/\bponto\s+(s\s*h|sh)\b/gi, '.sh'],
+  [/\bponto\s+(v\s*u\s*e|vue)\b/gi, '.vue'],
+  [/\bponto\s+(p[ií]ton|python)\b/gi, '.py']
 ]
 
 export function isCodeActionType(tipo: unknown): boolean {
@@ -202,6 +218,34 @@ function focusErrorsForVoice(value: unknown, depth = 0): unknown {
     }
   }
   return out
+}
+
+// ---------------------------------------------------------------------------
+// "Batimento" de voz em tarefas longas: se um comando passa de ~15 s, o Ares fala
+// uma atualização curta (e repete a cada ~30 s) no canal só-de-fala — o usuário
+// nunca fica no silêncio sem saber se travou. Puro (sem electron) e testável.
+// ---------------------------------------------------------------------------
+
+export const HEARTBEAT_FIRST_MS = 15_000
+export const HEARTBEAT_REPEAT_MS = 30_000
+export const HEARTBEAT_PHRASES = [
+  ' Ainda trabalhando nisso, senhor.',
+  ' A tarefa continua em execução. Já trago o resultado.',
+  ' Quase lá. Sigo acompanhando a saída.'
+]
+
+type HeartbeatDelta = (chunk: string, phase: number, kind?: 'both' | 'display' | 'speak') => void
+
+export function startHeartbeat(onDelta: HeartbeatDelta | undefined, phase: number): () => void {
+  if (!onDelta) return () => {}
+  let i = 0
+  let timer: ReturnType<typeof setTimeout>
+  const tick = (): void => {
+    onDelta(HEARTBEAT_PHRASES[i++ % HEARTBEAT_PHRASES.length], phase, 'speak')
+    timer = setTimeout(tick, HEARTBEAT_REPEAT_MS)
+  }
+  timer = setTimeout(tick, HEARTBEAT_FIRST_MS)
+  return () => clearTimeout(timer)
 }
 
 export function toolResultsPrompt(results: unknown[], voice: boolean, codeMode: boolean): string {

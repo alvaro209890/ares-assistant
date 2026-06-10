@@ -101,6 +101,37 @@ describe('agent — runTurn (orquestração do cérebro)', () => {
     expect(r.fala).toBe('São quatro, senhor.')
   })
 
+  it('encadeia rodadas de ferramentas: consulta da 2ª fase também executa', async () => {
+    const sid = createSession().id
+    // Rodada 1: pede um cálculo.
+    nextEnvelope('Vou calcular.', [{ tipo: 'calcular', expressao: '2+2' }])
+    // Rodada 2: com o resultado, pede OUTRA consulta (antes era ignorada).
+    nextEnvelope('Agora converto para milhas.', [{ tipo: 'converter.unidade', de: 'km', para: 'mi', valor: 4 }])
+    // Rodada 3: resposta final.
+    nextEnvelope('São quatro quilômetros, cerca de duas vírgula cinco milhas.', [])
+
+    const phases: number[] = []
+    const r = await runTurn(sid, 'quanto é 2+2 em km e em milhas?', false, (_c, ph) => phases.push(ph))
+
+    expect(brain).toHaveBeenCalledTimes(3)
+    expect(r.fala).toContain('milhas')
+    expect(Math.max(...phases)).toBe(3) // streaming abriu a 3ª fase
+  })
+
+  it('para de encadear no limite de rodadas (sem ciclo infinito)', async () => {
+    const sid = createSession().id
+    // O "cérebro" SEMPRE pede mais uma consulta — o agente precisa cortar no limite.
+    brain.mockResolvedValue(
+      JSON.stringify({ fala: 'Mais uma verificação.', acoes: [{ tipo: 'calcular', expressao: '1+1' }] })
+    )
+
+    const r = await runTurn(sid, 'fica calculando para sempre')
+
+    // 1 chamada inicial + MAX_TOOL_ROUNDS respostas pós-ferramenta = 4
+    expect(brain).toHaveBeenCalledTimes(4)
+    expect(r.fala).toBeTruthy()
+  })
+
   it('emite atividades ao ler arquivo no modo programador', async () => {
     updateConfig({ integrations: { code: { workspaceRoot: TMP, allowedRoots: [TMP] } } })
     writeFileSync(join(TMP, 'a.ts'), 'export const a = 1\n', 'utf8')

@@ -9,7 +9,8 @@ import {
   intToPtBR,
   normalizePtNumbers,
   normalizeSymbols,
-  prepareText
+  prepareText,
+  tightenWavSilence
 } from '../src/main/speech'
 
 describe('fala neural (speech)', () => {
@@ -31,6 +32,16 @@ describe('fala neural (speech)', () => {
     expect(detectTone('A previsão é de sol amanhã.')).toBe('neutro')
     // pista de erro vence pista de sucesso na mesma frase
     expect(detectTone('Criei o arquivo, mas o build falhou.')).toBe('erro')
+  })
+
+  it('detecta perguntas (entonação curiosa), mas erro ainda vence', () => {
+    expect(detectTone('Confirma que eu aplico o patch?')).toBe('pergunta')
+    expect(detectTone('Quer que eu rode os testes agora?')).toBe('pergunta')
+    expect(detectTone('O build falhou. Quer que eu tente de novo?')).toBe('erro')
+    const neutro = computeNoise('neutro')
+    const pergunta = computeNoise('pergunta')
+    expect(pergunta.noiseW).toBeGreaterThan(neutro.noiseW) // mais melódica
+    expect(computeLengthScale(1, 'pergunta')).toBeGreaterThan(computeLengthScale(1, 'neutro'))
   })
 
   it('varia a velocidade pelo tom: erro mais rápido, sucesso mais calmo', () => {
@@ -106,6 +117,21 @@ describe('normalização de números pt-BR', () => {
     expect(normalizePtNumbers('id 1234567')).toContain('1234567')
   })
 
+  it('datas por extenso (ISO e brasileira)', () => {
+    expect(normalizePtNumbers('o prazo é 2026-06-10')).toBe('o prazo é dez de junho de dois mil e vinte e seis')
+    expect(normalizePtNumbers('entrega em 10/06/2026')).toBe('entrega em dez de junho de dois mil e vinte e seis')
+    expect(normalizePtNumbers('dia 01/03/2026')).toBe('dia primeiro de março de dois mil e vinte e seis')
+    // mês/dia inválidos não viram data falada (os números seguem o caminho comum)
+    expect(normalizePtNumbers('2026-13-40 inválida')).not.toMatch(/junho|janeiro|março/)
+  })
+
+  it('unidades de dados e tempo após número', () => {
+    expect(normalizePtNumbers('são 16 GB de RAM')).toContain('gigabytes')
+    expect(normalizePtNumbers('baixou 512MB')).toContain('megabytes')
+    expect(normalizePtNumbers('respondeu em 120 ms')).toContain('milissegundos')
+    expect(normalizePtNumbers('tem 1 GB livre')).toContain('um gigabyte')
+  })
+
   it('símbolos isolados por extenso (conservador)', () => {
     expect(normalizeSymbols('pão & queijo')).toBe('pão e queijo')
     expect(normalizeSymbols('2 + 2')).toBe('2 mais 2')
@@ -116,6 +142,56 @@ describe('normalização de números pt-BR', () => {
     const out = prepareText('O total foi R$ 1.250,90, senhor.')
     expect(out).toContain('mil duzentos e cinquenta reais e noventa centavos')
     expect(out).not.toMatch(/\d/) // sem dígitos crus na fala
+  })
+})
+
+describe('aparar silêncio do WAV (fluidez entre frases)', () => {
+  const RATE = 22050
+  /** WAV PCM16 mono sintético: [silêncio | tom | silêncio], durações em ms. */
+  function makeWav(leadMs: number, toneMs: number, tailMs: number): Buffer {
+    const n = (ms: number) => Math.round((ms / 1000) * RATE)
+    const total = n(leadMs) + n(toneMs) + n(tailMs)
+    const raw = Buffer.alloc(total * 2)
+    for (let i = n(leadMs); i < n(leadMs) + n(toneMs); i++) {
+      raw.writeInt16LE(Math.round(Math.sin(i / 8) * 12000), i * 2)
+    }
+    const header = Buffer.alloc(44)
+    header.write('RIFF', 0)
+    header.writeUInt32LE(36 + raw.length, 4)
+    header.write('WAVE', 8)
+    header.write('fmt ', 12)
+    header.writeUInt32LE(16, 16)
+    header.writeUInt16LE(1, 20)
+    header.writeUInt16LE(1, 22)
+    header.writeUInt32LE(RATE, 24)
+    header.writeUInt32LE(RATE * 2, 28)
+    header.writeUInt16LE(2, 32)
+    header.writeUInt16LE(16, 34)
+    header.write('data', 36)
+    header.writeUInt32LE(raw.length, 40)
+    return Buffer.concat([header, raw])
+  }
+  const durationMs = (wav: Buffer): number => ((wav.length - 44) / 2 / RATE) * 1000
+
+  it('apara o rabo de silêncio do Piper mantendo um respiro curto', () => {
+    const wav = makeWav(150, 500, 400) // 400ms de silêncio no fim (sentence_silence)
+    const out = tightenWavSilence(wav)
+    expect(durationMs(out)).toBeLessThan(durationMs(wav) - 250) // cortou bem mais que 250ms
+    expect(durationMs(out)).toBeGreaterThan(500) // mas não comeu o áudio
+    expect(out.readUInt32LE(40)).toBe(out.length - 44) // header consistente
+    expect(out.toString('ascii', 0, 4)).toBe('RIFF')
+  })
+
+  it('não mexe quando não há excesso de silêncio', () => {
+    const wav = makeWav(20, 400, 60)
+    expect(tightenWavSilence(wav)).toBe(wav)
+  })
+
+  it('é seguro com formatos inesperados (não lança, devolve o original)', () => {
+    const junk = Buffer.from('isto não é um wav de verdade nem de longe!')
+    expect(tightenWavSilence(junk)).toBe(junk)
+    const silent = makeWav(300, 0, 300)
+    expect(tightenWavSilence(silent)).toBe(silent) // tudo silêncio: não mexe
   })
 })
 

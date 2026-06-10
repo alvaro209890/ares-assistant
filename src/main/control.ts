@@ -2,6 +2,7 @@ import { spawn, spawnSync } from 'child_process'
 import { existsSync, mkdirSync } from 'fs'
 import { homedir } from 'os'
 import { isAbsolute, join, resolve } from 'path'
+import { findStartMenuApp, type StartMenuApp } from './apps'
 import type { AppConfig, DesktopActionResult } from '../shared/types'
 
 // ---------------------------------------------------------------------------
@@ -54,16 +55,37 @@ const APP_ALIASES_WIN: Record<string, string[]> = {
   firefox: ['firefox'],
   chrome: ['chrome'],
   'google chrome': ['chrome'],
+  edge: ['msedge'],
+  'microsoft edge': ['msedge'],
   navegador: ['chrome', 'firefox', 'msedge'],
   vscode: ['code'],
   'vs code': ['code'],
   code: ['code'],
   editor: ['code', 'notepad'],
+  'bloco de notas': ['notepad'],
+  notepad: ['notepad'],
+  paint: ['mspaint'],
   calculadora: ['calc'],
   arquivos: ['explorer'],
   explorador: ['explorer'],
-  terminal: ['wt', 'powershell', 'cmd']
+  'gerenciador de tarefas': ['taskmgr'],
+  'prompt de comando': ['cmd'],
+  terminal: ['wt', 'powershell', 'cmd'],
+  // Apps de loja/instalados: raramente estão no PATH — o casamento cai no Menu
+  // Iniciar (ver resolveOpenTarget); o apelido garante o nome canônico da busca.
+  word: ['winword'],
+  excel: ['excel'],
+  powerpoint: ['powerpnt'],
+  spotify: ['spotify'],
+  whatsapp: ['whatsapp'],
+  discord: ['discord'],
+  telegram: ['telegram'],
+  steam: ['steam'],
+  vlc: ['vlc']
 }
+
+// "Abra as configurações" -> painel moderno do Windows (URL ms-settings:).
+const SETTINGS_ALIASES = new Set(['configuracoes', 'configurações', 'ajustes', 'configuracao', 'configuração'])
 
 const APP_ALIASES: Record<string, string[]> =
   process.platform === 'win32' ? APP_ALIASES_WIN : APP_ALIASES_LINUX
@@ -76,8 +98,12 @@ export interface OpenPlan {
   detail?: string
 }
 
-/** Decide COMO abrir o alvo (sem executar). Pura: testável com um `which` injetado. */
-export function resolveOpenTarget(target: string, which: WhichFn = realWhich): OpenPlan {
+type FindAppFn = (name: string) => StartMenuApp | null
+
+const realFindApp: FindAppFn = (name) => (process.platform === 'win32' ? findStartMenuApp(name) : null)
+
+/** Decide COMO abrir o alvo (sem executar). Pura: testável com `which`/`findApp` injetados. */
+export function resolveOpenTarget(target: string, which: WhichFn = realWhich, findApp: FindAppFn = realFindApp): OpenPlan {
   const raw = String(target || '').trim()
   if (!raw) return { kind: 'error', detail: 'diga o que devo abrir' }
 
@@ -89,11 +115,17 @@ export function resolveOpenTarget(target: string, which: WhichFn = realWhich): O
   const scheme = raw.match(/^([a-zA-Z][\w+.-]*):/)
   if (scheme) {
     const s = scheme[1].toLowerCase()
-    if (/^(https?|file|mailto|ftp)$/.test(s)) return { kind: 'url', cmd: opener, args: openArgs(raw), label: raw }
+    if (/^(https?|file|mailto|ftp|ms-settings)$/.test(s))
+      return { kind: 'url', cmd: opener, args: openArgs(raw), label: raw }
     return { kind: 'error', detail: `esquema não permitido: ${s}:` }
   }
 
   const lower = raw.toLowerCase()
+
+  // "Configurações" no Windows abre o painel moderno via ms-settings:.
+  if (process.platform === 'win32' && SETTINGS_ALIASES.has(lower)) {
+    return { kind: 'url', cmd: opener, args: openArgs('ms-settings:'), label: 'configurações' }
+  }
 
   // Domínio sem esquema (youtube.com, github.com/x) -> https://
   if (/^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(raw)) {
@@ -101,13 +133,21 @@ export function resolveOpenTarget(target: string, which: WhichFn = realWhich): O
     return { kind: 'url', cmd: opener, args: openArgs(url), label: url }
   }
 
-  // Aplicativo por apelido conhecido.
+  // Atalho do Menu Iniciar (Windows): abre via `start "" caminho.lnk`.
+  const fromMenu = (name: string): OpenPlan | null => {
+    const app = findApp(name)
+    return app ? { kind: 'app', cmd: opener, args: openArgs(app.path), label: app.name } : null
+  }
+
+  // Aplicativo por apelido conhecido: binário no PATH primeiro; senão, Menu Iniciar
+  // (cobre Word/Spotify/WhatsApp etc., que não ficam no PATH).
   const alias = APP_ALIASES[lower]
   if (alias) {
     const bin = alias.find((b) => which(b))
-    return bin
-      ? { kind: 'app', cmd: bin, args: [], label: lower }
-      : { kind: 'error', detail: `nenhum aplicativo encontrado para "${lower}"` }
+    if (bin) return { kind: 'app', cmd: bin, args: [], label: lower }
+    const viaMenu = fromMenu(lower) || alias.map(fromMenu).find(Boolean)
+    if (viaMenu) return viaMenu
+    return { kind: 'error', detail: `nenhum aplicativo encontrado para "${lower}"` }
   }
 
   // Caminho existente (absoluto ou relativo ao HOME).
@@ -117,7 +157,11 @@ export function resolveOpenTarget(target: string, which: WhichFn = realWhich): O
   // Binário direto no PATH.
   if (/^[\w.+-]+$/.test(raw) && which(raw)) return { kind: 'app', cmd: raw, args: [], label: raw }
 
-  // Último recurso: deixa o sistema tentar resolver.
+  // Qualquer app instalado, pelo nome falado (Menu Iniciar, com tolerância a erros).
+  const viaMenu = fromMenu(raw)
+  if (viaMenu) return viaMenu
+
+  // Último recurso: deixa o sistema tentar resolver (App Paths no Windows).
   if (/^[\w.+ -]+$/.test(raw)) return { kind: 'app', cmd: opener, args: openArgs(raw), label: raw }
 
   return { kind: 'error', detail: `não consegui interpretar "${raw}"` }
@@ -493,5 +537,6 @@ export function controlPromptContext(cfg: AppConfig): string {
   if (controlConfig(cfg).enabled === false) return 'Controle do computador: desativado nas Configurações.'
   const audio = audioBackend()
   const media = mediaBackend()
-  return `Controle do computador: ativado (${process.platform === 'win32' ? 'Windows' : 'Linux'}) — abrir apps/sites, volume (${audio || 'sem áudio'}), mídia (${media ? 'play/pause/próxima' : 'indisponível'}), brilho da tela, bloquear tela, captura de tela e escrever na área de transferência.`
+  const openScope = process.platform === 'win32' ? 'abrir QUALQUER app instalado (Menu Iniciar) e sites' : 'abrir apps/sites'
+  return `Controle do computador: ativado (${process.platform === 'win32' ? 'Windows' : 'Linux'}) — ${openScope}, volume (${audio || 'sem áudio'}), mídia (${media ? 'play/pause/próxima' : 'indisponível'}), brilho da tela, bloquear tela, captura de tela e escrever na área de transferência.`
 }

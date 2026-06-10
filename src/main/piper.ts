@@ -3,7 +3,7 @@ import { spawn } from 'child_process'
 import { existsSync, readdirSync, mkdirSync, writeFileSync, rmSync, chmodSync } from 'fs'
 import { join, dirname } from 'path'
 import { tmpdir } from 'os'
-import { PIPER_SENTENCE_SILENCE, computeLengthScale, computeNoise, detectTone, prepareText } from './speech'
+import { PIPER_SENTENCE_SILENCE, computeLengthScale, computeNoise, detectTone, prepareText, tightenWavSilence } from './speech'
 import { warmSynthesize, type PiperSynthParams } from './piperEngine'
 import { logger } from './logger'
 
@@ -101,10 +101,12 @@ export async function synthesize(text: string, opts: { voice?: string; rate?: nu
   }
   const prepared = prepareText(text)
 
+  // O silêncio residual no fim do WAV (sentence_silence do Piper) é aparado para a
+  // fala frase-a-frase emendar sem "vão" — a pausa entre frases é a do reprodutor.
   try {
-    return await warmSynthesize(params, prepared)
+    return tightenWavSilence(await warmSynthesize(params, prepared))
   } catch {
-    return await synthesizeOneShot(params, prepared)
+    return tightenWavSilence(await synthesizeOneShot(params, prepared))
   }
 }
 

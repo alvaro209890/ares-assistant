@@ -176,6 +176,27 @@ describe('tts', () => {
     )
   })
 
+  it('modo eager: corta a primeira oração na vírgula para a voz começar antes', () => {
+    installSpeechMock()
+    const buf =
+      'Entendido, vou analisar o diretório do projeto agora mesmo, e em seguida trago um resumo completo e detalhado do que eu encontrar por lá durante a análise do código'
+
+    const eager = splitSentences(buf, false, { eager: true })
+    expect(eager.sentences.length).toBe(1)
+    expect(eager.sentences[0].endsWith(',')).toBe(true) // cortou numa vírgula
+    expect((eager.sentences[0] + eager.rest).replace(/\s+/g, ' ')).toContain('resumo completo')
+
+    // sem eager (já há fala na fila), espera pontuação final — comportamento antigo
+    const normal = splitSentences(buf, false)
+    expect(normal.sentences).toEqual([])
+  })
+
+  it('eager não age em texto curto nem quando já existe frase completa', () => {
+    installSpeechMock()
+    expect(splitSentences('Claro, senhor.', false, { eager: true }).sentences).toEqual(['Claro, senhor.'])
+    expect(splitSentences('Oi, tudo bem', false, { eager: true }).sentences).toEqual([])
+  })
+
   it('quebra texto longo sem pontuacao para nao atrasar a voz', () => {
     installSpeechMock()
     const long = Array.from({ length: 70 }, (_, i) => `palavra${i}`).join(' ')

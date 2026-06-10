@@ -9,10 +9,15 @@ import {
 } from '../src/main/control'
 
 const which = (have: string[]) => (t: string) => have.includes(t)
+const noApp = () => null
+const menu = (apps: Record<string, string>) => (name: string) => {
+  const hit = Object.entries(apps).find(([n]) => n.toLowerCase().includes(name.toLowerCase()))
+  return hit ? { name: hit[0], path: hit[1] } : null
+}
 
 describe('controle do computador — resolveOpenTarget', () => {
   it('abre URL http(s) com o opener do sistema', () => {
-    const plan = resolveOpenTarget('https://example.com', which([]))
+    const plan = resolveOpenTarget('https://example.com', which([]), noApp)
     expect(plan.kind).toBe('url')
     if (process.platform === 'win32') {
       expect(plan.cmd).toBe('cmd')
@@ -24,38 +29,63 @@ describe('controle do computador — resolveOpenTarget', () => {
   })
 
   it('completa domínio sem esquema para https', () => {
-    const p = resolveOpenTarget('youtube.com', which([]))
+    const p = resolveOpenTarget('youtube.com', which([]), noApp)
     expect(p.kind).toBe('url')
     expect(p.args).toContain('https://youtube.com')
   })
 
   it('resolve apelido de app para o primeiro binário existente', () => {
     if (process.platform === 'win32') {
-      expect(resolveOpenTarget('navegador', which(['chrome'])).cmd).toBe('chrome')
-      expect(resolveOpenTarget('firefox', which(['firefox'])).cmd).toBe('firefox')
-      expect(resolveOpenTarget('calculadora', which(['calc'])).cmd).toBe('calc')
+      expect(resolveOpenTarget('navegador', which(['chrome']), noApp).cmd).toBe('chrome')
+      expect(resolveOpenTarget('firefox', which(['firefox']), noApp).cmd).toBe('firefox')
+      expect(resolveOpenTarget('calculadora', which(['calc']), noApp).cmd).toBe('calc')
+      expect(resolveOpenTarget('bloco de notas', which(['notepad']), noApp).cmd).toBe('notepad')
     } else {
-      expect(resolveOpenTarget('navegador', which(['google-chrome'])).cmd).toBe('google-chrome')
-      expect(resolveOpenTarget('firefox', which(['firefox'])).cmd).toBe('firefox')
-      expect(resolveOpenTarget('calculadora', which(['gnome-calculator'])).cmd).toBe('gnome-calculator')
+      expect(resolveOpenTarget('navegador', which(['google-chrome']), noApp).cmd).toBe('google-chrome')
+      expect(resolveOpenTarget('firefox', which(['firefox']), noApp).cmd).toBe('firefox')
+      expect(resolveOpenTarget('calculadora', which(['gnome-calculator']), noApp).cmd).toBe('gnome-calculator')
     }
   })
 
-  it('erro quando o app do apelido não está instalado', () => {
-    expect(resolveOpenTarget('firefox', which([])).kind).toBe('error')
+  it('apelido sem binário no PATH cai para o atalho do Menu Iniciar', () => {
+    const apps = menu({ Spotify: 'C:\\SM\\Spotify.lnk', Word: 'C:\\SM\\Word.lnk' })
+    const spotify = resolveOpenTarget('spotify', which([]), apps)
+    expect(spotify.kind).toBe('app')
+    expect(spotify.label).toBe('Spotify')
+    expect((spotify.args || []).join(' ')).toContain('Spotify.lnk')
+    expect(resolveOpenTarget('word', which([]), apps).label).toBe('Word')
+  })
+
+  it('nome falado de QUALQUER app instalado resolve pelo Menu Iniciar', () => {
+    const apps = menu({ 'OBS Studio': 'C:\\SM\\OBS Studio.lnk' })
+    const plan = resolveOpenTarget('obs', which([]), apps)
+    expect(plan.kind).toBe('app')
+    expect(plan.label).toBe('OBS Studio')
+  })
+
+  it('erro quando o app do apelido não está instalado em lugar nenhum', () => {
+    expect(resolveOpenTarget('firefox', which([]), noApp).kind).toBe('error')
   })
 
   it('bloqueia esquemas perigosos', () => {
-    expect(resolveOpenTarget('javascript:alert(1)', which([])).kind).toBe('error')
-    expect(resolveOpenTarget('ssh://host', which([])).kind).toBe('error')
+    expect(resolveOpenTarget('javascript:alert(1)', which([]), noApp).kind).toBe('error')
+    expect(resolveOpenTarget('ssh://host', which([]), noApp).kind).toBe('error')
+  })
+
+  it.skipIf(process.platform !== 'win32')('abre as configurações do Windows via ms-settings:', () => {
+    const direct = resolveOpenTarget('ms-settings:bluetooth', which([]), noApp)
+    expect(direct.kind).toBe('url')
+    const spoken = resolveOpenTarget('configurações', which([]), noApp)
+    expect(spoken.kind).toBe('url')
+    expect((spoken.args || []).join(' ')).toContain('ms-settings:')
   })
 
   it('aceita binário direto presente no PATH', () => {
-    expect(resolveOpenTarget('htop', which(['htop']))).toMatchObject({ kind: 'app', cmd: 'htop' })
+    expect(resolveOpenTarget('htop', which(['htop']), noApp)).toMatchObject({ kind: 'app', cmd: 'htop' })
   })
 
   it('reclama quando não há alvo', () => {
-    expect(resolveOpenTarget('', which([])).kind).toBe('error')
+    expect(resolveOpenTarget('', which([]), noApp).kind).toBe('error')
   })
 })
 

@@ -425,6 +425,236 @@ export function readCodeFile(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Navegação estilo agente: listar (glob), esboço (outline), referências e
+// substituição projeto-inteiro — ferramentas no espírito de Glob/Outline/Grep/
+// MultiEdit dos agentes de código (Claude Code/openclaude), adaptadas ao
+// protocolo falável do Ares: resultados compactos, contáveis e seguros.
+// ---------------------------------------------------------------------------
+
+/** Lista arquivos do projeto por padrão glob simples ("*.ts", "src/*"). */
+export function listCodeFiles(
+  cfg: AppConfig,
+  opts: { root?: string; pattern?: string; maxResults?: number } = {}
+): { root: string; pattern: string; files: string[]; total: number; truncated: boolean } {
+  const root = resolveCodeWorkspace(cfg, opts.root)
+  const pattern = String(opts.pattern || '').trim()
+  const maxResults = Math.max(1, Math.min(Number(opts.maxResults) || 80, 200))
+  const { files, timedOut } = walkFiles(root, 8, 2000)
+  const matched = pattern ? files.filter((f) => matchesFilter(f, pattern)) : files
+  return {
+    root,
+    pattern,
+    files: matched.slice(0, maxResults),
+    total: matched.length,
+    truncated: timedOut || matched.length > maxResults
+  }
+}
+
+export interface OutlineItem {
+  kind: string
+  name: string
+  line: number
+}
+
+type OutlinePattern = { re: RegExp; kind: string }
+
+const OUTLINE_TS: OutlinePattern[] = [
+  { re: /^\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+([A-Za-z_$][\w$]*)/, kind: 'class' },
+  { re: /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)/, kind: 'function' },
+  { re: /^\s*(?:export\s+)?interface\s+([A-Za-z_$][\w$]*)/, kind: 'interface' },
+  { re: /^\s*(?:export\s+)?type\s+([A-Za-z_$][\w$]*)\s*=/, kind: 'type' },
+  { re: /^\s*(?:export\s+)?(?:const\s+)?enum\s+([A-Za-z_$][\w$]*)/, kind: 'enum' },
+  // const fn = (...) => / const fn = async x =>
+  { re: /^\s*(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*(?::[^=]*)?=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*(?::[^=]*)?=>/, kind: 'function' }
+]
+const OUTLINE_PY: OutlinePattern[] = [
+  { re: /^\s*class\s+([A-Za-z_][\w]*)/, kind: 'class' },
+  { re: /^\s*(?:async\s+)?def\s+([A-Za-z_][\w]*)/, kind: 'function' }
+]
+const OUTLINE_GO: OutlinePattern[] = [
+  { re: /^func\s+(?:\([^)]*\)\s+)?([A-Za-z_][\w]*)/, kind: 'function' },
+  { re: /^type\s+([A-Za-z_][\w]*)/, kind: 'type' }
+]
+
+function outlinePatterns(ext: string): OutlinePattern[] {
+  if (['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue'].includes(ext)) return OUTLINE_TS
+  if (ext === '.py') return OUTLINE_PY
+  if (ext === '.go') return OUTLINE_GO
+  return OUTLINE_TS // heurística razoável para C-likes
+}
+
+/** Esboço de um arquivo: funções/classes/tipos com a linha onde começam. Pura. */
+export function outlineSource(content: string, ext: string): OutlineItem[] {
+  const patterns = outlinePatterns(String(ext || '').toLowerCase())
+  const items: OutlineItem[] = []
+  const lines = String(content || '').split(/\r?\n/)
+  for (let i = 0; i < lines.length && items.length < 120; i++) {
+    for (const { re, kind } of patterns) {
+      const m = lines[i].match(re)
+      if (m) {
+        items.push({ kind, name: m[1], line: i + 1 })
+        break
+      }
+    }
+  }
+  return items
+}
+
+/** Skill `codigo.esboco`: o "mapa" de um arquivo, para ir direto ao trecho certo. */
+export function outlineCodeFile(
+  cfg: AppConfig,
+  opts: { root?: string; file: string }
+): { root: string; file: string; totalLines: number; items: OutlineItem[] } {
+  const root = resolveCodeWorkspace(cfg, opts.root)
+  const abs = resolveCodeFile(cfg, root, String(opts.file || ''))
+  if (!existsSync(abs) || !statSync(abs).isFile()) throw new Error(`Arquivo não encontrado: ${opts.file}`)
+  const maxBytes = Math.max(1, codeConfig(cfg).maxFileKB) * 1024
+  if (!isLikelyText(abs, maxBytes)) throw new Error(`Arquivo muito grande ou binário: ${opts.file}`)
+  const content = readFileSync(abs, 'utf8')
+  return {
+    root,
+    file: relativeDisplayPath(root, abs),
+    totalLines: content.split(/\r?\n/).length,
+    items: outlineSource(content, extname(abs))
+  }
+}
+
+/** Onde um símbolo é usado no projeto (contagem por arquivo) — base para refatorar. */
+export function findCodeReferences(
+  cfg: AppConfig,
+  opts: { root?: string; symbol: string; maxResults?: number }
+): {
+  root: string
+  symbol: string
+  total: number
+  files: Array<{ file: string; count: number; line: number; sample: string }>
+  truncated: boolean
+} {
+  const root = resolveCodeWorkspace(cfg, opts.root)
+  const symbol = String(opts.symbol || '').trim()
+  if (symbol.length < 2 || !/^[\w$.]+$/.test(symbol)) {
+    throw new Error('Diga o nome do símbolo (função, classe, variável) a procurar.')
+  }
+  const maxResults = Math.max(1, Math.min(Number(opts.maxResults) || 40, 100))
+  const maxBytes = Math.max(1, codeConfig(cfg).maxFileKB) * 1024
+  const re = new RegExp(`\\b${symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`)
+  const { files, timedOut } = walkFiles(root, 8, 2000)
+  const out: Array<{ file: string; count: number; line: number; sample: string }> = []
+  const deadline = Date.now() + CODE_SCAN_TIMEOUT_MS
+  let total = 0
+  let clipped = false
+
+  for (const rel of files) {
+    if (Date.now() > deadline) {
+      clipped = true
+      break
+    }
+    const abs = resolveCodeFile(cfg, root, rel)
+    if (!isLikelyText(abs, maxBytes)) continue
+    const lines = readFileSync(abs, 'utf8').split(/\r?\n/)
+    let count = 0
+    let firstLine = 0
+    let sample = ''
+    for (let i = 0; i < lines.length; i++) {
+      if (re.test(lines[i])) {
+        count++
+        if (!firstLine) {
+          firstLine = i + 1
+          sample = lines[i].trim().slice(0, 200)
+        }
+      }
+    }
+    if (count > 0) {
+      total += count
+      if (out.length < maxResults) out.push({ file: rel, count, line: firstLine, sample })
+      else clipped = true
+    }
+  }
+
+  out.sort((a, b) => b.count - a.count)
+  return { root, symbol, total, files: out, truncated: timedOut || clipped }
+}
+
+const REPLACE_MAX_FILES = 40
+
+/**
+ * Substituição literal em TODO o projeto (refatoração por voz). Sem `apply`,
+ * devolve só a PRÉVIA (arquivos e contagens) para o usuário confirmar; com
+ * `apply`, exige "Permitir aplicar patches" e respeita os mesmos bloqueios de
+ * caminho sensível da edição. Limitada a ${REPLACE_MAX_FILES} arquivos por vez.
+ */
+export function replaceInProject(
+  cfg: AppConfig,
+  opts: { root?: string; find: string; replace: string; filter?: string; apply?: boolean }
+): {
+  root: string
+  find: string
+  replace: string
+  applied: boolean
+  totalMatches: number
+  files: Array<{ file: string; count: number }>
+  skipped: string[]
+  truncated: boolean
+} {
+  const root = resolveCodeWorkspace(cfg, opts.root)
+  const find = String(opts.find ?? '')
+  const replacement = String(opts.replace ?? '')
+  if (find.length < 2) throw new Error('Diga o texto a substituir (ao menos 2 caracteres).')
+  if (find === replacement) throw new Error('O texto novo é igual ao antigo — nada a fazer.')
+  if (opts.apply) ensureCanWrite(cfg)
+
+  const maxBytes = Math.max(1, codeConfig(cfg).maxFileKB) * 1024
+  const { files, timedOut } = walkFiles(root, 8, 2000)
+  const hits: Array<{ file: string; abs: string; count: number; next: string }> = []
+  const skipped: string[] = []
+  const deadline = Date.now() + CODE_SCAN_TIMEOUT_MS
+  let clipped = false
+
+  for (const rel of files) {
+    if (Date.now() > deadline) {
+      clipped = true
+      break
+    }
+    if (!matchesFilter(rel, opts.filter || '')) continue
+    const abs = resolveCodeFile(cfg, root, rel)
+    if (!isLikelyText(abs, maxBytes)) continue
+    const current = readFileSync(abs, 'utf8')
+    const count = current.split(find).length - 1
+    if (count === 0) continue
+    try {
+      assertSafeEditPath(rel)
+    } catch {
+      skipped.push(rel)
+      continue
+    }
+    if (hits.length >= REPLACE_MAX_FILES) {
+      clipped = true
+      break
+    }
+    hits.push({ file: rel, abs, count, next: current.split(find).join(replacement) })
+  }
+
+  if (opts.apply && clipped) {
+    throw new Error(
+      `Substituição atinge mais de ${REPLACE_MAX_FILES} arquivos ou o projeto é muito grande. Restrinja com um filtro (ex.: "src/*.ts").`
+    )
+  }
+  if (opts.apply) {
+    for (const h of hits) writeFileSync(h.abs, h.next, 'utf8')
+  }
+  return {
+    root,
+    find,
+    replace: replacement,
+    applied: !!opts.apply && hits.length > 0,
+    totalMatches: hits.reduce((n, h) => n + h.count, 0),
+    files: hits.map((h) => ({ file: h.file, count: h.count })),
+    skipped,
+    truncated: timedOut || clipped
+  }
+}
+
 type TextMatch = { start: number; end: number; strategy: string }
 
 function lineOffsets(content: string): number[] {
