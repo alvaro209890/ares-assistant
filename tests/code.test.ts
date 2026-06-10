@@ -123,6 +123,37 @@ describe('ferramentas locais de programação', () => {
     expect(summary.hints).toContain('teste disponível: npm run test')
   })
 
+  it('resume workspace geospacial/SIG com integridade de shapefiles', () => {
+    const gisRoot = mkdtempSync(join(tmpdir(), 'ares-gis-test-'))
+    const cfg = config()
+    cfg.integrations.code.workspaceRoot = gisRoot
+    cfg.integrations.code.allowedRoots = [gisRoot]
+
+    // Criamos shapefile saudável: AREA_CONSOLIDADA (.shp, .shx, .dbf, .prj)
+    writeFileSync(join(gisRoot, 'AREA_CONSOLIDADA.shp'), 'shp geometry')
+    writeFileSync(join(gisRoot, 'AREA_CONSOLIDADA.shx'), 'shx index')
+    writeFileSync(join(gisRoot, 'AREA_CONSOLIDADA.dbf'), 'dbf attributes')
+    writeFileSync(join(gisRoot, 'AREA_CONSOLIDADA.prj'), 'prj projection')
+
+    // Criamos shapefile incompleto: AREA_UMIDA (só .shp)
+    writeFileSync(join(gisRoot, 'AREA_UMIDA.shp'), 'shp geometry')
+
+    // Criamos shapefile sem projeção: DECLIVIDADE (.shp, .shx, .dbf mas sem .prj)
+    writeFileSync(join(gisRoot, 'DECLIVIDADE.shp'), 'shp geometry')
+    writeFileSync(join(gisRoot, 'DECLIVIDADE.shx'), 'shx index')
+    writeFileSync(join(gisRoot, 'DECLIVIDADE.dbf'), 'dbf attributes')
+
+    const summary = summarizeCodeWorkspace(cfg)
+    expect(summary.exists).toBe(true)
+    expect(summary.hints).toContain('projeto SIG/Geospacial detectado')
+    expect(summary.hints).toContain('3 shapefile(s) detectado(s)')
+    expect(summary.health?.ok).toBe(false)
+    expect(summary.health?.signals).toContain("shapefile 'AREA_UMIDA' incompleto (falta .shx, .dbf)")
+    expect(summary.health?.signals).toContain("shapefile 'DECLIVIDADE' sem arquivo de projeção (.prj)")
+
+    rmSync(gisRoot, { recursive: true, force: true })
+  })
+
   it('busca texto no código com filtro e limite', () => {
     const result = searchCode(config(), { query: 'greet', filter: '*.ts', maxResults: 10 })
 

@@ -311,6 +311,67 @@ function walkFiles(
   return { files, ignored, languages, timedOut }
 }
 
+interface GeospatialReport {
+  isGIS: boolean
+  shapefilesCount: number
+  missingMandatory: string[]
+  missingPrj: string[]
+}
+
+function checkGeospatialHealth(files: string[]): GeospatialReport {
+  const gisExtensions = new Set([
+    '.shp', '.shx', '.dbf', '.prj', '.mxd', '.qgs', '.qgz', '.gpkg',
+    '.kml', '.kmz', '.geojson', '.tif', '.tiff', '.dxf', '.dwg'
+  ])
+  let isGIS = false
+  const shapefilesMap = new Map<string, { shp?: boolean; shx?: boolean; dbf?: boolean; prj?: boolean }>()
+
+  for (const f of files) {
+    const ext = extname(f).toLowerCase()
+    if (gisExtensions.has(ext)) {
+      isGIS = true
+    }
+    if (['.shp', '.shx', '.dbf', '.prj'].includes(ext)) {
+      const baseKey = f.slice(0, -ext.length)
+      if (!shapefilesMap.has(baseKey)) {
+        shapefilesMap.set(baseKey, {})
+      }
+      const item = shapefilesMap.get(baseKey)!
+      if (ext === '.shp') item.shp = true
+      else if (ext === '.shx') item.shx = true
+      else if (ext === '.dbf') item.dbf = true
+      else if (ext === '.prj') item.prj = true
+    }
+  }
+
+  const missingMandatory: string[] = []
+  const missingPrj: string[] = []
+  let shapefilesCount = 0
+
+  for (const [baseKey, parts] of shapefilesMap.entries()) {
+    if (!parts.shp && !parts.shx && !parts.dbf && !parts.prj) continue
+    shapefilesCount++
+    const basenameOnly = basename(baseKey)
+    const missingParts: string[] = []
+    if (!parts.shp) missingParts.push('.shp')
+    if (!parts.shx) missingParts.push('.shx')
+    if (!parts.dbf) missingParts.push('.dbf')
+
+    if (missingParts.length > 0) {
+      missingMandatory.push(`shapefile '${basenameOnly}' incompleto (falta ${missingParts.join(', ')})`)
+    } else if (!parts.prj) {
+      missingPrj.push(`shapefile '${basenameOnly}' sem arquivo de projeção (.prj)`)
+    }
+  }
+
+  return {
+    isGIS: isGIS || shapefilesCount > 0,
+    shapefilesCount,
+    missingMandatory,
+    missingPrj
+  }
+}
+
 export function summarizeCodeWorkspace(cfg: AppConfig, requested = ''): CodeWorkspaceSummary {
   const root = resolveCodeWorkspace(cfg, requested)
   const name = basename(root)
@@ -323,21 +384,43 @@ export function summarizeCodeWorkspace(cfg: AppConfig, requested = ''): CodeWork
   const status = git(root, ['status', '--short'])
   const pkg = packageInfo(root)
   const hints: string[] = []
-  if (pkg.scripts?.test) hints.push(`teste disponível: ${pkg.packageManager || 'npm'} run test`)
-  if (pkg.scripts?.verify) hints.push(`verificação completa: ${pkg.packageManager || 'npm'} run verify`)
-  if (pkg.scripts?.build) hints.push(`build disponível: ${pkg.packageManager || 'npm'} run build`)
-  if (files.some((f) => f.endsWith('tsconfig.json'))) hints.push('TypeScript detectado')
-  if (files.some((f) => f.endsWith('electron.vite.config.ts'))) hints.push('Electron + Vite detectado')
+
+  const geo = checkGeospatialHealth(files)
+
+  if (geo.isGIS) {
+    hints.push('projeto SIG/Geospacial detectado')
+    if (geo.shapefilesCount > 0) hints.push(`${geo.shapefilesCount} shapefile(s) detectado(s)`)
+    if (files.some((f) => f.endsWith('.mxd'))) hints.push('projeto ArcGIS (.mxd) detectado')
+    if (files.some((f) => f.endsWith('.qgs') || f.endsWith('.qgz'))) hints.push('projeto QGIS (.qgs/.qgz) detectado')
+  } else {
+    if (pkg.scripts?.test) hints.push(`teste disponível: ${pkg.packageManager || 'npm'} run test`)
+    if (pkg.scripts?.verify) hints.push(`verificação completa: ${pkg.packageManager || 'npm'} run verify`)
+    if (pkg.scripts?.build) hints.push(`build disponível: ${pkg.packageManager || 'npm'} run build`)
+    if (files.some((f) => f.endsWith('tsconfig.json'))) hints.push('TypeScript detectado')
+    if (files.some((f) => f.endsWith('electron.vite.config.ts'))) hints.push('Electron + Vite detectado')
+  }
   if (timedOut) hints.push('analise parcial: limite de tempo atingido para manter a voz responsiva')
 
-  const hasPackage = files.some((f) => f === 'package.json')
-  const health = structuralHealth({
-    dirty: !!status,
-    hasPackage,
-    hasTestScript: !!pkg.scripts?.test,
-    hasLockfile: files.some((f) => /(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb)$/.test(f)),
-    timedOut
-  })
+  let health: ProjectHealth
+  if (geo.isGIS) {
+    const signals: string[] = []
+    if (status) signals.push('há alterações de dados sem commit')
+    signals.push(...geo.missingMandatory)
+    signals.push(...geo.missingPrj)
+    if (timedOut) signals.push('análise parcial: projeto grande')
+
+    const label = signals.length ? `pontos de atenção no projeto SIG: ${signals.join('; ')}` : 'repositório de dados SIG em ordem'
+    health = { ok: geo.missingMandatory.length === 0, label, signals }
+  } else {
+    const hasPackage = files.some((f) => f === 'package.json')
+    health = structuralHealth({
+      dirty: !!status,
+      hasPackage,
+      hasTestScript: !!pkg.scripts?.test,
+      hasLockfile: files.some((f) => /(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb)$/.test(f)),
+      timedOut
+    })
+  }
 
   return {
     root,
