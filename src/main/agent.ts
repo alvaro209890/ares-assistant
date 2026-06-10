@@ -266,12 +266,17 @@ ENCADEAMENTO: após receber os resultados, você PODE chamar novas ferramentas d
 - codigo.patch.preview {path?, diff?, patches?}   (valida e resume patch antes de aplicar; use sempre antes de aplicação)
 - codigo.patch.aplicar {path?, diff?, patches?}   (aplica patch apenas se habilitado e já confirmado pelo usuário)
 
-COLMEIA (sua equipe de subagentes especialistas — você é o gerente):
-Para tarefas GRANDES ou que pedem profundidade, delegue a um especialista e depois SINTETIZE o relatório dele em sua fala (nunca leia o relatório inteiro). Use "contexto" para passar o que você já sabe do turno. Na fala da rodada, anuncie a delegação ("Vou acionar o Investigador.").
-- subagente.pesquisar {objetivo, consulta?, url?, contexto?}   (INVESTIGADOR: pesquisa profunda na web/documentação e devolve só fatos com fonte — use para "pesquise a fundo", comparações, estado da arte, documentação de biblioteca)
-- subagente.construir {objetivo, path?, contexto?}   (CONSTRUTOR: projeta a implementação — arquivos, código pronto e ordem de aplicação — use ANTES de mudanças grandes em código; depois aplique você mesmo com codigo.criar/editar/patch)
-- subagente.auditar {objetivo, path?, contexto?}   (CRÍTICO: roda o diagnóstico do projeto e emite parecer rigoroso com problemas reais e veredito — use após mudanças do Construtor ou quando pedirem revisão/qualidade)
-Para perguntas simples ou ações diretas, NÃO use a colmeia: responda ou use as ferramentas comuns.
+COLMEIA (sua equipe de especialistas — você é o gerente; eles têm nome e o usuário os conhece):
+- subagente.pesquisar {objetivo, consulta?, url?, contexto?}   (ATENA, a investigadora: pesquisa profunda na web/documentação e devolve só fatos com fonte — use para "pesquise a fundo", comparações, estado da arte, docs de biblioteca, decisões que dependem de informação externa)
+- subagente.construir {objetivo, path?, contexto?}   (HEFESTO, o construtor: projeta a implementação — arquivos, código pronto e ordem de aplicação — use ANTES de mudanças grandes/multiarquivo em código; depois aplique você mesmo com codigo.criar/editar/patch)
+- subagente.auditar {objetivo, path?, contexto?}   (TÊMIS, a auditora: roda o diagnóstico do projeto e emite parecer rigoroso com problemas reais e veredito APROVADO/REPROVADO — use após aplicar mudanças, antes de entregar trabalho grande, ou quando pedirem revisão/qualidade)
+COMO USAR A EQUIPE:
+- ESCOLHA pelo tipo de tarefa: falta informação externa -> Atena; projetar/escrever código grande -> Hefesto; validar/julgar qualidade -> Têmis. Tarefa simples ou ação direta: NÃO use a colmeia.
+- ENCADEIE como um gerente: o relatório de um especialista vira o "contexto" do próximo (ex.: Atena pesquisa a biblioteca -> passe o essencial em contexto para Hefesto projetar -> você aplica com codigo.criar/editar -> Têmis audita o resultado).
+- Em "contexto" passe SEMPRE o que você já sabe do turno (path do projeto, decisões, restrições do usuário) — o especialista não vê a conversa.
+- Na fala da rodada, anuncie a delegação pelo NOME, em uma frase natural ("Vou pedir para a Atena investigar isso." / "Hefesto vai desenhar a mudança." / "Têmis fará a revisão final.").
+- Ao receber o relatório, SINTETIZE em sua fala citando o especialista ("Atena confirmou que...", "Têmis aprovou com uma ressalva..."); nunca leia o relatório inteiro nem o cole na fala.
+- Se o usuário pedir "use a equipe", "pesquisa completa", "trabalho caprichado" ou algo claramente grande, prefira a colmeia mesmo que pudesse fazer sozinho.
 
 MODO PROGRAMADOR:
 - Para perguntas de código, não chute: use codigo.workspace/codigo.buscar/codigo.ler quando houver path, arquivo, símbolo ou repo mencionado.
@@ -909,8 +914,16 @@ async function runQuery(
           a.tipo === 'subagente.pesquisar' ? RESEARCHER : a.tipo === 'subagente.construir' ? ENGINEER : AUDITOR
         const goal = String(a.objetivo || a.tarefa || a.consulta || a.texto || '').trim()
         if (!goal) return done({ tipo: a.tipo, erro: 'Diga o objetivo da tarefa para o subagente.' })
+        const gatherDetail =
+          profile.id === 'researcher'
+            ? 'Reunindo fontes na web...'
+            : profile.id === 'engineer'
+              ? 'Mapeando o projeto...'
+              : 'Rodando o diagnóstico do projeto...'
         const r = await beating(
           (async () => {
+            // Balões da Colmeia em etapas: coletando material -> analisando -> entregue.
+            onHive?.({ id: profile.id, label: profile.label, phase: 'thinking', detail: gatherDetail, updatedAt: Date.now() })
             const task: SubagentTask = {
               goal,
               context: a.contexto ? String(a.contexto) : undefined,
@@ -965,6 +978,19 @@ function proactiveCodeFollowup(
   cfg: AppConfig,
   results: unknown[]
 ): { instruction: string; note: string } | null {
+  // Fluxo da colmeia: plano do Hefesto entregue -> oferecer aplicar e, depois de
+  // aplicar de verdade, sugerir a auditoria da Têmis.
+  const built = results.find((r) => {
+    const o = r as { tipo?: string; resultado?: { ok?: boolean } }
+    return o?.tipo === 'subagente.construir' && o.resultado?.ok === true
+  })
+  if (built) {
+    return {
+      instruction:
+        'PROATIVIDADE DA COLMEIA: o Hefesto entregou o plano. Resuma-o em 1-2 frases e ofereça aplicá-lo (codigo.criar/editar/patch). Depois que as mudanças forem aplicadas, sugira acionar a Têmis (subagente.auditar) para validar.',
+      note: 'plano do Hefesto pronto: aplicar e auditar com Têmis'
+    }
+  }
   const ok = results.find((r) => {
     const o = r as { tipo?: string; resultado?: { applied?: boolean; created?: unknown[] } }
     if (o?.tipo === 'codigo.patch.aplicar') return o.resultado?.applied === true
@@ -1122,10 +1148,10 @@ function codeActivityMeta(a: Acao): ActivityMeta | null {
     const goal = String(a.objetivo || a.tarefa || a.consulta || '').slice(0, 120) || undefined
     const title =
       tipo === 'subagente.pesquisar'
-        ? 'Investigador pesquisando'
+        ? 'Atena investigando'
         : tipo === 'subagente.construir'
-          ? 'Construtor projetando'
-          : 'Crítico auditando'
+          ? 'Hefesto projetando'
+          : 'Têmis auditando'
     return { id: uid('act'), kind: 'hive', title, detail: goal }
   }
   if (!tipo.startsWith('codigo.')) return null

@@ -51,7 +51,7 @@ export async function executeSubagentTask(
   const emit = (phase: HiveWorkerStatus['phase'], detail?: string): void =>
     onStatus?.({ id: profile.id, label: profile.label, phase, detail, updatedAt: Date.now() })
 
-  emit('thinking', task.goal.slice(0, 120))
+  emit('thinking', `Analisando: ${task.goal.slice(0, 100)}`)
   const messages: ChatMessage[] = [
     { role: 'system', content: profile.systemPrompt },
     { role: 'user', content: buildTaskPrompt(task) }

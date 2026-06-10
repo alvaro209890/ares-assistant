@@ -1,26 +1,86 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import type { AresState, HiveWorkerStatus, SubagentId, WorkerPhase } from '../../shared/types'
 
-// Dashboard da Colmeia: Ares (Manager) no topo orquestrando os três especialistas
-// (Workers). Linhas de conexão animadas mostram a informação fluindo quando um
-// subagente está trabalhando. CSS/SVG puro — sem canvas.
+// Dashboard da Colmeia: o Ares (gerente) no topo e os três especialistas em
+// fileira vertical, cada um com avatar, cor própria e um BALÃO de fala que
+// mostra o que está fazendo agora. CSS/SVG puro — sem canvas.
 
 const PHASE_LABEL: Record<WorkerPhase, string> = {
-  idle: 'Ocioso',
-  thinking: 'Trabalhando',
-  done: 'Relatório entregue',
-  error: 'Falha'
+  idle: 'em prontidão',
+  thinking: 'trabalhando',
+  done: 'relatório entregue',
+  error: 'falha'
 }
 
-const PHASE_STYLE: Record<WorkerPhase, { card: string; dot: string; text: string }> = {
-  idle: { card: 'border-cyan-300/12 bg-white/[0.03]', dot: 'bg-cyan-200/30', text: 'text-cyan-200/45' },
-  thinking: { card: 'border-amber-300/50 bg-amber-400/10 shadow-glow', dot: 'bg-amber-300', text: 'text-amber-200' },
-  done: { card: 'border-emerald-300/40 bg-emerald-400/8', dot: 'bg-emerald-300', text: 'text-emerald-200' },
-  error: { card: 'border-red-400/45 bg-red-500/10', dot: 'bg-red-400', text: 'text-red-200' }
+// Identidade visual de cada especialista (classes Tailwind estáticas).
+const AGENT_META: Record<
+  SubagentId,
+  {
+    name: string
+    role: string
+    initial: string
+    ring: string // anel do avatar
+    avatarBg: string
+    accentText: string
+    activeCard: string
+    bubble: string
+    bubbleTail: string
+    idleBubble: string
+  }
+> = {
+  researcher: {
+    name: 'Atena',
+    role: 'Investigadora · pesquisa e fatos',
+    initial: 'A',
+    ring: 'border-violet-300/60',
+    avatarBg: 'from-violet-400/30 to-fuchsia-500/10 text-violet-100',
+    accentText: 'text-violet-200',
+    activeCard: 'border-violet-300/50 bg-violet-400/10 shadow-glow',
+    bubble: 'border-violet-300/35 bg-violet-400/12 text-violet-100',
+    bubbleTail: 'border-violet-300/35 bg-[#120b22]',
+    idleBubble: 'Aguardando uma investigação, senhor.'
+  },
+  engineer: {
+    name: 'Hefesto',
+    role: 'Construtor · forja o código',
+    initial: 'H',
+    ring: 'border-amber-300/60',
+    avatarBg: 'from-amber-400/30 to-orange-500/10 text-amber-100',
+    accentText: 'text-amber-200',
+    activeCard: 'border-amber-300/50 bg-amber-400/10 shadow-glow',
+    bubble: 'border-amber-300/35 bg-amber-400/12 text-amber-100',
+    bubbleTail: 'border-amber-300/35 bg-[#1c1208]',
+    idleBubble: 'Forja acesa. Pronto para construir.'
+  },
+  auditor: {
+    name: 'Têmis',
+    role: 'Auditora · qualidade e veredito',
+    initial: 'T',
+    ring: 'border-emerald-300/60',
+    avatarBg: 'from-emerald-400/30 to-teal-500/10 text-emerald-100',
+    accentText: 'text-emerald-200',
+    activeCard: 'border-emerald-300/50 bg-emerald-400/10 shadow-glow',
+    bubble: 'border-emerald-300/35 bg-emerald-400/12 text-emerald-100',
+    bubbleTail: 'border-emerald-300/35 bg-[#081a14]',
+    idleBubble: 'A balança está calibrada.'
+  }
 }
 
-// Posição horizontal (em %) do centro de cada card de worker, para as linhas SVG.
-const WORKER_X: Record<SubagentId, number> = { researcher: 17, engineer: 50, auditor: 83 }
+const PHASE_DOT: Record<WorkerPhase, string> = {
+  idle: 'bg-cyan-200/30',
+  thinking: 'bg-amber-300',
+  done: 'bg-emerald-300',
+  error: 'bg-red-400'
+}
+
+/** Texto do balão conforme a fase: detalhe real do trabalho ou frase de prontidão. */
+export function bubbleText(w: HiveWorkerStatus): string {
+  if (w.phase === 'idle') return AGENT_META[w.id]?.idleBubble ?? 'Em prontidão.'
+  if (w.detail) return w.detail
+  if (w.phase === 'thinking') return 'Trabalhando nisso agora...'
+  if (w.phase === 'done') return 'Relatório entregue ao Ares.'
+  return 'Algo deu errado nesta tarefa.'
+}
 
 export default function HiveDashboard({
   workers,
@@ -34,80 +94,118 @@ export default function HiveDashboard({
 
   return (
     <div className="relative">
-      {/* Ares — o gerente da colmeia */}
-      <div className="relative z-10 flex justify-center">
-        <div
-          className={`flex items-center gap-3 rounded-2xl border px-5 py-3 backdrop-blur transition ${
-            busy ? 'border-cyan-300/50 bg-cyan-400/12 shadow-glow' : 'border-cyan-300/20 bg-white/[0.04]'
+      {/* Ares — o gerente */}
+      <div
+        className={`relative z-10 flex items-center gap-3 rounded-2xl border px-4 py-3 backdrop-blur transition ${
+          busy ? 'border-cyan-300/50 bg-cyan-400/12 shadow-glow' : 'border-cyan-300/20 bg-white/[0.04]'
+        }`}
+      >
+        <span className="relative flex h-11 w-11 shrink-0 items-center justify-center">
+          <span className={`absolute inset-0 rounded-full border border-cyan-300/55 ${busy ? 'animate-ping' : 'animate-pulse-ring'}`} />
+          <span className="absolute inset-[7px] rounded-full bg-cyan-300 shadow-glow" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block font-display text-lg text-cyan-100 neon-text">ARES</span>
+          <span className="block truncate text-[11px] text-cyan-200/55">Gerente · delega, acompanha e sintetiza</span>
+        </span>
+        <span
+          className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] title-track ${
+            anyActive
+              ? 'border-amber-300/45 bg-amber-400/10 text-amber-200'
+              : busy
+                ? 'border-cyan-300/40 bg-cyan-400/10 text-cyan-100'
+                : 'border-cyan-300/15 text-cyan-200/45'
           }`}
         >
-          <span className="relative flex h-9 w-9 items-center justify-center">
-            <span className={`absolute inset-0 rounded-full border border-cyan-300/55 ${busy ? 'animate-ping' : 'animate-pulse-ring'}`} />
-            <span className="absolute inset-2 rounded-full bg-cyan-300 shadow-glow" />
-          </span>
-          <span>
-            <span className="block font-display text-base text-cyan-100 neon-text">ARES</span>
-            <span className="block text-[11px] text-cyan-200/55">
-              {anyActive ? 'Orquestrando a equipe' : busy ? 'Trabalhando' : 'Gerente em prontidão'}
-            </span>
-          </span>
-        </div>
+          {anyActive ? 'ORQUESTRANDO' : busy ? 'TRABALHANDO' : 'PRONTIDÃO'}
+        </span>
       </div>
 
-      {/* Linhas de conexão Ares -> workers (fluxo animado quando ativo) */}
-      <svg className="pointer-events-none relative z-0 -my-1 h-12 w-full" viewBox="0 0 100 24" preserveAspectRatio="none">
+      {/* A equipe, ligada ao Ares por um trilho com fluxo animado */}
+      <div className="relative mt-4 space-y-4 pl-7">
+        <span className="pointer-events-none absolute bottom-10 left-[13px] top-[-10px] w-px bg-gradient-to-b from-cyan-300/45 via-cyan-300/15 to-transparent" />
         {workers.map((w) => {
+          const meta = AGENT_META[w.id] ?? AGENT_META.researcher
           const active = w.phase === 'thinking'
-          const x = WORKER_X[w.id] ?? 50
           return (
-            <path
-              key={w.id}
-              d={`M 50 0 C 50 14, ${x} 8, ${x} 24`}
-              fill="none"
-              stroke={active ? 'rgba(251,191,36,0.75)' : 'rgba(103,232,249,0.16)'}
-              strokeWidth={active ? 1.1 : 0.6}
-              strokeDasharray={active ? '3 2.4' : '1 2.6'}
-              className={active ? 'hive-flow' : undefined}
-            />
-          )
-        })}
-      </svg>
+            <div key={w.id} className="relative">
+              {/* Conector cotovelo: anima quando a informação está fluindo */}
+              <svg className="pointer-events-none absolute left-[-15px] top-7 h-2 w-4 overflow-visible" viewBox="0 0 16 8">
+                <path
+                  d="M 1 0 Q 1 7, 15 7"
+                  fill="none"
+                  stroke={active ? 'rgba(251,191,36,0.8)' : 'rgba(103,232,249,0.22)'}
+                  strokeWidth={active ? 1.6 : 1}
+                  strokeDasharray={active ? '3 2.4' : undefined}
+                  className={active ? 'hive-flow' : undefined}
+                />
+              </svg>
 
-      {/* Os especialistas */}
-      <div className="grid grid-cols-3 gap-3">
-        {workers.map((w) => {
-          const s = PHASE_STYLE[w.phase]
-          return (
-            <div key={w.id} className={`min-w-0 rounded-xl border px-3 py-2.5 transition ${s.card}`}>
-              <div className="flex items-center gap-2">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-current/15 text-cyan-100">
-                  <WorkerIcon id={w.id} />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm text-cyan-50">{w.label}</span>
-                  <span className={`flex items-center gap-1.5 text-[10px] ${s.text}`}>
+              <div className={`rounded-2xl border px-3.5 py-3 transition ${active ? meta.activeCard : 'border-cyan-300/12 bg-white/[0.03]'}`}>
+                <div className="flex items-center gap-3">
+                  {/* Avatar */}
+                  <span className="relative flex h-11 w-11 shrink-0 items-center justify-center">
                     <motion.span
-                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${s.dot}`}
-                      animate={w.phase === 'thinking' ? { opacity: [1, 0.25, 1] } : { opacity: 1 }}
-                      transition={w.phase === 'thinking' ? { duration: 1, repeat: Infinity } : undefined}
+                      className={`absolute inset-0 rounded-full border ${meta.ring}`}
+                      animate={active ? { scale: [1, 1.12, 1], opacity: [0.9, 0.5, 0.9] } : { scale: 1, opacity: 0.55 }}
+                      transition={active ? { duration: 1.4, repeat: Infinity } : undefined}
                     />
-                    {PHASE_LABEL[w.phase]}
+                    <span className={`flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br font-display text-base ${meta.avatarBg}`}>
+                      {meta.initial}
+                    </span>
                   </span>
-                </span>
-              </div>
-              <AnimatePresence>
-                {w.detail && w.phase !== 'idle' && (
+
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-baseline gap-2">
+                      <span className="font-display text-base text-cyan-50">{meta.name}</span>
+                      <span className={`flex items-center gap-1.5 text-[10px] ${w.phase === 'error' ? 'text-red-300' : meta.accentText}`}>
+                        <motion.span
+                          className={`h-1.5 w-1.5 rounded-full ${PHASE_DOT[w.phase]}`}
+                          animate={active ? { opacity: [1, 0.25, 1] } : { opacity: 1 }}
+                          transition={active ? { duration: 1, repeat: Infinity } : undefined}
+                        />
+                        {PHASE_LABEL[w.phase]}
+                      </span>
+                    </span>
+                    <span className="block truncate text-[11px] text-cyan-200/45">{meta.role}</span>
+                  </span>
+                </div>
+
+                {/* Balão de fala */}
+                <AnimatePresence mode="wait">
                   <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className={`mt-1.5 truncate text-[11px] ${s.text}`}
-                    title={w.detail}
+                    key={`${w.phase}-${w.detail ?? ''}`}
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 2 }}
+                    transition={{ duration: 0.18 }}
+                    className="relative ml-12 mt-2.5"
                   >
-                    {w.detail}
+                    <span
+                      className={`absolute -top-[5px] left-4 h-2.5 w-2.5 rotate-45 border-l border-t ${
+                        w.phase === 'error'
+                          ? 'border-red-400/40 bg-[#1a0a10]'
+                          : w.phase === 'idle'
+                            ? 'border-cyan-300/15 bg-[#070d1a]'
+                            : meta.bubbleTail
+                      }`}
+                    />
+                    <div
+                      className={`rounded-xl border px-3 py-1.5 text-[11.5px] leading-snug ${
+                        w.phase === 'error'
+                          ? 'border-red-400/40 bg-red-500/10 text-red-200'
+                          : w.phase === 'idle'
+                            ? 'border-cyan-300/15 bg-black/25 text-cyan-200/45 italic'
+                            : meta.bubble
+                      }`}
+                      title={w.detail || undefined}
+                    >
+                      <span className="line-clamp-2">{bubbleText(w)}</span>
+                      {active && <ThinkingDots />}
+                    </div>
                   </motion.div>
-                )}
-              </AnimatePresence>
+                </AnimatePresence>
+              </div>
             </div>
           )
         })}
@@ -116,26 +214,17 @@ export default function HiveDashboard({
   )
 }
 
-function WorkerIcon({ id }: { id: SubagentId }): JSX.Element {
-  if (id === 'researcher') {
-    return (
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
-        <circle cx="11" cy="11" r="7" />
-        <path d="M21 21l-4.3-4.3M8 11h6M11 8v6" strokeLinecap="round" />
-      </svg>
-    )
-  }
-  if (id === 'engineer') {
-    return (
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
-        <path d="M8 6l-5 6 5 6M16 6l5 6-5 6M13 4l-2 16" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    )
-  }
+function ThinkingDots(): JSX.Element {
   return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
-      <path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4z" strokeLinejoin="round" />
-      <path d="M9 12l2 2 4-4" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+    <span className="ml-1 inline-flex gap-0.5 align-baseline">
+      {[0, 1, 2].map((i) => (
+        <motion.span
+          key={i}
+          className="inline-block h-1 w-1 rounded-full bg-current"
+          animate={{ opacity: [0.2, 1, 0.2] }}
+          transition={{ duration: 1, repeat: Infinity, delay: i * 0.22 }}
+        />
+      ))}
+    </span>
   )
 }

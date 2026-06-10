@@ -60,9 +60,9 @@ type Screen = 'assistant' | 'office' | 'tasks' | 'calendar' | 'reminders' | 'lis
 
 // Estado inicial da Colmeia: os três especialistas ociosos.
 export const HIVE_IDLE: HiveWorkerStatus[] = [
-  { id: 'researcher', label: 'Investigador', phase: 'idle', updatedAt: 0 },
-  { id: 'engineer', label: 'Construtor', phase: 'idle', updatedAt: 0 },
-  { id: 'auditor', label: 'Crítico', phase: 'idle', updatedAt: 0 }
+  { id: 'researcher', label: 'Atena', phase: 'idle', updatedAt: 0 },
+  { id: 'engineer', label: 'Hefesto', phase: 'idle', updatedAt: 0 },
+  { id: 'auditor', label: 'Têmis', phase: 'idle', updatedAt: 0 }
 ]
 
 /** Aplica uma atualização de status de subagente à lista da Colmeia. Pura e testável. */
