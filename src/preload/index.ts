@@ -11,6 +11,7 @@ import type {
   ChatSession,
   Checklist,
   DiagnosticsResult,
+  HiveWorkerStatus,
   MemoryCategory,
   MemoryFact,
   NewsItem,
@@ -89,6 +90,12 @@ const api = {
       const listener = (_e: unknown, data: AgentActivityEvent) => cb(data)
       ipcRenderer.on('chat:activity', listener)
       return () => ipcRenderer.removeListener('chat:activity', listener)
+    },
+    // Status em tempo real dos subagentes da Colmeia (aba Escritório).
+    onHive: (cb: (status: HiveWorkerStatus) => void): (() => void) => {
+      const listener = (_e: unknown, status: HiveWorkerStatus) => cb(status)
+      ipcRenderer.on('agent:hive-update', listener)
+      return () => ipcRenderer.removeListener('agent:hive-update', listener)
     }
   },
   code: {

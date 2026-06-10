@@ -489,3 +489,13 @@ body.simple .ares-orb-reticle {
 body.simple .ares-office-wrapper {
   display: none;
 }
+
+/* Colmeia (aba Escritório): fluxo animado na linha Ares -> subagente ativo */
+.hive-flow {
+  animation: hive-flow 0.9s linear infinite;
+}
+@keyframes hive-flow {
+  to {
+    stroke-dashoffset: -5.4;
+  }
+}

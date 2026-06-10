@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentActivityEvent } from '../src/shared/types'
-import { finalSpeechFallback, mergeActivityEvent } from '../src/renderer/lib/store'
+import { HIVE_IDLE, finalSpeechFallback, mergeActivityEvent, mergeHiveStatus } from '../src/renderer/lib/store'
 
 describe('renderer store — fallback de fala final', () => {
   it('usa falaVoz quando a fase 2 nao enfileirou audio', () => {
@@ -45,5 +45,32 @@ describe('renderer store — fallback de fala final', () => {
     expect(merged).toHaveLength(2)
     expect(merged[0].status).toBe('done')
     expect(merged[1].status).toBe('output')
+  })
+})
+
+describe('renderer store — Colmeia (mergeHiveStatus)', () => {
+
+  it('começa com os três especialistas ociosos', () => {
+    expect(HIVE_IDLE.map((w) => w.id)).toEqual(['researcher', 'engineer', 'auditor'])
+    expect(HIVE_IDLE.every((w) => w.phase === 'idle')).toBe(true)
+  })
+
+  it('atualiza o worker certo preservando os demais', () => {
+    const next = mergeHiveStatus(HIVE_IDLE, {
+      id: 'engineer',
+      label: 'Construtor',
+      phase: 'thinking',
+      detail: 'Projetando módulo',
+      updatedAt: 123
+    })
+    expect(next.find((w) => w.id === 'engineer')?.phase).toBe('thinking')
+    expect(next.find((w) => w.id === 'researcher')?.phase).toBe('idle')
+    expect(next).toHaveLength(3)
+    expect(HIVE_IDLE.find((w) => w.id === 'engineer')?.phase).toBe('idle') // imutável
+  })
+
+  it('worker desconhecido é acrescentado (tolerante a versões futuras)', () => {
+    const next = mergeHiveStatus([], { id: 'auditor', label: 'Crítico', phase: 'done', updatedAt: 1 })
+    expect(next).toHaveLength(1)
   })
 })

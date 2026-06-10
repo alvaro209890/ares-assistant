@@ -8,6 +8,7 @@ import Onboarding from './components/Onboarding'
 import Help from './components/Help'
 import CommandPalette from './components/CommandPalette'
 import Assistant from './screens/Assistant'
+import Office from './screens/Office'
 import Tasks from './screens/Tasks'
 import Calendar from './screens/Calendar'
 import Reminders from './screens/Reminders'
@@ -31,6 +32,7 @@ export default function App(): JSX.Element {
           <main className="main-scroll min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
             <AnimatePresence mode="wait">
               {screen === 'assistant' && <Assistant key="a" />}
+              {screen === 'office' && <Office key="o" />}
               {screen === 'tasks' && <Tasks key="t" />}
               {screen === 'calendar' && <Calendar key="c" />}
               {screen === 'reminders' && <Reminders key="r" />}

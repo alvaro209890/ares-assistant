@@ -212,6 +212,9 @@ function registerIpc(): void {
       },
       (activity) => {
         if (!event.sender.isDestroyed()) event.sender.send('chat:activity', activity)
+      },
+      (status) => {
+        if (!event.sender.isDestroyed()) event.sender.send('agent:hive-update', status)
       }
     )
   })

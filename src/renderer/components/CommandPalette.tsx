@@ -85,7 +85,9 @@ export default function CommandPalette(): JSX.Element {
       go('reminders', 'Lembretes', 'Alt+4'),
       go('lists', 'Listas e notas', 'Alt+5'),
       go('memory', 'Memória', 'Alt+6'),
-      go('system', 'Sistema / Diagnóstico', 'Alt+7'),
+      go('models', 'Modelos de IA', 'Alt+7'),
+      go('system', 'Sistema / Diagnóstico', 'Alt+8'),
+      go('office', 'Escritório (Colmeia de subagentes)', 'Alt+9'),
       {
         id: 'act-briefing',
         group: 'Ações',

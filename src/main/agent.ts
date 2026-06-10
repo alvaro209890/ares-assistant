@@ -100,6 +100,16 @@ import {
   replaceInProject
 } from './code'
 import { clearPendingCode, getPendingCode, setPendingCode } from './pending'
+import {
+  AUDITOR,
+  ENGINEER,
+  RESEARCHER,
+  executeSubagentTask,
+  relevantMemories,
+  type HiveStatusFn,
+  type SubagentProfile,
+  type SubagentTask
+} from './subagents'
 import { registerRun } from './running'
 import {
   codeVoiceProgressSummary,
@@ -255,6 +265,13 @@ ENCADEAMENTO: após receber os resultados, você PODE chamar novas ferramentas d
 - codigo.projeto {objetivo, path?, passos?}   (CODER AUTÔNOMO: dado um objetivo, ele planeja, escreve os arquivos, roda checagens seguras e itera sozinho até concluir; precisa de "Permitir aplicar patches". Use para "construa/faça um app/site/programa que faça X" quando envolver vários arquivos ou lógica)
 - codigo.patch.preview {path?, diff?, patches?}   (valida e resume patch antes de aplicar; use sempre antes de aplicação)
 - codigo.patch.aplicar {path?, diff?, patches?}   (aplica patch apenas se habilitado e já confirmado pelo usuário)
+
+COLMEIA (sua equipe de subagentes especialistas — você é o gerente):
+Para tarefas GRANDES ou que pedem profundidade, delegue a um especialista e depois SINTETIZE o relatório dele em sua fala (nunca leia o relatório inteiro). Use "contexto" para passar o que você já sabe do turno. Na fala da rodada, anuncie a delegação ("Vou acionar o Investigador.").
+- subagente.pesquisar {objetivo, consulta?, url?, contexto?}   (INVESTIGADOR: pesquisa profunda na web/documentação e devolve só fatos com fonte — use para "pesquise a fundo", comparações, estado da arte, documentação de biblioteca)
+- subagente.construir {objetivo, path?, contexto?}   (CONSTRUTOR: projeta a implementação — arquivos, código pronto e ordem de aplicação — use ANTES de mudanças grandes em código; depois aplique você mesmo com codigo.criar/editar/patch)
+- subagente.auditar {objetivo, path?, contexto?}   (CRÍTICO: roda o diagnóstico do projeto e emite parecer rigoroso com problemas reais e veredito — use após mudanças do Construtor ou quando pedirem revisão/qualidade)
+Para perguntas simples ou ações diretas, NÃO use a colmeia: responda ou use as ferramentas comuns.
 
 MODO PROGRAMADOR:
 - Para perguntas de código, não chute: use codigo.workspace/codigo.buscar/codigo.ler quando houver path, arquivo, símbolo ou repo mencionado.
@@ -502,6 +519,49 @@ function announceLongTask(onDelta: DeltaFn | undefined, cfg: AppConfig, command:
 }
 
 
+/**
+ * Coleta o material bruto que cada especialista da Colmeia precisa ANTES da
+ * chamada de LLM: o Investigador recebe busca web (e a página, se houver URL),
+ * o Construtor recebe o resumo do workspace e o Crítico o diagnóstico do projeto.
+ * Falhas de coleta não derrubam a tarefa — o subagente trabalha com o que houver.
+ */
+async function gatherSubagentEvidence(
+  profile: SubagentProfile,
+  a: Acao,
+  cfg: AppConfig,
+  goal: string,
+  signal?: AbortSignal,
+  progress?: (event: { stream: 'stdout' | 'stderr'; chunk: string }) => void
+): Promise<string | undefined> {
+  const root = String(a.path || a.raiz || a.workspace || '')
+  try {
+    if (profile.id === 'researcher') {
+      const parts: string[] = []
+      const results = await webSearch(String(a.consulta || goal))
+      if (Array.isArray(results) && results.length) {
+        parts.push('Resultados de busca:\n' + results.map((r) => `- ${r.title} (${r.url}): ${r.snippet}`).join('\n'))
+      }
+      const url = String(a.url || a.endereco || '').trim()
+      if (url) {
+        const page = await readPage(url)
+        parts.push(`Conteúdo da página ${url}:\n${JSON.stringify(page).slice(0, 4000)}`)
+      }
+      return parts.join('\n\n') || undefined
+    }
+    if (!cfg.integrations.code.enabled) return undefined
+    if (profile.id === 'engineer') {
+      const ws = summarizeCodeWorkspace(cfg, root)
+      return `Workspace ${ws.name} (${ws.root}):\nlinguagens: ${JSON.stringify(ws.languages)}\nscripts: ${JSON.stringify(ws.scripts || {})}\narquivos:\n${ws.files.slice(0, 80).join('\n')}\n${ws.hints.join('\n')}`
+    }
+    // auditor: roda o diagnóstico real (typecheck/lint/test disponíveis) como material.
+    const diag = await diagnoseProject(cfg, { root, signal, onProgress: progress })
+    const checks = diag.checks.map((c) => `- ${c.name} (${c.command}): ${c.ran ? c.summary : 'não rodou'}`).join('\n')
+    return `Diagnóstico de ${diag.name} (${diag.root}) — ${diag.health.label}:\n${checks}\n${diag.hints.join('\n')}`
+  } catch (e) {
+    return `Falha ao coletar material: ${e instanceof Error ? e.message : String(e)}`
+  }
+}
+
 async function runQuery(
   a: Acao,
   cfg: AppConfig,
@@ -509,7 +569,8 @@ async function runQuery(
   onDelta?: DeltaFn,
   signal?: AbortSignal,
   onActivity?: ActivityFn,
-  phase = 1
+  phase = 1,
+  onHive?: HiveStatusFn
 ): Promise<unknown> {
   const integrations = cfg.integrations
   const activity = codeActivityMeta(a)
@@ -841,6 +902,35 @@ async function runQuery(
         if (resultado.applied && resultado.files[0]) setLastEditedFile(resultado.files[0], resultado.root)
         return done({ tipo: a.tipo, resultado })
       }
+      case 'subagente.pesquisar':
+      case 'subagente.construir':
+      case 'subagente.auditar': {
+        const profile: SubagentProfile =
+          a.tipo === 'subagente.pesquisar' ? RESEARCHER : a.tipo === 'subagente.construir' ? ENGINEER : AUDITOR
+        const goal = String(a.objetivo || a.tarefa || a.consulta || a.texto || '').trim()
+        if (!goal) return done({ tipo: a.tipo, erro: 'Diga o objetivo da tarefa para o subagente.' })
+        const r = await beating(
+          (async () => {
+            const task: SubagentTask = {
+              goal,
+              context: a.contexto ? String(a.contexto) : undefined,
+              evidence: await gatherSubagentEvidence(profile, a, cfg, goal, signal, progress),
+              memories: relevantMemories(goal, loadMemory())
+            }
+            return executeSubagentTask(profile, task, cfg, onHive, signal)
+          })()
+        )
+        return done({
+          tipo: a.tipo,
+          resultado: {
+            agente: r.label,
+            ok: r.ok,
+            duracaoMs: r.durationMs,
+            summary: `${r.label}: relatório ${r.ok ? 'entregue' : 'com falha'} em ${Math.round(r.durationMs / 1000)}s`,
+            relatorio: r.report
+          }
+        })
+      }
       case 'briefing.consultar': {
         const b = await buildBriefing(cfg)
         return {
@@ -985,6 +1075,7 @@ function memoryFallback(userText: string, acoes: Acao[]): Acao[] {
 export type DeltaKind = 'both' | 'display' | 'speak'
 export type DeltaFn = (chunk: string, phase: number, kind?: DeltaKind) => void
 export type ActivityFn = (activity: AgentActivityEvent) => void
+export type { HiveStatusFn }
 type DeltaTextTransform = (text: string, phase: number, kind: DeltaKind) => string
 
 type ActivityMeta = {
@@ -1027,6 +1118,16 @@ function emitActivity(
 
 function codeActivityMeta(a: Acao): ActivityMeta | null {
   const tipo = String(a.tipo || '')
+  if (tipo.startsWith('subagente.')) {
+    const goal = String(a.objetivo || a.tarefa || a.consulta || '').slice(0, 120) || undefined
+    const title =
+      tipo === 'subagente.pesquisar'
+        ? 'Investigador pesquisando'
+        : tipo === 'subagente.construir'
+          ? 'Construtor projetando'
+          : 'Crítico auditando'
+    return { id: uid('act'), kind: 'hive', title, detail: goal }
+  }
   if (!tipo.startsWith('codigo.')) return null
   const path = String(a.path || a.raiz || a.workspace || a.destino || a.onde || '').trim()
   const file = String(a.arquivo || a.file || '').trim()
@@ -1194,7 +1295,8 @@ export async function runTurn(
   userText: string,
   voice = false,
   onDelta?: DeltaFn,
-  onActivity?: ActivityFn
+  onActivity?: ActivityFn,
+  onHive?: HiveStatusFn
 ): Promise<AgentTurnResult> {
   const cfg = readConfig()
   // Controlador de cancelamento do turno: permite ao usuário (Esc/IPC code:cancel) abortar
@@ -1245,7 +1347,9 @@ export async function runTurn(
   let convo: ChatMessage[] = messages
   let phase = 1
   for (let round = 0; queries.length && round < MAX_TOOL_ROUNDS; round++) {
-    const results = await Promise.all(queries.map((q) => runQuery(q, cfg, sessionId, onDelta, signal, onActivity, phase)))
+    const results = await Promise.all(
+      queries.map((q) => runQuery(q, cfg, sessionId, onDelta, signal, onActivity, phase, onHive))
+    )
     const codeMode = hasCodeAction(queries)
     // Proatividade de engenheiro: após editar com sucesso, oferece validar (teste/build).
     const proactive = proactiveCodeFollowup(cfg, results)

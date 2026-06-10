@@ -32,14 +32,21 @@ export function buildChatBody(cfg: AppConfig, messages: ChatMessage[], opts: Bod
  * Chamada não-streaming ao 9 Router que retorna o conteúdo do assistente.
  * Tenta pedir resposta em JSON (response_format); se o upstream recusar, repete sem.
  */
-export async function chatJSON(cfg: AppConfig, messages: ChatMessage[], wantJson = true): Promise<string> {
+export async function chatJSON(
+  cfg: AppConfig,
+  messages: ChatMessage[],
+  wantJson = true,
+  opts: { temperature?: number; signal?: AbortSignal } = {}
+): Promise<string> {
   const url = cfg.nineRouter.baseUrl.replace(/\/$/, '') + '/chat/completions'
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (cfg.nineRouter.apiKey) headers['Authorization'] = `Bearer ${cfg.nineRouter.apiKey}`
 
   const call = async (useJson: boolean, withReasoning: boolean): Promise<Response> => {
-    const body = buildChatBody(cfg, messages, { stream: false, json: useJson, withReasoning })
-    return fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(90_000) })
+    const body = buildChatBody(cfg, messages, { stream: false, json: useJson, withReasoning, temperature: opts.temperature })
+    const signals = [AbortSignal.timeout(90_000)]
+    if (opts.signal) signals.push(opts.signal)
+    return fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.any(signals) })
   }
 
   let res: Response

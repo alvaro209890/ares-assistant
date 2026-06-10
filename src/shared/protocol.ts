@@ -55,7 +55,10 @@ export const QUERY_TOOLS = new Set([
   'codigo.todo',
   'codigo.projeto',
   'codigo.patch.preview',
-  'codigo.patch.aplicar'
+  'codigo.patch.aplicar',
+  'subagente.pesquisar',
+  'subagente.construir',
+  'subagente.auditar'
 ])
 
 // Ações de mutação conhecidas e os campos obrigatórios de cada uma. Usado para

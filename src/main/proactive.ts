@@ -73,6 +73,14 @@ export interface ProactiveWeather {
   alert?: string // alerta simples já formatado (chuva forte, calor extremo, etc.)
 }
 
+// Saúde do sistema observada pelo monitor (CPU sustentada, memória, erros no log).
+export interface SystemHealthState {
+  cpuPercent: number // última leitura (0..100)
+  cpuHighStreak: number // leituras consecutivas com CPU acima do limiar
+  memPercent: number // memória usada (0..100)
+  newLogErrors: number // erros NOVOS no registro desde a última checagem
+}
+
 export interface ProactiveState {
   now: number
   battery: BatteryInfo
@@ -80,11 +88,12 @@ export interface ProactiveState {
   overdueCount: number
   eventHeadsUpMin: number
   weather?: ProactiveWeather | null
+  health?: SystemHealthState | null
 }
 
 export interface ProactiveNudge {
   id: string // id estável para o cooldown
-  kind: 'battery' | 'event' | 'tasks' | 'weather'
+  kind: 'battery' | 'event' | 'tasks' | 'weather' | 'system'
   text: string // falável
   priority: number // maior = mais importante
   cooldownMs: number
@@ -167,6 +176,41 @@ export function buildNudges(s: ProactiveState): ProactiveNudge[] {
         text: `Senhor, ${what}. Vale levar um guarda-chuva.`,
         priority: 50,
         cooldownMs: 12 * 60 * 60_000
+      })
+    }
+  }
+
+  // Monitor de saúde do sistema: CPU alta SUSTENTADA (não um pico), memória no
+  // limite e falhas novas no registro. O aviso de erro sugere acionar o Crítico
+  // (subagente auditor) — o usuário decide na conversa.
+  const h = s.health
+  if (h) {
+    if (h.memPercent >= 92) {
+      out.push({
+        id: 'system-memory',
+        kind: 'system',
+        text: `Senhor, a memória do sistema está em ${Math.round(h.memPercent)}%. Convém fechar algum aplicativo pesado.`,
+        priority: 65,
+        cooldownMs: 15 * 60_000
+      })
+    }
+    if (h.cpuHighStreak >= 3) {
+      out.push({
+        id: 'system-cpu',
+        kind: 'system',
+        text: `O processador está em ${Math.round(h.cpuPercent)}% há alguns minutos. Algo pode estar preso; quer que eu verifique os processos?`,
+        priority: 55,
+        cooldownMs: 15 * 60_000
+      })
+    }
+    if (h.newLogErrors > 0) {
+      const n = h.newLogErrors
+      out.push({
+        id: 'system-log-errors',
+        kind: 'system',
+        text: `Senhor, notei ${n === 1 ? 'uma falha recente' : `${n} falhas recentes`} no registro do sistema. Devo pedir ao Crítico para analisar?`,
+        priority: 45,
+        cooldownMs: 30 * 60_000
       })
     }
   }

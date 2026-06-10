@@ -3,8 +3,10 @@ import { loadBoard, saveBoard } from './tasks'
 import { loadEvents, setEvents, loadReminders, setReminders } from './data'
 import { advanceISO } from './board'
 import { readConfig } from './config'
-import { pickProactiveNudge, readBattery, type ProactiveWeather } from './proactive'
+import { pickProactiveNudge, readBattery, type ProactiveWeather, type SystemHealthState } from './proactive'
 import { getWeather, getWeatherAt } from './tools'
+import { getSystemMetrics } from './system'
+import { getRecentLogs } from './logger'
 import type { AppConfig } from '../shared/types'
 
 // Lembretes locais: varre periodicamente tarefas (reminderAt) e eventos (whenISO).
@@ -53,6 +55,35 @@ function fire(prefix: string, title: string): void {
   emit(`${prefix}: ${title}`)
 }
 
+// Monitor de saúde do sistema: CPU alta precisa ser SUSTENTADA (3 ticks ≈ 1,5 min)
+// e só erros NOVOS no registro contam — senão o mesmo erro antigo alertaria sempre.
+const CPU_HIGH_THRESHOLD = 85
+let cpuHighStreak = 0
+let lastLogErrorCount = -1 // -1 = primeira leitura (vira linha de base, sem alerta)
+
+function readSystemHealth(): SystemHealthState {
+  let cpuPercent = 0
+  let memPercent = 0
+  try {
+    const m = getSystemMetrics()
+    cpuPercent = m.cpuPercent
+    memPercent = m.memPercent
+  } catch {
+    /* telemetria é opcional */
+  }
+  cpuHighStreak = cpuPercent >= CPU_HIGH_THRESHOLD ? cpuHighStreak + 1 : 0
+
+  let newLogErrors = 0
+  try {
+    const errors = getRecentLogs(200).filter((l) => l.includes('[ERROR]')).length
+    if (lastLogErrorCount >= 0 && errors > lastLogErrorCount) newLogErrors = errors - lastLogErrorCount
+    lastLogErrorCount = errors
+  } catch {
+    /* sem registro disponível */
+  }
+  return { cpuPercent, cpuHighStreak, memPercent, newLogErrors }
+}
+
 /** Camada proativa: escolhe no máximo um aviso de ambiente e o anuncia. */
 function proactiveTick(now: number, board: ReturnType<typeof loadBoard>, events: ReturnType<typeof loadEvents>): void {
   const cfg = readConfig()
@@ -68,7 +99,8 @@ function proactiveTick(now: number, board: ReturnType<typeof loadBoard>, events:
       events: events.map((e) => ({ id: e.id, title: e.title, whenISO: e.whenISO, remindMinutes: e.remindMinutes })),
       overdueCount,
       eventHeadsUpMin: 10,
-      weather: weatherCache
+      weather: weatherCache,
+      health: readSystemHealth()
     },
     proactiveLastShown,
     proactiveLastAny,

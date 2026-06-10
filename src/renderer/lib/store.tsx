@@ -10,6 +10,7 @@ import type {
   Checklist,
   AresState,
   DeepPartial,
+  HiveWorkerStatus,
   MemoryCategory,
   MemoryFact,
   Note,
@@ -55,7 +56,23 @@ export function finalSpeechFallback(
   return ''
 }
 
-type Screen = 'assistant' | 'tasks' | 'calendar' | 'reminders' | 'lists' | 'memory' | 'models' | 'system'
+type Screen = 'assistant' | 'office' | 'tasks' | 'calendar' | 'reminders' | 'lists' | 'memory' | 'models' | 'system'
+
+// Estado inicial da Colmeia: os três especialistas ociosos.
+export const HIVE_IDLE: HiveWorkerStatus[] = [
+  { id: 'researcher', label: 'Investigador', phase: 'idle', updatedAt: 0 },
+  { id: 'engineer', label: 'Construtor', phase: 'idle', updatedAt: 0 },
+  { id: 'auditor', label: 'Crítico', phase: 'idle', updatedAt: 0 }
+]
+
+/** Aplica uma atualização de status de subagente à lista da Colmeia. Pura e testável. */
+export function mergeHiveStatus(workers: HiveWorkerStatus[], status: HiveWorkerStatus): HiveWorkerStatus[] {
+  const idx = workers.findIndex((w) => w.id === status.id)
+  if (idx === -1) return [...workers, status]
+  const next = workers.slice()
+  next[idx] = status
+  return next
+}
 
 interface AresStore {
   ready: boolean
@@ -86,6 +103,7 @@ interface AresStore {
   error: string | null
   status: string
   actionToast: string | null
+  hiveWorkers: HiveWorkerStatus[]
 
   navigate: (s: Screen) => void
   openSettings: (b: boolean) => void
@@ -177,6 +195,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState('')
   const [actionToast, setActionToast] = useState<string | null>(null)
+  const [hiveWorkers, setHiveWorkers] = useState<HiveWorkerStatus[]>(HIVE_IDLE)
 
   const configRef = useRef<AppConfig | null>(null)
   const aresStateRef = useRef<AresState>('idle')
@@ -299,6 +318,29 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
       cancelled = true
     }
   }, [refreshWidgets])
+
+  // Colmeia: reflete em tempo real o que cada subagente está fazendo. Workers
+  // ativos voltam a "idle" sozinhos depois de um tempo sem atualização (visual).
+  useEffect(() => {
+    const off = window.ares.chat.onHive((status) => {
+      setHiveWorkers((ws) => mergeHiveStatus(ws, status))
+    })
+    const settle = setInterval(() => {
+      setHiveWorkers((ws) =>
+        ws.some((w) => (w.phase === 'done' || w.phase === 'error') && Date.now() - w.updatedAt > 12_000)
+          ? ws.map((w) =>
+              (w.phase === 'done' || w.phase === 'error') && Date.now() - w.updatedAt > 12_000
+                ? { ...w, phase: 'idle' as const }
+                : w
+            )
+          : ws
+      )
+    }, 4000)
+    return () => {
+      off()
+      clearInterval(settle)
+    }
+  }, [])
 
   useEffect(() => {
     const off = window.ares.reminders.onFired((data) => {
@@ -1147,6 +1189,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     error,
     status,
     actionToast,
+    hiveWorkers,
     navigate,
     openSettings,
     openHelp,

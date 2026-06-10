@@ -4,7 +4,7 @@ import { useAres, type ConvMsg } from '../lib/store'
 import type { AgentActivityEvent } from '../../shared/types'
 import AresOffice from './AresOffice'
 
-type Screen = 'assistant' | 'tasks' | 'calendar' | 'reminders' | 'lists' | 'memory' | 'models' | 'system'
+type Screen = 'assistant' | 'office' | 'tasks' | 'calendar' | 'reminders' | 'lists' | 'memory' | 'models' | 'system'
 
 const tabs: { id: Screen; label: string; hint: string; icon: JSX.Element }[] = [
   { id: 'assistant', label: 'Assistente', hint: 'Alt+1', icon: <AssistantIcon /> },
@@ -14,7 +14,8 @@ const tabs: { id: Screen; label: string; hint: string; icon: JSX.Element }[] = [
   { id: 'lists', label: 'Listas', hint: 'Alt+5', icon: <ListIcon /> },
   { id: 'memory', label: 'Memória', hint: 'Alt+6', icon: <MemoryIcon /> },
   { id: 'models', label: 'Modelos de IA', hint: 'Alt+7', icon: <ChipIcon /> },
-  { id: 'system', label: 'Sistema', hint: 'Alt+8', icon: <SystemIcon /> }
+  { id: 'system', label: 'Sistema', hint: 'Alt+8', icon: <SystemIcon /> },
+  { id: 'office', label: 'Escritório', hint: 'Alt+9', icon: <HiveIcon /> }
 ]
 
 function latestOfficeActivity(conversation: ConvMsg[]): AgentActivityEvent | null {
@@ -228,6 +229,16 @@ function SystemIcon(): JSX.Element {
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
       <path d="M12 2a3 3 0 0 1 3 3v1.2a6 6 0 0 1 1.8 1l1-.6 2 3.4-1 .6a6 6 0 0 1 0 2l1 .6-2 3.4-1-.6a6 6 0 0 1-1.8 1V19a3 3 0 0 1-6 0v-1.2a6 6 0 0 1-1.8-1l-1 .6-2-3.4 1-.6a6 6 0 0 1 0-2l-1-.6 2-3.4 1 .6a6 6 0 0 1 1.8-1V5a3 3 0 0 1 3-3z" strokeLinejoin="round" />
       <circle cx="12" cy="12" r="2.4" />
+    </svg>
+  )
+}
+
+function HiveIcon(): JSX.Element {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+      <path d="M12 2.8l3.6 2.1v4.2L12 11.2 8.4 9.1V4.9L12 2.8z" strokeLinejoin="round" />
+      <path d="M5.8 12.6l3.6 2.1v4.2l-3.6 2.1-3.6-2.1v-4.2l3.6-2.1zM18.2 12.6l3.6 2.1v4.2l-3.6 2.1-3.6-2.1v-4.2l3.6-2.1z" strokeLinejoin="round" />
+      <path d="M12 11.2v3M9.4 14.7l-1.2.7M14.6 14.7l1.2.7" strokeLinecap="round" />
     </svg>
   )
 }

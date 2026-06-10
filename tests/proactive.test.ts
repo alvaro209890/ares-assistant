@@ -154,3 +154,40 @@ describe('proatividade — pickProactiveNudge', () => {
     expect(pickProactiveNudge(state(), {}, 0, 0)).toBeNull()
   })
 })
+
+describe('proatividade — saúde do sistema', () => {
+  const health = (over: Partial<import('../src/main/proactive').SystemHealthState> = {}) => ({
+    cpuPercent: 20,
+    cpuHighStreak: 0,
+    memPercent: 40,
+    newLogErrors: 0,
+    ...over
+  })
+
+  it('CPU alta só alerta quando SUSTENTADA (streak >= 3)', () => {
+    const pico = buildNudges(state({ health: health({ cpuPercent: 95, cpuHighStreak: 1 }) }))
+    expect(pico.find((n) => n.id === 'system-cpu')).toBeUndefined()
+    const sustentada = buildNudges(state({ health: health({ cpuPercent: 95, cpuHighStreak: 3 }) }))
+    expect(sustentada.find((n) => n.id === 'system-cpu')?.text).toContain('95%')
+  })
+
+  it('memória no limite gera alerta com prioridade maior que CPU', () => {
+    const out = buildNudges(state({ health: health({ memPercent: 95, cpuPercent: 95, cpuHighStreak: 5 }) }))
+    const mem = out.find((n) => n.id === 'system-memory')
+    const cpu = out.find((n) => n.id === 'system-cpu')
+    expect(mem && cpu && mem.priority > cpu.priority).toBe(true)
+  })
+
+  it('erros novos no registro sugerem acionar o Crítico', () => {
+    const um = buildNudges(state({ health: health({ newLogErrors: 1 }) }))
+    expect(um.find((n) => n.id === 'system-log-errors')?.text).toContain('uma falha recente')
+    const tres = buildNudges(state({ health: health({ newLogErrors: 3 }) }))
+    expect(tres.find((n) => n.id === 'system-log-errors')?.text).toContain('3 falhas recentes')
+    expect(tres.find((n) => n.id === 'system-log-errors')?.text).toContain('Crítico')
+  })
+
+  it('sem health (ou saudável) não gera alertas de sistema', () => {
+    expect(buildNudges(state()).filter((n) => n.kind === 'system')).toEqual([])
+    expect(buildNudges(state({ health: health() })).filter((n) => n.kind === 'system')).toEqual([])
+  })
+})

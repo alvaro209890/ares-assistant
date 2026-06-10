@@ -329,7 +329,21 @@ export type AgentActivityKind =
   | 'scaffold'
   | 'patch'
   | 'diagnostic'
+  | 'hive'
   | 'tool'
+
+// --- Colmeia (subagentes especialistas orquestrados pelo Ares) ---
+export type SubagentId = 'researcher' | 'engineer' | 'auditor'
+export type WorkerPhase = 'idle' | 'thinking' | 'done' | 'error'
+
+// Status de um subagente, transmitido em tempo real ao renderer (aba Escritório).
+export interface HiveWorkerStatus {
+  id: SubagentId
+  label: string
+  phase: WorkerPhase
+  detail?: string // ex.: "Investigando padrão observer..." / "2 erros encontrados"
+  updatedAt: number
+}
 
 export interface AgentActivityEvent {
   id: string
