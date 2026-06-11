@@ -1,5 +1,7 @@
 // Sintese de voz do Ares: prioriza inicio rapido e nunca deixa fala antiga presa.
 
+import { connectPlaybackAudio } from './audio'
+
 type ActiveAudio = {
   audio: HTMLAudioElement
   url: string
@@ -350,6 +352,7 @@ async function piperSpeak(text: string, opts: SpeakOptions, force = false): Prom
     const blob = new Blob([wav], { type: 'audio/wav' })
     const url = URL.createObjectURL(blob)
     const audio = new Audio(url)
+    connectPlaybackAudio(audio)
     audio.volume = opts.volume ?? 1
 
     const result = await new Promise<'ended' | 'cancelled'>((resolve, reject) => {

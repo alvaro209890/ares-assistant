@@ -2,7 +2,7 @@ import { useMemo, useRef } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { AresState } from '../../shared/types'
-import { getLevel } from '../lib/audio'
+import { getLevel, getPlaybackLevel } from '../lib/audio'
 
 // Ruído simplex 3D (Ashima) para deformar a malha da orbe no vertex shader.
 const NOISE_GLSL = `
@@ -84,10 +84,13 @@ function Core({ state }: { state: AresState }): JSX.Element {
 
   useFrame((_, delta) => {
     const t = STATE_TARGET[state]
-    // Em "ouvindo", a amplitude vem do nível real do microfone.
-    const liveAmp = state === 'listening' ? Math.max(t.amp, getLevel() * 0.9) : t.amp
+    // Em "ouvindo", a amplitude vem do microfone. Em "falando", vem do áudio sintetizado.
+    const liveAmp =
+      state === 'listening' ? Math.max(t.amp, getLevel() * 0.9) :
+      state === 'speaking' ? Math.max(t.amp, getPlaybackLevel() * 1.1) :
+      t.amp
     const breathing = state === 'idle' ? Math.sin(performance.now() / 700) * 0.015 : 0
-    const speakPulse = state === 'speaking' ? Math.abs(Math.sin(performance.now() / 160)) * 0.08 : 0
+    const speakPulse = 0
     const targetAmp = liveAmp + breathing + speakPulse
 
     ampRef.current += (targetAmp - ampRef.current) * Math.min(1, delta * 8)

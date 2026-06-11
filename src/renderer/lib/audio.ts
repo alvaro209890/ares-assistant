@@ -174,3 +174,46 @@ export async function watchForSpeech(
     setTimeout(tick, 80)
   })
 }
+
+let playbackAnalyser: AnalyserNode | null = null
+const _playbackTimeBuf = new Uint8Array(1024)
+
+/** Conecta um elemento HTMLAudioElement de reprodução ao analisador de playback. */
+export function connectPlaybackAudio(audioElement: HTMLAudioElement): void {
+  try {
+    if (!audioCtx) {
+      audioCtx = new AudioContext()
+    }
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume().catch(() => {})
+    }
+    if (!playbackAnalyser) {
+      playbackAnalyser = audioCtx.createAnalyser()
+      playbackAnalyser.fftSize = 1024
+      playbackAnalyser.smoothingTimeConstant = 0.8
+    }
+    // Conecta a fonte do elemento ao analisador
+    const source = audioCtx.createMediaElementSource(audioElement)
+    source.connect(playbackAnalyser)
+    // Conecta o analisador aos alto-falantes
+    playbackAnalyser.connect(audioCtx.destination)
+  } catch (e) {
+    console.warn('[Audio] Falha ao conectar áudio de reprodução ao analisador Web Audio', e)
+  }
+}
+
+/** Retorna o nível de volume/frequência de reprodução (RMS) atual. */
+export function getPlaybackLevel(): number {
+  if (!playbackAnalyser) return 0
+  try {
+    playbackAnalyser.getByteTimeDomainData(_playbackTimeBuf)
+    let sum = 0
+    for (let i = 0; i < _playbackTimeBuf.length; i++) {
+      const v = (_playbackTimeBuf[i] - 128) / 128
+      sum += v * v
+    }
+    return Math.min(1, Math.sqrt(sum / _playbackTimeBuf.length) * 3.2)
+  } catch {
+    return 0
+  }
+}
