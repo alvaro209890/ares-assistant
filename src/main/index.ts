@@ -229,6 +229,9 @@ function registerIpc(): void {
       },
       (status) => {
         sendToRenderer('agent:hive-update', status)
+      },
+      (progress) => {
+        sendToRenderer('agent:task-progress', progress)
       }
     )
   })

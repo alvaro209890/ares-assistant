@@ -360,6 +360,19 @@ export interface AgentActivityEvent {
   ok?: boolean
 }
 
+// HUD de progresso por ferramenta: canal SEPARADO do AgentActivityEvent (que vai pra
+// timeline do chat). Aqui o renderer mostra um único indicador "task em andamento" —
+// barra/spinner cyan estilo JARVIS — para conforto visual em tarefas longas.
+export interface TaskProgressEvent {
+  id: string
+  tool: string
+  status: 'start' | 'update' | 'end'
+  label: string
+  percent?: number
+  ok?: boolean
+  ts: number
+}
+
 // --- Programação / código ---
 export interface CodeWorkspaceSummary {
   root: string

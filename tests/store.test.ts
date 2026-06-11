@@ -1,22 +1,28 @@
 import { describe, expect, it } from 'vitest'
-import type { AgentActivityEvent } from '../src/shared/types'
-import { HIVE_IDLE, finalSpeechFallback, mergeActivityEvent, mergeHiveStatus } from '../src/renderer/lib/store'
+import type { AgentActivityEvent, TaskProgressEvent } from '../src/shared/types'
+import {
+  HIVE_IDLE,
+  finalSpeechFallback,
+  mergeActivityEvent,
+  mergeHiveStatus,
+  mergeTaskProgress
+} from '../src/renderer/lib/store'
 
 describe('renderer store — fallback de fala final', () => {
   it('usa falaVoz quando a fase 2 nao enfileirou audio', () => {
     expect(
       finalSpeechFallback(
-        { fala: 'Resposta completa com detalhes técnicos.', falaVoz: 'Resumo falável da análise.' },
+        { fala: 'Resposta completa com detalhes tecnicos.', falaVoz: 'Resumo falavel da analise.' },
         true,
         false
       )
-    ).toBe('Resumo falável da análise.')
+    ).toBe('Resumo falavel da analise.')
   })
 
   it('nao duplica falaVoz quando a fase 2 ja entrou na fila', () => {
     expect(
       finalSpeechFallback(
-        { fala: 'Resposta completa com detalhes técnicos.', falaVoz: 'Resumo falável da análise.' },
+        { fala: 'Resposta completa com detalhes tecnicos.', falaVoz: 'Resumo falavel da analise.' },
         true,
         true
       )
@@ -55,8 +61,7 @@ describe('renderer store — fallback de fala final', () => {
 })
 
 describe('renderer store — Colmeia (mergeHiveStatus)', () => {
-
-  it('começa com os três especialistas ociosos', () => {
+  it('comeca com os tres especialistas ociosos', () => {
     expect(HIVE_IDLE.map((w) => w.id)).toEqual(['researcher', 'engineer', 'auditor'])
     expect(HIVE_IDLE.every((w) => w.phase === 'idle')).toBe(true)
   })
@@ -66,17 +71,69 @@ describe('renderer store — Colmeia (mergeHiveStatus)', () => {
       id: 'engineer',
       label: 'Construtor',
       phase: 'thinking',
-      detail: 'Projetando módulo',
+      detail: 'Projetando modulo',
       updatedAt: 123
     })
     expect(next.find((w) => w.id === 'engineer')?.phase).toBe('thinking')
     expect(next.find((w) => w.id === 'researcher')?.phase).toBe('idle')
     expect(next).toHaveLength(3)
-    expect(HIVE_IDLE.find((w) => w.id === 'engineer')?.phase).toBe('idle') // imutável
+    expect(HIVE_IDLE.find((w) => w.id === 'engineer')?.phase).toBe('idle')
   })
 
-  it('worker desconhecido é acrescentado (tolerante a versões futuras)', () => {
-    const next = mergeHiveStatus([], { id: 'auditor', label: 'Crítico', phase: 'done', updatedAt: 1 })
+  it('worker desconhecido e acrescentado (tolerante a versoes futuras)', () => {
+    const next = mergeHiveStatus([], { id: 'auditor', label: 'Critico', phase: 'done', updatedAt: 1 })
     expect(next).toHaveLength(1)
+  })
+})
+
+describe('renderer store — HUD de progresso (mergeTaskProgress)', () => {
+  const start: TaskProgressEvent = {
+    id: 'task-1',
+    tool: 'codigo.testar',
+    status: 'start',
+    label: 'Rodando testes...',
+    ts: 1
+  }
+
+  it('ativa o HUD em start/update e preserva o mesmo item', () => {
+    const started = mergeTaskProgress(null, start)
+    const updated = mergeTaskProgress(started, {
+      id: 'task-1',
+      tool: 'codigo.testar',
+      status: 'update',
+      label: 'Executando suite...',
+      percent: 40,
+      ts: 2
+    })
+
+    expect(started?.label).toBe('Rodando testes...')
+    expect(updated?.label).toBe('Executando suite...')
+    expect(updated?.percent).toBe(40)
+  })
+
+  it('limpa o HUD quando a tarefa atual termina', () => {
+    const ended = mergeTaskProgress(start, {
+      id: 'task-1',
+      tool: 'codigo.testar',
+      status: 'end',
+      label: 'Rodando testes...',
+      ok: true,
+      ts: 3
+    })
+
+    expect(ended).toBeNull()
+  })
+
+  it('ignora end de outra tarefa quando a atual e diferente', () => {
+    const kept = mergeTaskProgress(start, {
+      id: 'task-2',
+      tool: 'web.buscar',
+      status: 'end',
+      label: 'Buscando...',
+      ok: true,
+      ts: 3
+    })
+
+    expect(kept?.id).toBe('task-1')
   })
 })

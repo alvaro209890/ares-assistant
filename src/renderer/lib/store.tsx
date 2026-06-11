@@ -18,6 +18,7 @@ import type {
   Reminder,
   SessionMeta,
   SystemMetrics,
+  TaskProgressEvent,
   TtsStatus,
   UserLocation,
   WeatherResult
@@ -101,6 +102,19 @@ export function mergeHiveStatus(workers: HiveWorkerStatus[], status: HiveWorkerS
   return next
 }
 
+/** Um único HUD global de tarefa: start/update substituem, end limpa. */
+export function mergeTaskProgress(
+  current: TaskProgressEvent | null,
+  event: TaskProgressEvent
+): TaskProgressEvent | null {
+  if (event.status === 'end') {
+    if (!current || current.id === event.id || current.tool === event.tool) return null
+    return current
+  }
+  if (!current || current.id === event.id || current.tool === event.tool) return { ...current, ...event }
+  return event
+}
+
 interface AresStore {
   ready: boolean
   config: AppConfig | null
@@ -131,6 +145,7 @@ interface AresStore {
   status: string
   actionToast: string | null
   hiveWorkers: HiveWorkerStatus[]
+  taskProgress: TaskProgressEvent | null
 
   navigate: (s: Screen) => void
   openSettings: (b: boolean) => void
@@ -223,6 +238,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   const [status, setStatus] = useState('')
   const [actionToast, setActionToast] = useState<string | null>(null)
   const [hiveWorkers, setHiveWorkers] = useState<HiveWorkerStatus[]>(HIVE_IDLE)
+  const [taskProgress, setTaskProgress] = useState<TaskProgressEvent | null>(null)
 
   const configRef = useRef<AppConfig | null>(null)
   const aresStateRef = useRef<AresState>('idle')
@@ -381,6 +397,14 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     })
     return off
   }, [showToast, speakText])
+
+  // HUD de progresso de tarefas longas vindas do processo main.
+  useEffect(() => {
+    const off = window.ares.chat.onTaskProgress((event) => {
+      setTaskProgress((current) => mergeTaskProgress(current, event))
+    })
+    return off
+  }, [])
 
   // Espelha o estado do Ares na mini-orbe flutuante.
   useEffect(() => {
@@ -561,6 +585,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
         const result = await window.ares.chat.ask(sid, userText, voice)
         off()
         offActivity()
+        setTaskProgress(null)
         flush(true) // fala o restante do buffer
         boardRef.current = result.board
         setBoardState(result.board)
@@ -608,6 +633,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
       } catch (e) {
         off()
         offActivity()
+        setTaskProgress(null)
         clearSpeechQueue()
         setConversation((prev) => prev.filter((m) => m.id !== assistantId))
         setError(errMsg(e))
@@ -1228,6 +1254,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     status,
     actionToast,
     hiveWorkers,
+    taskProgress,
     navigate,
     openSettings,
     openHelp,

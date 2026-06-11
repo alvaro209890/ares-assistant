@@ -7,6 +7,7 @@ import BriefingPanel from './components/BriefingPanel'
 import Onboarding from './components/Onboarding'
 import Help from './components/Help'
 import CommandPalette from './components/CommandPalette'
+import TaskProgressBar from './components/TaskProgressBar'
 import Assistant from './screens/Assistant'
 import Office from './screens/Office'
 import Tasks from './screens/Tasks'
@@ -18,7 +19,7 @@ import Models from './screens/Models'
 import System from './screens/System'
 
 export default function App(): JSX.Element {
-  const { ready, screen, error, clearError, actionToast, recording } = useAres()
+  const { ready, screen, error, clearError, actionToast, recording, taskProgress } = useAres()
 
   return (
     <div className="relative h-full w-full text-cyan-50">
@@ -50,6 +51,9 @@ export default function App(): JSX.Element {
       <Help />
       <Onboarding />
       <CommandPalette />
+      <div className="pointer-events-none fixed left-1/2 top-4 z-[54] -translate-x-1/2">
+        <TaskProgressBar task={taskProgress} />
+      </div>
 
       {/* Indicador global de microfone ativo (privacidade/confiança) */}
       <AnimatePresence>

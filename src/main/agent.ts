@@ -89,10 +89,15 @@ import { runQuery } from './agent/router'
 import { streamTurn, validateActions, classifyProviderError } from './agent/stream'
 import { createTrace, nullTrace } from './agent/trace'
 import { uid } from './agent/activity'
-import type { ActivityFn, DeltaFn, DeltaTextTransform, HiveWorkerStatus } from './agent/types'
+import type {
+  ActivityFn,
+  DeltaFn,
+  DeltaTextTransform,
+  HiveStatusFn,
+  TaskProgressFn
+} from './agent/types'
 
-export type { DeltaFn, DeltaKind, ActivityFn } from './agent/types'
-export type HiveStatusFn = (status: HiveWorkerStatus) => void
+export type { DeltaFn, DeltaKind, ActivityFn, TaskProgressFn, HiveStatusFn } from './agent/types'
 
 // Re-exports preservando a superfície pública conhecida por testes/UI.
 export {
@@ -204,7 +209,8 @@ export async function runTurn(
   voice = false,
   onDelta?: DeltaFn,
   onActivity?: ActivityFn,
-  onHive?: HiveStatusFn
+  onHive?: HiveStatusFn,
+  onProgress?: TaskProgressFn
 ): Promise<AgentTurnResult> {
   const cfg = readConfig()
   // Telemetria leve por turno (no-op a menos que algum caller leia o trace).
@@ -265,7 +271,7 @@ export async function runTurn(
   let phase = 1
   for (let round = 0; queries.length && round < MAX_TOOL_ROUNDS; round++) {
     const results = await Promise.all(
-      queries.map((q) => runQuery(q, { cfg, sessionId, phase, signal, onDelta, onActivity, onHive, trace }))
+      queries.map((q) => runQuery(q, { cfg, sessionId, phase, signal, onDelta, onActivity, onHive, onProgress, trace }))
     )
     const codeMode = hasCodeAction(queries)
     const proactive = proactiveCodeFollowup(cfg, results)

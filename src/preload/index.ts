@@ -22,6 +22,7 @@ import type {
   ReverseGeocodeResult,
   SessionMeta,
   SystemMetrics,
+  TaskProgressEvent,
   TtsStatus,
   UserLocation,
   WeatherResult
@@ -96,6 +97,13 @@ const api = {
       const listener = (_e: unknown, status: HiveWorkerStatus) => cb(status)
       ipcRenderer.on('agent:hive-update', listener)
       return () => ipcRenderer.removeListener('agent:hive-update', listener)
+    },
+    // HUD de progresso de tarefa: 'start' acende o indicador, 'update' troca o
+    // texto / barra, 'end' apaga. Distinto do canal de atividade (timeline).
+    onTaskProgress: (cb: (event: TaskProgressEvent) => void): (() => void) => {
+      const listener = (_e: unknown, event: TaskProgressEvent) => cb(event)
+      ipcRenderer.on('agent:task-progress', listener)
+      return () => ipcRenderer.removeListener('agent:task-progress', listener)
     }
   },
   code: {

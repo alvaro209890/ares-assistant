@@ -2,7 +2,7 @@
 // desacoplados de detalhes de electron/data/etc., e dá nomes claros a contratos
 // que antes circulavam como `unknown`.
 
-import type { AgentActivityEvent, Acao, HiveWorkerStatus } from '../../shared/types'
+import type { AgentActivityEvent, Acao, HiveWorkerStatus, TaskProgressEvent } from '../../shared/types'
 
 // Canal do delta: 'both' (exibe no chat E fala — padrão), 'display' (só texto na tela,
 // não fala — usado para streamar a resposta COMPLETA de código) ou 'speak' (só fala,
@@ -12,6 +12,10 @@ export type DeltaKind = 'both' | 'display' | 'speak'
 export type DeltaFn = (chunk: string, phase: number, kind?: DeltaKind) => void
 export type ActivityFn = (activity: AgentActivityEvent) => void
 export type ProgressFn = (event: { stream: 'stdout' | 'stderr'; chunk: string }) => void
+// Canal NOVO de progresso de alto nível para a HUD (start/update/end). Diferente do
+// ProgressFn (stdout/stderr piping para a timeline de atividades).
+export type TaskProgressFn = (event: TaskProgressEvent) => void
+export type HiveStatusFn = (status: HiveWorkerStatus) => void
 export type DeltaTextTransform = (text: string, phase: number, kind: DeltaKind) => string
 
 // Envelope padrão devolvido por toda ferramenta de consulta/mutação.
