@@ -135,6 +135,7 @@ export async function streamTurn(
       const env = parseEnvelope(full)
       if (env.fala) onDelta(transform ? transform(env.fala, phase, kind) : env.fala, phase, kind)
     }
+    onDelta('', phase, kind, true)
     return full
   } catch (e) {
     const cls = classifyProviderError(e)
@@ -142,11 +143,15 @@ export async function streamTurn(
     if (cls.kind === 'abort') throw e
     // Se algo já saiu para a UI, prefere finalizar com o parcial: a alternativa
     // (cair para chatJSON) duplicaria a fala no chat.
-    if (emitted > 0) return JSON.stringify({ fala: lastText, acoes: [] })
+    if (emitted > 0) {
+      onDelta('', phase, kind, true)
+      return JSON.stringify({ fala: lastText, acoes: [] })
+    }
     // Stream falhou sem emitir nada: tenta a rota não-streaming uma vez.
     const full = await chatJSON(cfg, messages, true, { signal })
     const env = parseEnvelope(full)
     if (env.fala) onDelta(transform ? transform(env.fala, phase, kind) : env.fala, phase, kind)
+    onDelta('', phase, kind, true)
     return full
   }
 }

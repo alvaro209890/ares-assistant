@@ -132,6 +132,41 @@ describe('voz no modo programador', () => {
     expect(summary.length).toBeLessThan(360)
   })
 
+  it('gera resumo falavel imediato para subagente depurar, construir, auditar e pesquisar', () => {
+    const depurar = codeVoiceProgressSummary([
+      {
+        tipo: 'subagente.depurar',
+        resultado: {
+          ok: true,
+          relatorio: '[CAUSA RAIZ] A causa raiz é um import inválido em file.ts:12.\\n[CORRECAO]\\n1. file.ts:12\\n   ANTES: import x\\n   DEPOIS: import y\\n[VALIDAR]\\nnpm run test'
+        }
+      }
+    ])
+    expect(depurar).toContain('Prometeu identificou a causa raiz: A causa raiz é um import inválido em file.ts:12.')
+
+    const construir = codeVoiceProgressSummary([
+      {
+        tipo: 'subagente.construir',
+        resultado: {
+          ok: true,
+          relatorio: '[ESCOPO] Refatorar a classe A.\\n[PASSOS]\\n1. Editar file.ts'
+        }
+      }
+    ])
+    expect(construir).toContain('Hefesto elaborou o plano: Refatorar a classe A.')
+
+    const auditar = codeVoiceProgressSummary([
+      {
+        tipo: 'subagente.auditar',
+        resultado: {
+          ok: true,
+          relatorio: '[VEREDITO] APROVADO\\n[RESUMO] Mudanças em ordem.'
+        }
+      }
+    ])
+    expect(auditar).toContain('Têmis concluiu a auditoria e aprovou as alterações')
+  })
+
   it('detecta falas duplicadas para nao repetir resumo e conclusao', () => {
     expect(isDuplicateSpeech('Analisei o diretório X: 3 arquivos.', 'analisei o diretório x: 3 arquivos')).toBe(true)
     expect(isDuplicateSpeech('Analisei o diretório X: 3 arquivos. Estrutura em ordem.', 'Analisei o diretório X: 3 arquivos.')).toBe(true)

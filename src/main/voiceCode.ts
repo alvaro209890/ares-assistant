@@ -1,4 +1,5 @@
 import type { Acao } from '../shared/types'
+import { parseReportTags } from './subagents'
 
 const CODE_HINT_RE =
   /\b(c[oó]digo|programa[cç][aã]o|arquivo|pasta|projeto|workspace|src|npm|npx|git|guit|patch|diff|terminal|linha|fun[cç][aã]o|classe|componente|m[eé]todo|vari[aá]vel|build|teste|test|typecheck|commit|push|callback|call back|async|await|ass[ií]ncron|arrow|promise|promessa|lambda|try|catch)\b/i
@@ -48,7 +49,7 @@ const EXTENSIONS: Array<[RegExp, string]> = [
 ]
 
 export function isCodeActionType(tipo: unknown): boolean {
-  return typeof tipo === 'string' && tipo.startsWith('codigo.')
+  return typeof tipo === 'string' && (tipo.startsWith('codigo.') || tipo.startsWith('subagente.'))
 }
 
 export function hasCodeAction(actions: Acao[]): boolean {
@@ -220,6 +221,35 @@ function summarizeCodeResult(tipo: string, resultado: Record<string, unknown>, e
   if (erro) return `A ferramenta de codigo falhou: ${rootCauseError(erro) || erro}`
 
   switch (tipo) {
+    case 'subagente.depurar': {
+      const ok = resultado.ok === true
+      if (!ok) return 'O depurador Prometeu falhou ao rodar.'
+      const report = String(resultado.relatorio || '')
+      const tags = parseReportTags(report)
+      const cause = tags.rootCause || 'Diagnóstico concluído.'
+      return `Prometeu identificou a causa raiz: ${cause}`
+    }
+    case 'subagente.pesquisar': {
+      const ok = resultado.ok === true
+      if (!ok) return 'A pesquisa da Atena falhou.'
+      return 'Atena concluiu a pesquisa das fontes.'
+    }
+    case 'subagente.construir': {
+      const ok = resultado.ok === true
+      if (!ok) return 'O planejamento do Hefesto falhou.'
+      const report = String(resultado.relatorio || '')
+      const tags = parseReportTags(report)
+      const scope = tags.scope || 'Planejamento concluído.'
+      return `Hefesto elaborou o plano: ${scope}`
+    }
+    case 'subagente.auditar': {
+      const ok = resultado.ok === true
+      if (!ok) return 'A auditoria da Têmis falhou.'
+      const report = String(resultado.relatorio || '')
+      const tags = parseReportTags(report)
+      const verdict = tags.verdict === 'APROVADO' ? 'aprovou as alterações' : 'reprovou as alterações'
+      return `Têmis concluiu a auditoria e ${verdict}`
+    }
     case 'codigo.workspace': {
       if (resultado.exists === false) return `Nao encontrei o workspace ${str(resultado.root) || 'solicitado'}`
       const name = str(resultado.name) || basename(str(resultado.root)) || 'workspace'
@@ -439,7 +469,7 @@ export function codeVoiceProgressSummary(results: unknown[]): string {
   for (const raw of results) {
     const r = obj(raw)
     const tipo = str(r.tipo)
-    if (!tipo.startsWith('codigo.')) continue
+    if (!tipo.startsWith('codigo.') && !tipo.startsWith('subagente.')) continue
     const summary = summarizeCodeResult(tipo, obj(r.resultado), str(r.erro))
     if (summary) parts.push(summary)
     if (parts.length >= 2) break
@@ -533,18 +563,33 @@ export const HEARTBEAT_PHRASES = [
   ' Quase lá. Sigo acompanhando a saída.'
 ]
 
-type HeartbeatDelta = (chunk: string, phase: number, kind?: 'both' | 'display' | 'speak') => void
+type HeartbeatDelta = (chunk: string, phase: number, kind?: 'both' | 'display' | 'speak', done?: boolean) => void
+
+let activeHeartbeats = 0
+let heartbeatTimer: ReturnType<typeof setTimeout> | null = null
+let heartbeatIndex = 0
 
 export function startHeartbeat(onDelta: HeartbeatDelta | undefined, phase: number): () => void {
   if (!onDelta) return () => {}
-  let i = 0
-  let timer: ReturnType<typeof setTimeout>
-  const tick = (): void => {
-    onDelta(HEARTBEAT_PHRASES[i++ % HEARTBEAT_PHRASES.length], phase, 'speak')
-    timer = setTimeout(tick, HEARTBEAT_REPEAT_MS)
+  activeHeartbeats++
+  if (activeHeartbeats === 1) {
+    heartbeatIndex = 0
+    const tick = (): void => {
+      onDelta(HEARTBEAT_PHRASES[heartbeatIndex++ % HEARTBEAT_PHRASES.length], phase, 'speak', true)
+      heartbeatTimer = setTimeout(tick, HEARTBEAT_REPEAT_MS)
+    }
+    heartbeatTimer = setTimeout(tick, HEARTBEAT_FIRST_MS)
   }
-  timer = setTimeout(tick, HEARTBEAT_FIRST_MS)
-  return () => clearTimeout(timer)
+  return () => {
+    activeHeartbeats--
+    if (activeHeartbeats <= 0) {
+      activeHeartbeats = 0
+      if (heartbeatTimer) {
+        clearTimeout(heartbeatTimer)
+        heartbeatTimer = null
+      }
+    }
+  }
 }
 
 export function toolResultsPrompt(results: unknown[], voice: boolean, codeMode: boolean): string {

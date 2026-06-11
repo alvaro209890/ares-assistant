@@ -9,7 +9,7 @@ import type { AgentActivityEvent, Acao, HiveWorkerStatus, TaskProgressEvent } fr
 // não altera a tela — usado para o resumo falável conciso de tarefas de programação).
 export type DeltaKind = 'both' | 'display' | 'speak'
 
-export type DeltaFn = (chunk: string, phase: number, kind?: DeltaKind) => void
+export type DeltaFn = (chunk: string, phase: number, kind?: DeltaKind, done?: boolean) => void
 export type ActivityFn = (activity: AgentActivityEvent) => void
 export type ProgressFn = (event: { stream: 'stdout' | 'stderr'; chunk: string }) => void
 // Canal NOVO de progresso de alto nível para a HUD (start/update/end). Diferente do

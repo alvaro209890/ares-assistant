@@ -83,9 +83,9 @@ const api = {
     // Recebe a "fala" em pedaços enquanto o LLM gera. phase muda (1→2) quando há
     // ferramentas e a resposta final começa (sinal para reiniciar exibição/fala).
     onDelta: (
-      cb: (data: { chunk: string; phase: number; kind?: 'both' | 'display' | 'speak' }) => void
+      cb: (data: { chunk: string; phase: number; kind?: 'both' | 'display' | 'speak'; done?: boolean }) => void
     ): (() => void) => {
-      const listener = (_e: unknown, data: { chunk: string; phase: number; kind?: 'both' | 'display' | 'speak' }) =>
+      const listener = (_e: unknown, data: { chunk: string; phase: number; kind?: 'both' | 'display' | 'speak'; done?: boolean }) =>
         cb(data)
       ipcRenderer.on('chat:delta', listener)
       return () => ipcRenderer.removeListener('chat:delta', listener)

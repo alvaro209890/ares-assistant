@@ -283,7 +283,7 @@ export async function runTurn(
       // antes do heartbeat dos 15 s.
       if (voice && hasCodeAction(queries) && (round > 0 || !fala.trim())) {
         const announce = voiceToolAnnouncement(queries)
-        if (announce) onDelta?.(` ${announce}`, phase, 'speak')
+        if (announce) onDelta?.(` ${announce}`, phase, 'speak', true)
       }
       const results = await Promise.all(
         queries.map((q) => runQuery(q, { cfg, sessionId, phase, signal, onDelta, onActivity, onHive, onProgress, trace }))
@@ -312,7 +312,7 @@ export async function runTurn(
         const immediateSpoken = codeVoiceProgressSummary(results)
         if (immediateSpoken) {
           falaVoz = immediateSpoken
-          onDelta?.(` ${immediateSpoken}`, phase, 'speak')
+          onDelta?.(` ${immediateSpoken}`, phase, 'speak', true)
         }
         const raw = await streamTurn(cfg, convo, phase, onDelta, 'display', deltaTransform, signal)
         const envN = parseEnvelope(raw)
@@ -320,11 +320,11 @@ export async function runTurn(
           fala = _finalFala(envN.fala, suppressGreeting)
           const spoken = sanitizeVoiceCodeFala(fala) || 'Análise concluída. Os detalhes principais estão na tela.'
           falaVoz = spoken
-          if (!isDuplicateSpeech(spoken, immediateSpoken)) onDelta?.(` ${spoken}`, phase, 'speak')
+          if (!isDuplicateSpeech(spoken, immediateSpoken)) onDelta?.(` ${spoken}`, phase, 'speak', true)
         } else if (!immediateSpoken) {
           const fallback = 'Concluído. Os detalhes estão na tela.'
           falaVoz = fallback
-          onDelta?.(` ${fallback}`, phase, 'speak')
+          onDelta?.(` ${fallback}`, phase, 'speak', true)
         }
         mutations = mutations.concat(envN.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo)))
         queries = lastRound ? [] : envN.acoes.filter((a) => QUERY_TOOLS.has(a.tipo))

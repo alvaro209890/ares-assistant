@@ -573,7 +573,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
         }
       }
 
-      const off = window.ares.chat.onDelta(({ chunk, phase: ph, kind = 'both' }) => {
+      const off = window.ares.chat.onDelta(({ chunk, phase: ph, kind = 'both', done }) => {
         if (ph !== phase) {
           // Resposta final após ferramentas: encerra a fase anterior e recomeça.
           flush(true)
@@ -596,6 +596,9 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
         if (speak && kind !== 'display') {
           sentenceBuf += chunk
           flush(false)
+        }
+        if (done) {
+          flush(true)
         }
       })
       const offActivity = window.ares.chat.onActivity((activity) => {

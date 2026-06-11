@@ -168,9 +168,11 @@ async function webSpeakOnce(
   synth: SpeechSynthesis,
   text: string,
   opts: SpeakOptions,
-  voices: SpeechSynthesisVoice[]
+  voices: SpeechSynthesisVoice[],
+  generation: number
 ): Promise<'ended' | 'cancelled' | 'failed'> {
-  log('debug', `webSpeakOnce: text="${text}"`)
+  if (generation !== queueGeneration) return 'cancelled'
+  log('debug', `webSpeakOnce: text="${text}", generation=${generation}`)
   const u = new SpeechSynthesisUtterance(text)
   u.lang = 'pt-BR'
   const win = window.ares.system.platform === 'win32'
@@ -185,6 +187,10 @@ async function webSpeakOnce(
   if (chosen) u.voice = chosen
 
   return new Promise((resolve) => {
+    if (generation !== queueGeneration) {
+      resolve('cancelled')
+      return
+    }
     let settled = false
     let started = false
     let endTimer: ReturnType<typeof setTimeout> | null = null
@@ -233,8 +239,8 @@ async function webSpeakOnce(
   })
 }
 
-async function webSpeak(text: string, opts: SpeakOptions): Promise<'ok' | 'failed' | 'cancelled'> {
-  log('info', `webSpeak: starting fallback webSpeak for "${text}"`)
+async function webSpeak(text: string, opts: SpeakOptions, generation: number): Promise<'ok' | 'failed' | 'cancelled'> {
+  log('info', `webSpeak: starting fallback webSpeak for "${text}", generation=${generation}`)
   const synth = window.speechSynthesis
   if (!synth) {
     log('error', 'webSpeak: window.speechSynthesis is not available')
@@ -242,13 +248,19 @@ async function webSpeak(text: string, opts: SpeakOptions): Promise<'ok' | 'faile
     return 'failed'
   }
 
+  if (generation !== queueGeneration) return 'cancelled'
   let voices = synth.getVoices()
-  if (!voices.length) voices = await loadVoices()
+  if (!voices.length) {
+    voices = await loadVoices()
+    if (generation !== queueGeneration) return 'cancelled'
+  }
 
   for (let attempt = 0; attempt < WEB_MAX_RETRIES; attempt++) {
+    if (generation !== queueGeneration) return 'cancelled'
     log('debug', `webSpeak: attempt ${attempt + 1} of ${WEB_MAX_RETRIES}`)
     synth.cancel()
-    const result = await webSpeakOnce(synth, text, opts, voices)
+    const result = await webSpeakOnce(synth, text, opts, voices, generation)
+    if (generation !== queueGeneration) return 'cancelled'
     if (result === 'ended') {
       opts.onEnd?.()
       return 'ok'
@@ -330,14 +342,16 @@ async function takePrefetched(cleanText: string, opts: SpeakOptions): Promise<Ar
   }
 }
 
-async function piperSpeak(text: string, opts: SpeakOptions, force = false): Promise<boolean> {
-  log('debug', `piperSpeak: force=${force}, text="${text}"`)
+async function piperSpeak(text: string, opts: SpeakOptions, generation: number, force = false): Promise<boolean> {
+  log('debug', `piperSpeak: force=${force}, text="${text}", generation=${generation}`)
   try {
+    if (generation !== queueGeneration) return false
     if (!force && Date.now() < piperDisabledUntil) {
       log('debug', `piperSpeak: Piper cooldown active, skipping Piper for now`)
       return false
     }
     const status = await getPiperStatus()
+    if (generation !== queueGeneration) return false
     if (!status.ready || !status.voices.length) {
       log('debug', `piperSpeak: Piper status is not ready or no voices, skipping Piper`)
       return false
@@ -348,6 +362,7 @@ async function piperSpeak(text: string, opts: SpeakOptions, force = false): Prom
       (await takePrefetched(text, opts)) ??
       (await synthesizeWithRetry(text, opts.piperVoice, opts.rate))
     
+    if (generation !== queueGeneration) return false
     log('debug', `piperSpeak: audio data received successfully, length=${wav.byteLength}`)
     const blob = new Blob([wav], { type: 'audio/wav' })
     const url = URL.createObjectURL(blob)
@@ -356,6 +371,11 @@ async function piperSpeak(text: string, opts: SpeakOptions, force = false): Prom
     audio.volume = opts.volume ?? 1
 
     const result = await new Promise<'ended' | 'cancelled'>((resolve, reject) => {
+      if (generation !== queueGeneration) {
+        URL.revokeObjectURL(url)
+        resolve('cancelled')
+        return
+      }
       let settled = false
       const playbackTimer = setTimeout(() => {
         log('warn', `piperSpeak: playback timeout for "${text}"`)
@@ -405,6 +425,7 @@ async function piperSpeak(text: string, opts: SpeakOptions, force = false): Prom
       })
     })
 
+    if (generation !== queueGeneration) return false
     if (result === 'ended') opts.onEnd?.()
     log('debug', `piperSpeak completed for "${text}" with result: ${result}`)
     return true
@@ -423,8 +444,8 @@ function prefersPiper(opts: SpeakOptions): boolean {
   return opts.engine === 'piper' || (opts.engine === 'auto' && (platform === 'linux' || platform === 'win32'))
 }
 
-async function speakInternal(text: string, opts: SpeakOptions, cancelBefore: boolean): Promise<void> {
-  log('debug', `speakInternal: text="${text}", cancelBefore=${cancelBefore}`)
+async function speakInternal(text: string, opts: SpeakOptions, cancelBefore: boolean, generation: number): Promise<void> {
+  log('debug', `speakInternal: text="${text}", cancelBefore=${cancelBefore}, generation=${generation}`)
   const clean = normalizeSpeechText(text)
   if (!clean) {
     log('debug', `speakInternal: text normalized to empty, skipping speech`)
@@ -432,9 +453,11 @@ async function speakInternal(text: string, opts: SpeakOptions, cancelBefore: boo
     return
   }
   if (cancelBefore) cancelSpeech()
+  if (generation !== queueGeneration) return
   if (prefersPiper(opts)) {
     log('debug', `speakInternal: prefers Piper engine`)
-    const ok = await piperSpeak(clean, opts)
+    const ok = await piperSpeak(clean, opts, generation)
+    if (generation !== queueGeneration) return
     if (ok) return
     log('warn', `speakInternal: Piper failed; keeping configured neural voice and not falling back to Web Speech`)
     opts.onError?.('Voz neural Piper falhou nesta frase. Mantive a voz atual e liberei o Ares.')
@@ -442,7 +465,8 @@ async function speakInternal(text: string, opts: SpeakOptions, cancelBefore: boo
     return
   }
   log('debug', `speakInternal: prefers Web Speech engine`)
-  const webResult = await webSpeak(clean, opts)
+  const webResult = await webSpeak(clean, opts, generation)
+  if (generation !== queueGeneration) return
   if (webResult === 'ok' || webResult === 'cancelled') return
   opts.onEnd?.()
 }
@@ -456,7 +480,7 @@ export async function speak(text: string, opts: SpeakOptions = {}): Promise<void
   draining = false
   const generation = queueGeneration
   try {
-    await speakInternal(text, opts, true)
+    await speakInternal(text, opts, true, generation)
   } catch (err) {
     log('error', `speak: uncaught speech error for "${text}"`, err)
     opts.onError?.('Falha inesperada na fala.')
@@ -506,7 +530,7 @@ async function drainQueue(): Promise<void> {
       startPrefetch(sentenceQueue[i].text, sentenceQueue[i].opts)
     }
     try {
-      await withTimeout(speakInternal(text, opts, false), SENTENCE_HARD_TIMEOUT_MS, 'sentence')
+      await withTimeout(speakInternal(text, opts, false, generation), SENTENCE_HARD_TIMEOUT_MS, 'sentence')
     } catch (err) {
       log('error', `drainQueue: uncaught speech error for "${text}"`, err)
       // Se foi o teto rígido, derruba qualquer áudio pendurado antes de seguir a fila.

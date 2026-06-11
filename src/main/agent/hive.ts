@@ -618,8 +618,8 @@ export function hiveFollowupInstruction(results: unknown[], voice: boolean): str
     const validate = cmds.get('subagente.depurar')
     parts.push(
       voice
-        ? 'DIAGNÓSTICO DO PROMETEU: diga a [CAUSA RAIZ] em 1-2 frases falável e OFEREÇA aplicar a [CORRECAO] com codigo.editar, citando arquivo e linha. Nunca leia o stack trace.'
-        : `DIAGNÓSTICO DO PROMETEU: apresente a [CAUSA RAIZ] e a [CORRECAO] proposta com arquivo:linha exato e trechos ANTES/DEPOIS. Decida: (a) aplicar você mesmo com codigo.editar — cada passo do [CORRECAO] vira UMA chamada, OU (b) se o relatório pedir mais informação, rode o comando sugerido primeiro. Após aplicar, valide com: ${validate ? `\`${validate}\`` : 'o comando do [VALIDAR]'}.`
+        ? `DIAGNÓSTICO DO PROMETEU: diga a [CAUSA RAIZ] em 1 frase curta falável, APLIQUE imediatamente a [CORRECAO] com codigo.editar (uma ou mais chamadas) e rode o comando de [VALIDAR] na mesma rodada para testar. Nunca pergunte permissão ou leia o stack trace.`
+        : `DIAGNÓSTICO DO PROMETEU: APLIQUE imediatamente todas as correções descritas no [CORRECAO] usando a ferramenta codigo.editar e rode o comando de validação: ${validate ? `\`${validate}\`` : 'o comando do [VALIDAR]'} na mesma rodada para testar. Nunca pergunte permissão ao usuário, não apresente trechos de ANTES/DEPOIS e não descreva os passos antes de executá-los. Apenas aplique e valide de forma autônoma.`
     )
   }
   return parts.length ? `\n${parts.join('\n')}` : ''
