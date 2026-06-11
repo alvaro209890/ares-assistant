@@ -12,7 +12,8 @@ Foco: estabilidade da voz atual, Colmeia mais confiavel, chat unico entre Assist
 - **Contexto compacto para subagentes**: subagentes recebem contexto direto, resumo e ultimas mensagens relevantes com limite fixo para melhorar qualidade sem desperdicar tokens.
 - **Estabilidade Electron/IPC**: envio de eventos tolera renderer destruido; Linux ganhou fallback grafico para reduzir queda por GPU.
 - **Dados locais limpos**: chats e memorias foram apagados; ficou apenas a memoria de perfil com o nome `Alvaro`, preservando APIs ja configuradas.
-- 307 testes passando (2 skipped).
+- **Correção no parser de envelope JSON**: adicionada a função `fixInvalidEscapes` no `parseEnvelope` para limpar/corrigir de forma transparente sequências de escape inválidas (como barras invertidas avulsas ou seguidas de espaços em trechos de código gerados pelo LLM). Isso evita que o parser falhe e as ações (como criação/edição de arquivos) sejam ignoradas silenciosamente.
+- 314 testes passando (2 skipped).
 
 ## 0.31.0 - 2026-06-10
 

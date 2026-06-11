@@ -178,6 +178,50 @@ function extractJsonObject(text: string): string | null {
 }
 
 /**
+ * Corrige caracteres de escape inválidos dentro de strings JSON geradas pelo LLM.
+ * Substitui barras invertidas avulsas por barras duplas para que o JSON permaneça válido.
+ */
+function fixInvalidEscapes(json: string): string {
+  let result = ''
+  let inString = false
+  for (let i = 0; i < json.length; i++) {
+    const ch = json[i]
+    if (!inString) {
+      result += ch
+      if (ch === '"') {
+        inString = true
+      }
+    } else {
+      if (ch === '"') {
+        inString = false
+        result += ch
+      } else if (ch === '\\') {
+        const next = json[i + 1]
+        if (next === undefined) {
+          result += '\\\\'
+        } else if (['"', '\\', '/', 'b', 'f', 'n', 'r', 't'].includes(next)) {
+          result += ch + next
+          i++
+        } else if (next === 'u') {
+          const hex = json.slice(i + 2, i + 6)
+          if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+            result += ch + next + hex
+            i += 5
+          } else {
+            result += '\\\\'
+          }
+        } else {
+          result += '\\\\'
+        }
+      } else {
+        result += ch
+      }
+    }
+  }
+  return result
+}
+
+/**
  * Faz o parse robusto da resposta do LLM no envelope {fala, acoes}.
  * Aceita JSON puro, JSON dentro de crases, ou texto solto (vira só fala).
  */
@@ -185,7 +229,8 @@ export function parseEnvelope(raw: string): AgentEnvelope {
   const text = (raw || '').trim()
   const tryParse = (s: string): AgentEnvelope | null => {
     try {
-      const obj = JSON.parse(s)
+      const fixed = fixInvalidEscapes(s)
+      const obj = JSON.parse(fixed)
       if (obj && typeof obj === 'object') {
         const fala = typeof obj.fala === 'string' ? obj.fala : ''
         const acoes: Acao[] = Array.isArray(obj.acoes)
