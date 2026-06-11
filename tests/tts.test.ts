@@ -304,3 +304,12 @@ describe('finalSpeechFallback (anti-repetição)', () => {
     expect(finalSpeechFallback(result, true, false)).toBe('')
   })
 })
+
+describe('Cancelamento de áudio residual na mudança de fase', () => {
+  it('garante que clearSpeechQueue cancela a reprodução e limpa a fila', () => {
+    const { cancel } = installSpeechMock()
+    clearSpeechQueue()
+    expect(cancel).toHaveBeenCalled()
+  })
+})
+

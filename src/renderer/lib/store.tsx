@@ -568,9 +568,14 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
         if (ph !== phase) {
           // Resposta final após ferramentas: encerra a fase anterior e recomeça.
           flush(true)
+          // Plano 1: Cancelamento imediato de fila de fala e áudio residual na mudança de fase/passo.
+          // Isso impede que o áudio de uma fase anterior (planejamento, etc.) continue tocando
+          // quando o Ares já mudou de contexto e começou a nova fase agêntica.
+          clearSpeechQueue()
           phase = ph
           display = ''
           sentenceBuf = ''
+          speaking = false
         }
         // 'speak' = canal só de fala (resumo conciso de código): não vai pra tela.
         if (kind !== 'speak') {
