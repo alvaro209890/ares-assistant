@@ -36,11 +36,37 @@ export interface ConvMsg {
 }
 
 export function mergeActivityEvent(events: AgentActivityEvent[] = [], event: AgentActivityEvent): AgentActivityEvent[] {
-  if (event.status === 'output') return [...events, event].slice(-80)
-  const idx = events.findIndex((e) => e.id === event.id && e.status !== 'output')
-  if (idx === -1) return [...events, event].slice(-80)
+  if (event.status === 'output') {
+    const existingIdx = events.findIndex((e) => e.id === event.id)
+    if (existingIdx !== -1) {
+      const next = events.slice()
+      const existing = next[existingIdx]
+      const currentLines = (existing.output || '').split('\n').filter(Boolean)
+      const newLines = (event.output || '').split('\n').filter(Boolean)
+      
+      let combined = [...currentLines, ...newLines]
+      if (combined.length > 8) combined = combined.slice(-8)
+      
+      next[existingIdx] = {
+        ...existing,
+        output: combined.join('\n')
+      }
+      return next
+    }
+    return [...events, event].slice(-80)
+  }
+  
+  const idx = events.findIndex((e) => e.id === event.id)
+  if (idx === -1) {
+    return [...events, event].slice(-80)
+  }
+  
   const next = events.slice()
-  next[idx] = event
+  next[idx] = {
+    ...next[idx],
+    ...event,
+    output: event.output || next[idx].output
+  }
   return next
 }
 

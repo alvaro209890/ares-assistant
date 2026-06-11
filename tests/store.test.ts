@@ -33,7 +33,7 @@ describe('renderer store — fallback de fala final', () => {
     )
   })
 
-  it('atualiza atividade por id e preserva outputs como eventos separados', () => {
+  it('atualiza atividade por id e agrupa os outputs sob a mesma atividade', () => {
     const base: AgentActivityEvent = {
       id: 'act-1',
       kind: 'command',
@@ -48,9 +48,9 @@ describe('renderer store — fallback de fala final', () => {
 
     const merged = mergeActivityEvent(mergeActivityEvent(mergeActivityEvent([], base), output), done)
 
-    expect(merged).toHaveLength(2)
+    expect(merged).toHaveLength(1)
     expect(merged[0].status).toBe('done')
-    expect(merged[1].status).toBe('output')
+    expect(merged[0].output).toBe('passou')
   })
 })
 
