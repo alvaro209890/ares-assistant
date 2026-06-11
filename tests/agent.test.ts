@@ -43,7 +43,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AgentActivityEvent } from '../src/shared/types'
 import { chatJSON, streamChat } from '../src/main/ninerouter'
-import { compactSubagentContext, runTurn, stripRepeatedGreeting } from '../src/main/agent'
+import { compactSubagentContext, hiveFollowupInstruction, runTurn, stripRepeatedGreeting } from '../src/main/agent'
 import { createSession } from '../src/main/data'
 import { updateConfig } from '../src/main/config'
 
@@ -110,6 +110,17 @@ describe('agent — runTurn (orquestração do cérebro)', () => {
     expect(ctx).toContain('Contexto direto da ação')
     expect(ctx).toContain('Atena deve priorizar notícias recentes')
     expect(ctx!.length).toBeLessThanOrEqual(500)
+  })
+
+  it('orienta a sintese para Hefesto e Temis, nao apenas Atena', () => {
+    const out = hiveFollowupInstruction(
+      [{ tipo: 'subagente.construir' }, { tipo: 'subagente.auditar' }],
+      false
+    )
+
+    expect(out).toContain('PLANO DO HEFESTO')
+    expect(out).toContain('AUDITORIA DA TÊMIS')
+    expect(out).toContain('APROVADO/REPROVADO')
   })
 
   it('ignora ação inválida e registra uma nota', async () => {

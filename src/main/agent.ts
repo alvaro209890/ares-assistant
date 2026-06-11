@@ -579,12 +579,33 @@ async function gatherSubagentEvidence(
     if (!cfg.integrations.code.enabled) return undefined
     if (profile.id === 'engineer') {
       const ws = summarizeCodeWorkspace(cfg, root)
-      return `Workspace ${ws.name} (${ws.root}):\nlinguagens: ${JSON.stringify(ws.languages)}\nscripts: ${JSON.stringify(ws.scripts || {})}\narquivos:\n${ws.files.slice(0, 80).join('\n')}\n${ws.hints.join('\n')}`
+      const gitStatus = await runCodeGit(cfg, { root, operation: 'status', signal, onProgress: progress }).catch(() => null)
+      const diffStat = await runCodeGit(cfg, { root, operation: 'diffStat', signal, onProgress: progress }).catch(() => null)
+      return [
+        `Workspace ${ws.name} (${ws.root}):`,
+        `linguagens: ${JSON.stringify(ws.languages)}`,
+        `scripts: ${JSON.stringify(ws.scripts || {})}`,
+        `health: ${ws.health?.label || 'indisponível'}`,
+        `git status:\n${gitStatus?.stdout?.trim() || 'limpo/indisponível'}`,
+        `diff stat:\n${diffStat?.stdout?.trim() || 'sem diff/indisponível'}`,
+        `arquivos:\n${ws.files.slice(0, 120).join('\n')}`,
+        ws.hints.join('\n')
+      ].join('\n')
     }
-    // auditor: roda o diagnóstico real (typecheck/lint/test disponíveis) como material.
-    const diag = await diagnoseProject(cfg, { root, signal, onProgress: progress })
+    // auditor: combina diagnóstico real com Git diff/status para revisar o que mudou.
+    const [diag, gitStatus, diff] = await Promise.all([
+      diagnoseProject(cfg, { root, signal, onProgress: progress }),
+      runCodeGit(cfg, { root, operation: 'status', signal, onProgress: progress }).catch(() => null),
+      runCodeGit(cfg, { root, operation: 'diff', signal, onProgress: progress }).catch(() => null)
+    ])
     const checks = diag.checks.map((c) => `- ${c.name} (${c.command}): ${c.ran ? c.summary : 'não rodou'}`).join('\n')
-    return `Diagnóstico de ${diag.name} (${diag.root}) — ${diag.health.label}:\n${checks}\n${diag.hints.join('\n')}`
+    return [
+      `Diagnóstico de ${diag.name} (${diag.root}) — ${diag.health.label}:`,
+      checks,
+      diag.hints.join('\n'),
+      `git status:\n${gitStatus?.stdout?.trim() || 'limpo/indisponível'}`,
+      `diff para auditoria:\n${(diff?.stdout || '').slice(0, 12000) || 'sem diff/indisponível'}`
+    ].join('\n')
   } catch (e) {
     return `Falha ao coletar material: ${e instanceof Error ? e.message : String(e)}`
   }
@@ -1035,12 +1056,31 @@ function proactiveCodeFollowup(
   }
 }
 
-function researchFollowupInstruction(results: unknown[], voice: boolean): string {
-  const hasResearch = results.some((r) => (r as { tipo?: string })?.tipo === 'subagente.pesquisar')
-  if (!hasResearch) return ''
-  return voice
-    ? '\nPESQUISA DA ATENA: dê uma resposta mais completa que o normal, mas falável: 3 a 5 frases com o achado principal, datas, fontes principais e qualquer incerteza relevante.'
-    : '\nPESQUISA DA ATENA: responda de forma completa e organizada, com achado principal, datas/linha do tempo, fontes principais e incertezas. Não invente detalhes fora do relatório.'
+export function hiveFollowupInstruction(results: unknown[], voice: boolean): string {
+  const tipos = new Set(results.map((r) => (r as { tipo?: string })?.tipo).filter(Boolean))
+  const parts: string[] = []
+  if (tipos.has('subagente.pesquisar')) {
+    parts.push(
+      voice
+        ? 'PESQUISA DA ATENA: dê uma resposta mais completa que o normal, mas falável: 3 a 5 frases com o achado principal, datas, fontes principais e qualquer incerteza relevante.'
+        : 'PESQUISA DA ATENA: responda de forma completa e organizada, com achado principal, datas/linha do tempo, fontes principais e incertezas. Não invente detalhes fora do relatório.'
+    )
+  }
+  if (tipos.has('subagente.construir')) {
+    parts.push(
+      voice
+        ? 'PLANO DO HEFESTO: resuma a arquitetura proposta em 2 a 4 frases e diga claramente se precisa de autorização para aplicar arquivos/patches.'
+        : 'PLANO DO HEFESTO: sintetize o plano por arquivos, ordem de aplicação e validação recomendada. Não cole o relatório inteiro; destaque próximos passos acionáveis.'
+    )
+  }
+  if (tipos.has('subagente.auditar')) {
+    parts.push(
+      voice
+        ? 'AUDITORIA DA TÊMIS: comece pelo veredito APROVADO/REPROVADO e cite só os riscos reais mais importantes.'
+        : 'AUDITORIA DA TÊMIS: comece pelo veredito APROVADO/REPROVADO; depois liste problemas reais com arquivo/linha quando houver, gravidade e correção sugerida. Não inclua elogios genéricos.'
+    )
+  }
+  return parts.length ? `\n${parts.join('\n')}` : ''
 }
 
 function applyMutations(acoes: Acao[]): { board: Board; notes: string[]; changedBoard: boolean } {
@@ -1479,7 +1519,7 @@ export async function runTurn(
         role: 'system',
         content:
           toolResultsPrompt(results, voice, codeMode) +
-          researchFollowupInstruction(results, voice) +
+          hiveFollowupInstruction(results, voice) +
           (proactive ? `\n${proactive.instruction}` : '') +
           (lastRound
             ? '\nLimite de rodadas de ferramentas atingido: responda AGORA ao usuário com o que tem, sem chamar novas ferramentas de consulta.'
