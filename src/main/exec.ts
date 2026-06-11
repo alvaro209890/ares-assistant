@@ -32,6 +32,40 @@ export interface SpawnOptions {
 
 const DEFAULT_MAX_BYTES = 256 * 1024
 
+// ---------------------------------------------------------------------------
+// Windows: npm/npx/yarn/tsc e afins são scripts .cmd — o Node moderno (>= 20.12,
+// fix de CVE) LANÇA EINVAL ao spawná-los sem shell, e o resolvedor sem shell nem
+// acha "npm" sem extensão. Estes comandos são roteados por cmd.exe /d /s /c com
+// os argumentos re-citados. Executáveis nativos conhecidos (git, node, python...)
+// continuam spawnados direto, preservando a fidelidade dos argumentos.
+// ---------------------------------------------------------------------------
+
+const WIN_NATIVE_EXES = new Set([
+  'git', 'node', 'python', 'python3', 'py', 'go', 'cargo', 'rustc', 'java', 'dotnet', 'taskkill', 'where'
+])
+
+/** Cita um argumento para a linha de comando do cmd.exe. Pura e testável. */
+export function quoteWindowsArg(arg: string): string {
+  if (arg === '') return '""'
+  if (!/[\s"&|<>^()%!]/.test(arg)) return arg
+  return `"${arg.replace(/"/g, '\\"')}"`
+}
+
+/**
+ * Decide como spawnar no Windows: direto (exe nativo/caminho com extensão de
+ * executável) ou via cmd.exe (shims .cmd/.bat e comandos "bare" tipo npm).
+ * Pura e testável — fora do Windows o chamador nem deve chamá-la.
+ */
+export function windowsSpawnPlan(file: string, args: string[]): { file: string; args: string[] } {
+  const lower = String(file || '').toLowerCase()
+  const isPath = /[\\/]/.test(lower)
+  if (/\.(exe|com)$/.test(lower)) return { file, args }
+  if (!isPath && WIN_NATIVE_EXES.has(lower)) return { file, args }
+  if (isPath && !/\.(cmd|bat)$/.test(lower)) return { file, args }
+  const commandLine = [quoteWindowsArg(file), ...args.map(quoteWindowsArg)].join(' ')
+  return { file: 'cmd.exe', args: ['/d', '/s', '/c', commandLine] }
+}
+
 export const backgroundProcesses = new Map<string, Set<ChildProcess>>()
 
 export function registerBackgroundProcess(sessionId: string, child: ChildProcess): void {
@@ -92,7 +126,8 @@ export function spawnAsync(file: string, args: string[], opts: SpawnOptions): Pr
 
     let child: ChildProcess
     try {
-      child = spawn(file, args, { cwd: opts.cwd, env: opts.env })
+      const plan = process.platform === 'win32' ? windowsSpawnPlan(file, args) : { file, args }
+      child = spawn(plan.file, plan.args, { cwd: opts.cwd, env: opts.env })
     } catch (e) {
       return resolve({ code: null, stdout: '', stderr: e instanceof Error ? e.message : String(e), timedOut: false, aborted: false })
     }
@@ -173,6 +208,7 @@ export function spawnAsync(file: string, args: string[], opts: SpawnOptions): Pr
           })
         }
       }, opts.startupTimeoutMs ?? 3000)
+      startupTimer.unref?.()
     }
 
     child.stdout?.on('data', (d: Buffer) => {

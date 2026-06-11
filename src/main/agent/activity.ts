@@ -16,15 +16,9 @@ export type ActivityMeta = {
   command?: string
 }
 
-function trimActivityOutput(raw: string): string {
-  return String(raw || '')
-    .split(/\r?\n/)
-    .map((l) => l.trimEnd())
-    .filter(Boolean)
-    .slice(-4)
-    .join('\n')
-    .slice(-900)
-}
+// Cap por EVENTO de output (o renderer agrega os eventos num terminal ao vivo
+// com cap próprio). Grande o bastante para não picotar stack traces.
+const OUTPUT_EVENT_MAX_CHARS = 2000
 
 export function emitActivity(
   onActivity: ActivityFn | undefined,
@@ -54,7 +48,9 @@ export function codeActivityMeta(a: Acao): ActivityMeta | null {
         ? 'Atena investigando'
         : tipo === 'subagente.construir'
           ? 'Hefesto projetando'
-          : 'Têmis auditando'
+          : tipo === 'subagente.depurar'
+            ? 'Prometeu depurando'
+            : 'Têmis auditando'
     return { id: uid('act'), kind: 'hive', title, detail: goal }
   }
   if (!tipo.startsWith('codigo.')) return null
@@ -84,6 +80,8 @@ export function codeActivityMeta(a: Acao): ActivityMeta | null {
       }
     case 'codigo.ler':
       return { ...base, kind: 'read', title: 'Lendo arquivo', detail: file || undefined }
+    case 'codigo.explicar':
+      return { ...base, kind: 'read', title: 'Analisando trecho', detail: file || undefined }
     case 'codigo.comando':
       return { ...base, kind: 'command', title: 'Rodando comando', command }
     case 'codigo.terminal':
@@ -150,15 +148,33 @@ export function activityOk(result: unknown): boolean | undefined {
   return true
 }
 
+/**
+ * Pipe de stdout/stderr para a UI em STREAMING INCREMENTAL: os pedaços são
+ * acumulados entre emissões e enviados CRUS (o renderer concatena e renderiza
+ * um mini-terminal ao vivo, linha a linha). Throttle leve (120 ms) segura o
+ * IPC sem perder conteúdo — antes, só as últimas 4 linhas de cada chunk
+ * sobreviviam e a saída "pulava" em blocos no fim.
+ */
 export function createProgressActivity(onActivity: ActivityFn | undefined, meta: ActivityMeta | null): ProgressFn {
+  let pending = ''
+  let pendingStream: 'stdout' | 'stderr' = 'stdout'
   let last = 0
+  const flush = (): void => {
+    const output = pending.slice(-OUTPUT_EVENT_MAX_CHARS)
+    pending = ''
+    if (output) emitActivity(onActivity, meta, { status: 'output', stream: pendingStream, output })
+  }
   return ({ stream, chunk }) => {
-    const output = trimActivityOutput(chunk)
-    if (!output) return
+    if (!chunk) return
+    // Troca de fluxo (stdout <-> stderr): emite o acumulado antes para o
+    // renderer poder colorir o erro separadamente.
+    if (pending && stream !== pendingStream) flush()
+    pendingStream = stream
+    pending += chunk
     const now = Date.now()
-    if (now - last < 250 && !chunk.includes('\n')) return
+    if (now - last < 120 && !chunk.includes('\n')) return
     last = now
-    emitActivity(onActivity, meta, { status: 'output', stream, output })
+    flush()
   }
 }
 

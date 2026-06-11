@@ -3,7 +3,9 @@
 
 import {
   buildCodeIndex,
+  explainCode,
   findCodeReferences,
+  gitStructuredDiff,
   listCodeFiles,
   outlineCodeFile,
   readCodeFile,
@@ -68,6 +70,20 @@ export const codeReadCommands: ToolCommand[] = [
     run: (a, { cfg }) => toolOk(a.tipo, outlineCodeFile(cfg, { root: argRoot(a), file: argFile(a) }))
   },
   {
+    tipo: 'codigo.explicar',
+    category: 'code-read',
+    run: (a, { cfg }) =>
+      toolOk(
+        a.tipo,
+        explainCode(cfg, {
+          root: argRoot(a),
+          file: argFile(a),
+          startLine: Number(a.inicio || a.start || a.startLine || 0) || undefined,
+          endLine: Number(a.fim || a.end || a.endLine || 0) || undefined
+        })
+      )
+  },
+  {
     tipo: 'codigo.referencias',
     category: 'code-read',
     run: (a, { cfg }) =>
@@ -84,12 +100,21 @@ export const codeReadCommands: ToolCommand[] = [
     tipo: 'codigo.git',
     category: 'code-read',
     async run(a, { cfg, signal, pipeProgress }) {
+      const operation = String(a.operacao || a.operation || 'status')
+      const file = a.arquivo || a.file ? String(a.arquivo || a.file) : undefined
+      // diff estruturado (arquivos + totais + commit semântico sugerido)
+      if (/^diff(struct|estruturado)$/i.test(operation)) {
+        return toolOk(
+          a.tipo,
+          await gitStructuredDiff(cfg, { root: argRoot(a), file, signal, onProgress: pipeProgress })
+        )
+      }
       return toolOk(
         a.tipo,
         await runCodeGit(cfg, {
           root: argRoot(a),
-          operation: String(a.operacao || a.operation || 'status'),
-          file: a.arquivo || a.file ? String(a.arquivo || a.file) : undefined,
+          operation,
+          file,
           signal,
           onProgress: pipeProgress
         })

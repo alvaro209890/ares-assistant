@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MemoryFact } from '../src/shared/types'
-import { AUDITOR, ENGINEER, RESEARCHER, SUBAGENT_PROFILES, getSubagentProfile } from '../src/main/subagents/profiles'
+import { AUDITOR, DEBUGGER, ENGINEER, RESEARCHER, SUBAGENT_PROFILES, getSubagentProfile } from '../src/main/subagents/profiles'
 import { buildTaskPrompt, parseReportTags, relevantMemories, summarizeReport } from '../src/main/subagents/executor'
 import {
   evidenceOf,
@@ -21,9 +21,9 @@ const fact = (text: string, over: Partial<MemoryFact> = {}): MemoryFact => ({
 })
 
 describe('colmeia — perfis dos subagentes', () => {
-  it('tem os três especialistas com campos completos', () => {
-    expect(SUBAGENT_PROFILES).toHaveLength(3)
-    for (const p of [RESEARCHER, ENGINEER, AUDITOR]) {
+  it('tem os quatro especialistas com campos completos', () => {
+    expect(SUBAGENT_PROFILES).toHaveLength(4)
+    for (const p of [RESEARCHER, ENGINEER, AUDITOR, DEBUGGER]) {
       expect(p.label.length).toBeGreaterThan(2)
       expect(p.systemPrompt).toContain('subagente')
       expect(p.temperature).toBeGreaterThanOrEqual(0)
@@ -49,8 +49,26 @@ describe('colmeia — perfis dos subagentes', () => {
     expect(AUDITOR.systemPrompt).toMatch(/\[PROBLEMAS\]/)
   })
 
+  it('Prometeu foca em causa raiz com correção cirúrgica', () => {
+    expect(DEBUGGER.label).toBe('Prometeu')
+    expect(DEBUGGER.systemPrompt).toMatch(/\[CAUSA RAIZ\]/)
+    expect(DEBUGGER.systemPrompt).toMatch(/\[CORRECAO\]/)
+    expect(DEBUGGER.systemPrompt).toMatch(/\[VALIDAR\]/)
+    expect(DEBUGGER.systemPrompt).toMatch(/cir[uú]rgic/i)
+    expect(DEBUGGER.temperature).toBeLessThanOrEqual(AUDITOR.temperature)
+  })
+
+  it('Hefesto tem [TRECHOS] antes/depois e Prometeu tem budget maior de relatório', () => {
+    expect(ENGINEER.systemPrompt).toMatch(/ANTES.*DEPOIS|DEPOIS.*ANTES/is)
+    expect(ENGINEER.reportMaxChars).toBeGreaterThanOrEqual(8000)
+    expect(DEBUGGER.reportMaxChars).toBeGreaterThanOrEqual(8000)
+    // Atena e Têmis usam o padrão menor
+    expect(RESEARCHER.reportMaxChars ?? 6000).toBeLessThan(ENGINEER.reportMaxChars!)
+  })
+
   it('getSubagentProfile acha por id e devolve null para desconhecido', () => {
     expect(getSubagentProfile('engineer')).toBe(ENGINEER)
+    expect(getSubagentProfile('debugger')).toBe(DEBUGGER)
     expect(getSubagentProfile('chef')).toBeNull()
   })
 })
@@ -261,6 +279,43 @@ describe('colmeia — parseReportTags', () => {
     expect(r.risks).toBeTruthy()
     expect(r.risks!.length).toBe(2)
     expect(r.risks![0]).toMatch(/regressão/i)
+  })
+
+  it('extrai [CAUSA RAIZ] do relatório do Prometeu', () => {
+    const r = parseReportTags(
+      '[CAUSA RAIZ] O método `foo` em src/main/x.ts:42 retorna undefined antes do await.\n[EVIDÊNCIA]\n- linha 42: return foo()\n[CORRECAO]\n1. src/main/x.ts:42 — adicionar await\n[VALIDAR]\nnpm test'
+    )
+    expect(r.rootCause).toMatch(/foo.*src\/main\/x\.ts/)
+  })
+
+  it('extrai [VALIDAR] como comando limpo (sem backticks, sem bullets)', () => {
+    const r1 = parseReportTags('[VALIDAR]\n`npm run verify`\n')
+    expect(r1.validateCmd).toBe('npm run verify')
+
+    const r2 = parseReportTags('[VALIDAR]\n- npm test -- --reporter=verbose\n')
+    expect(r2.validateCmd).toBe('npm test -- --reporter=verbose')
+
+    const r3 = parseReportTags('[VALIDAR] npm run typecheck')
+    expect(r3.validateCmd).toBe('npm run typecheck')
+  })
+
+  it('extrai [ESCOPO] como primeira linha do Hefesto', () => {
+    const r = parseReportTags(
+      '[ESCOPO] Adicionar campo `expiry` em UserProfile sem quebrar contratos existentes.\n[ARQUIVOS]\n- src/types.ts (editar): novo campo'
+    )
+    expect(r.scope).toMatch(/expiry.*UserProfile/i)
+  })
+
+  it('extrai [PROBLEMAS] estruturado da Têmis', () => {
+    const r = parseReportTags(
+      '[VEREDITO] REPROVADO\n[PROBLEMAS]\n- src/main/code.ts:456 — alta — `foo` retorna undefined quando cfg é null\n- src/renderer/App.tsx:12 — baixa — import não utilizado\n'
+    )
+    expect(r.problems).toHaveLength(2)
+    expect(r.problems![0].file).toBe('src/main/code.ts')
+    expect(r.problems![0].line).toBe(456)
+    expect(r.problems![0].severity).toBe('alta')
+    expect(r.problems![0].desc).toMatch(/foo.*undefined/)
+    expect(r.problems![1].severity).toBe('baixa')
   })
 
   it('devolve objeto vazio quando não há tags', () => {

@@ -591,6 +591,17 @@ function protectSentenceDots(text: string): { text: string; restore: (value: str
 const EAGER_MIN_CHARS = 48
 const EAGER_MAX_CHARS = 140
 
+// Fast-path de STATUS: frases curtas de progresso de código ("Executando os testes,
+// senhor.") chegam inteiras num único delta e terminam o buffer com pontuação final.
+// A regex normal de sentenças exige um caractere DEPOIS da pontuação quando o stream
+// não é final — então o anúncio ficava preso na fila até o próximo delta (ou o flush
+// do fim do turno), e o Ares parecia mudo durante a tarefa. Critérios de segurança:
+// começa com verbo de status, é curta e termina com pontuação precedida de LETRA
+// (nunca corta "3." de "3.14"; extensões tipo "code.ts" terminam em letra e são
+// frases completas de status de qualquer forma).
+const STATUS_FAST_RE =
+  /^\s*(executando|rodando|checando|verificando|analisando|aplicando|compilando|testando|buscando|lendo|editando|criando|formatando|indexando|acionando|consultando|passando|preparando|instalando|atualizando|gerando|mapeando|identifiquei|encontrei|conclu[ií]do|pronto)\b[\s\S]{0,140}\p{L}[.!?…]+\s*$/iu
+
 function eagerSplitIndex(buffer: string): number {
   if (buffer.length < EAGER_MAX_CHARS) return -1
   const windowText = buffer.slice(EAGER_MIN_CHARS, EAGER_MAX_CHARS)
@@ -647,6 +658,15 @@ export function splitSentences(
     lastIndex = sentenceRe.lastIndex
   }
   let rest = protectedText.restore(scan.slice(lastIndex))
+  // Prioridade ultra-rápida para frases de status de código: se o que sobrou no
+  // buffer é um anúncio de progresso completo, toca AGORA em vez de esperar o
+  // próximo delta confirmar a pontuação.
+  if (!final && rest.trim() && STATUS_FAST_RE.test(rest)) {
+    const status = rest.trim()
+    sentences.push(status)
+    log('debug', `splitSentences: status fast-path sentence="${status}"`)
+    rest = ''
+  }
   // Sem frase completa ainda E nada falado neste turno: corta a primeira oração
   // na vírgula para reduzir a latência até o primeiro som.
   if (!final && opts.eager && sentences.length === 0) {

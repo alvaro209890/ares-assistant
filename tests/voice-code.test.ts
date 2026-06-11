@@ -6,8 +6,33 @@ import {
   sanitizeVoiceCodeFala,
   toolResultsPrompt,
   voiceCodeInterpretation,
-  voiceAwareUserContent
+  voiceAwareUserContent,
+  voiceToolAnnouncement
 } from '../src/main/voiceCode'
+
+describe('voiceToolAnnouncement — anúncio falado não-bloqueante', () => {
+  it('anuncia a primeira ação reconhecida em frase curta', () => {
+    expect(voiceToolAnnouncement([{ tipo: 'codigo.testar' }])).toMatch(/testes/i)
+    expect(voiceToolAnnouncement([{ tipo: 'codigo.typecheck' }])).toMatch(/tipos/i)
+    expect(voiceToolAnnouncement([{ tipo: 'subagente.depurar' }])).toMatch(/Prometeu/)
+  })
+
+  it('inclui o nome curto do arquivo em edições e leituras', () => {
+    expect(voiceToolAnnouncement([{ tipo: 'codigo.editar', arquivo: 'src/main/code.ts' }])).toContain('code.ts')
+    expect(voiceToolAnnouncement([{ tipo: 'codigo.ler', arquivo: 'src\\renderer\\App.tsx' }])).toContain('App.tsx')
+  })
+
+  it('resume o comando do terminal sem despejar a linha inteira', () => {
+    const out = voiceToolAnnouncement([{ tipo: 'codigo.terminal', comando: 'npm run test -- --reporter=verbose --watch=false' }])
+    expect(out).toContain('npm run test')
+    expect(out).not.toContain('--reporter')
+  })
+
+  it('devolve vazio para ações sem anúncio mapeado', () => {
+    expect(voiceToolAnnouncement([{ tipo: 'clima.consultar' }])).toBe('')
+    expect(voiceToolAnnouncement([])).toBe('')
+  })
+})
 
 describe('voz no modo programador', () => {
   it('interpreta caminhos e extensoes ditados por voz', () => {

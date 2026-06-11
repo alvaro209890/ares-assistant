@@ -37,37 +37,45 @@ export interface ConvMsg {
   activities?: AgentActivityEvent[]
 }
 
+// Caps do terminal ao vivo: linhas/chars suficientes para acompanhar um build
+// sem deixar a mensagem do chat gigante (o backend já limita cada evento).
+const TERMINAL_MAX_LINES = 40
+const TERMINAL_MAX_CHARS = 6000
+
 export function mergeActivityEvent(events: AgentActivityEvent[] = [], event: AgentActivityEvent): AgentActivityEvent[] {
   if (event.status === 'output') {
     const existingIdx = events.findIndex((e) => e.id === event.id)
     if (existingIdx !== -1) {
       const next = events.slice()
       const existing = next[existingIdx]
-      const currentLines = (existing.output || '').split('\n').filter(Boolean)
-      const newLines = (event.output || '').split('\n').filter(Boolean)
-      
-      let combined = [...currentLines, ...newLines]
-      if (combined.length > 8) combined = combined.slice(-8)
-      
+      // Streaming incremental: concatena os pedaços CRUS (preserva linhas
+      // parciais que chegam divididas entre eventos) e capa pelo fim.
+      const combined = `${existing.output || ''}${event.output || ''}`
+      const lines = combined.split('\n')
+      const capped = (lines.length > TERMINAL_MAX_LINES ? lines.slice(-TERMINAL_MAX_LINES) : lines)
+        .join('\n')
+        .slice(-TERMINAL_MAX_CHARS)
       next[existingIdx] = {
         ...existing,
-        output: combined.join('\n')
+        status: existing.status === 'running' || existing.status === 'output' ? 'output' : existing.status,
+        stream: event.stream || existing.stream,
+        output: capped
       }
       return next
     }
     return [...events, event].slice(-80)
   }
-  
+
   const idx = events.findIndex((e) => e.id === event.id)
   if (idx === -1) {
     return [...events, event].slice(-80)
   }
-  
+
   const next = events.slice()
   next[idx] = {
     ...next[idx],
     ...event,
-    output: event.output || next[idx].output
+    output: next[idx].output || event.output
   }
   return next
 }
@@ -96,11 +104,12 @@ export function finalSpeechFallback(
 
 type Screen = 'assistant' | 'office' | 'tasks' | 'calendar' | 'reminders' | 'lists' | 'memory' | 'models' | 'system'
 
-// Estado inicial da Colmeia: os três especialistas ociosos.
+// Estado inicial da Colmeia: os quatro especialistas ociosos.
 export const HIVE_IDLE: HiveWorkerStatus[] = [
   { id: 'researcher', label: 'Atena', phase: 'idle', updatedAt: 0 },
   { id: 'engineer', label: 'Hefesto', phase: 'idle', updatedAt: 0 },
-  { id: 'auditor', label: 'Têmis', phase: 'idle', updatedAt: 0 }
+  { id: 'auditor', label: 'Têmis', phase: 'idle', updatedAt: 0 },
+  { id: 'debugger', label: 'Prometeu', phase: 'idle', updatedAt: 0 }
 ]
 
 /** Aplica uma atualização de status de subagente à lista da Colmeia. Pura e testável. */

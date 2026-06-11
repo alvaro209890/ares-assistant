@@ -60,8 +60,8 @@ describe('renderer store — fallback de fala final', () => {
 })
 
 describe('renderer store — Colmeia (mergeHiveStatus)', () => {
-  it('comeca com os tres especialistas ociosos', () => {
-    expect(HIVE_IDLE.map((w) => w.id)).toEqual(['researcher', 'engineer', 'auditor'])
+  it('comeca com os quatro especialistas ociosos', () => {
+    expect(HIVE_IDLE.map((w) => w.id)).toEqual(['researcher', 'engineer', 'auditor', 'debugger'])
     expect(HIVE_IDLE.every((w) => w.phase === 'idle')).toBe(true)
   })
 
@@ -75,7 +75,7 @@ describe('renderer store — Colmeia (mergeHiveStatus)', () => {
     })
     expect(next.find((w) => w.id === 'engineer')?.phase).toBe('thinking')
     expect(next.find((w) => w.id === 'researcher')?.phase).toBe('idle')
-    expect(next).toHaveLength(3)
+    expect(next).toHaveLength(4)
     expect(HIVE_IDLE.find((w) => w.id === 'engineer')?.phase).toBe('idle')
   })
 

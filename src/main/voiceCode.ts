@@ -262,8 +262,18 @@ function summarizeCodeResult(tipo: string, resultado: Record<string, unknown>, e
       return `Encontrei ${oneOrMany(total, 'referencia', 'referencias')} de ${symbol} em ${oneOrMany(files.length, 'arquivo', 'arquivos')}${first ? `; principal em ${first}` : ''}`
     }
     case 'codigo.comando':
-    case 'codigo.git':
       return commandOutcome(resultado)
+    case 'codigo.git': {
+      // diffStruct devolve um summary pronto (arquivos, totais e commit sugerido).
+      const summary = str(resultado.summary)
+      return summary || commandOutcome(resultado)
+    }
+    case 'codigo.explicar': {
+      const file = str(resultado.file) || 'arquivo'
+      const items = arr(resultado.outline).length
+      const hints = arr(resultado.hints).map(str).filter(Boolean)
+      return compactSpeech([`Analisei ${file}: ${oneOrMany(items, 'simbolo', 'simbolos')}`, hints[0] || ''], 320)
+    }
     case 'codigo.terminal': {
       if (resultado.requiresApproval === true) {
         const command = str(resultado.command)
@@ -313,6 +323,9 @@ function summarizeCodeResult(tipo: string, resultado: Record<string, unknown>, e
     case 'codigo.patch.aplicar': {
       const files = arr(resultado.files).length
       const applied = resultado.applied === true
+      if (resultado.reverted === true) {
+        return `Patch revertido automaticamente: a sintaxe quebrou em ${oneOrMany(files, 'arquivo', 'arquivos')}. Nada foi alterado`
+      }
       return `${applied ? 'Patch aplicado' : 'Patch validado'} em ${oneOrMany(files, 'arquivo', 'arquivos')}`
     }
     case 'codigo.indexar': {
@@ -359,6 +372,66 @@ export function isDuplicateSpeech(a: string, b: string): boolean {
   const nb = norm(b)
   if (!na || !nb) return false
   return na === nb || na.includes(nb) || nb.includes(na)
+}
+
+/**
+ * Anúncio falado de progresso ANTES de rodar as ferramentas de uma rodada: frase
+ * curta dita EM PARALELO com a execução (voz assíncrona, não segura o turno).
+ * Cobre o silêncio das rodadas intermediárias do modo voz+código, em que a
+ * resposta crua do modelo vai só para a tela — sem isto, o usuário ficava no
+ * vácuo até o heartbeat dos 15 s. A primeira ação reconhecida dita o anúncio.
+ * Pura e testável.
+ */
+export function voiceToolAnnouncement(actions: Acao[]): string {
+  for (const a of actions || []) {
+    const tipo = String(a?.tipo || '')
+    const file = basename(String(a?.arquivo || a?.file || ''))
+    switch (tipo) {
+      case 'codigo.testar':
+        return 'Executando os testes, senhor.'
+      case 'codigo.typecheck':
+        return 'Checando os tipos do projeto.'
+      case 'codigo.lint':
+        return 'Passando o linter no projeto.'
+      case 'codigo.formatar':
+        return 'Formatando o código.'
+      case 'codigo.diagnostico':
+        return 'Rodando o diagnóstico do projeto.'
+      case 'codigo.deps':
+        return 'Verificando as dependências.'
+      case 'codigo.editar':
+        return file ? `Aplicando a correção em ${file}.` : 'Aplicando a edição.'
+      case 'codigo.criar':
+        return file ? `Criando ${file}.` : 'Criando o arquivo.'
+      case 'codigo.patch.aplicar':
+        return 'Aplicando o patch com validação de sintaxe.'
+      case 'codigo.buscar':
+        return 'Buscando no código.'
+      case 'codigo.ler':
+        return file ? `Lendo ${file}.` : 'Lendo o arquivo.'
+      case 'codigo.explicar':
+        return file ? `Analisando ${file}.` : 'Analisando o trecho.'
+      case 'codigo.terminal':
+      case 'codigo.comando':
+      case 'codigo.confirmar': {
+        const c = String(a?.comando || a?.command || '').trim().split(/\s+/).slice(0, 3).join(' ')
+        return c ? `Executando ${c} no terminal.` : 'Executando o comando.'
+      }
+      case 'codigo.projeto':
+        return 'Acionando o coder autônomo. Acompanho os passos.'
+      case 'codigo.git':
+        return 'Consultando o estado do Git.'
+      case 'subagente.depurar':
+        return 'Passando o erro ao Prometeu para depuração.'
+      case 'subagente.pesquisar':
+        return 'Acionando a Atena.'
+      case 'subagente.construir':
+        return 'Acionando o Hefesto.'
+      case 'subagente.auditar':
+        return 'Acionando a Têmis.'
+    }
+  }
+  return ''
 }
 
 export function codeVoiceProgressSummary(results: unknown[]): string {

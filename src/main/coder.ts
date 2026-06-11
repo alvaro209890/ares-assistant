@@ -224,6 +224,12 @@ export async function runCoderTask(
   let done = false
 
   for (let i = 0; i < maxSteps; i++) {
+    // Cancelamento (Esc/IPC): sem esta checagem, um erro de parse em loop ainda
+    // disparava novas chamadas ao LLM depois de o usuário abortar a tarefa.
+    if (opts.signal?.aborted) {
+      transcript.push({ written: [], skipped: [], ran: [], summary: 'tarefa cancelada pelo usuário', done: false })
+      break
+    }
     const ws = summarizeCodeWorkspace(cfg, root)
     let raw = ''
     try {
@@ -233,7 +239,8 @@ export async function runCoderTask(
           { role: 'system', content: CODER_SYSTEM },
           { role: 'user', content: buildCoderPrompt(objective, ws.files, lastResult) }
         ],
-        true
+        true,
+        { signal: opts.signal }
       )
     } catch (e) {
       transcript.push({ written: [], skipped: [], ran: [], summary: `falha ao planejar: ${e instanceof Error ? e.message : e}`, done: false })

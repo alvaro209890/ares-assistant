@@ -233,6 +233,26 @@ describe('tts', () => {
     expect(splitSentences('Oi, tudo bem', false, { eager: true }).sentences).toEqual([])
   })
 
+  it('fast-path: frase de status de código toca imediatamente sem esperar o próximo delta', () => {
+    installSpeechMock()
+    // Anúncio de progresso chega INTEIRO num único delta e termina o buffer com
+    // pontuação — sem o fast-path, ficava preso até o flush final.
+    const split = splitSentences(' Executando os testes, senhor.', false)
+    expect(split.sentences).toEqual(['Executando os testes, senhor.'])
+    expect(split.rest).toBe('')
+
+    const edit = splitSentences(' Aplicando a correção em code.ts.', false)
+    expect(edit.sentences).toEqual(['Aplicando a correção em code.ts.'])
+  })
+
+  it('fast-path de status não dispara para texto comum sem verbo de status', () => {
+    installSpeechMock()
+    // Texto narrativo terminando com ponto no fim do buffer continua esperando
+    // confirmação do próximo delta (evita cortar "3." de "3.14" etc.).
+    expect(splitSentences('O total foi de 3.', false).sentences).toEqual([])
+    expect(splitSentences('Certo, vou olhar isso agora.', false).sentences).toEqual([])
+  })
+
   it('quebra texto longo sem pontuacao para nao atrasar a voz', () => {
     installSpeechMock()
     const long = Array.from({ length: 70 }, (_, i) => `palavra${i}`).join(' ')

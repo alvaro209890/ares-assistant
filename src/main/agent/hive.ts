@@ -14,6 +14,7 @@ import {
   diagnoseProject,
   outlineCodeFile,
   proactiveValidationCommand,
+  readCodeContext,
   runCodeGit,
   summarizeCodeWorkspace
 } from '../code'
@@ -21,6 +22,7 @@ import { codingPreferencesSummary, getSession, getSessionContext } from '../data
 import {
   evidenceOf,
   parseGitStatusFiles,
+  parseReportTags,
   pickRelevantFiles,
   type EvidencePackage,
   type EvidenceSection,
@@ -80,12 +82,51 @@ export async function gatherResearcherEvidence(a: Acao, goal: string): Promise<E
     })
   }
   const url = String(a.url || a.endereco || '').trim()
+
+  // Busca proativa: lê as top-2 páginas dos resultados principais em paralelo,
+  // sem bloquear — se uma falhar ou demorar >7s, é descartada silenciosamente.
+  // Só faz isso quando não há URL explícita (para não duplicar a leitura abaixo).
+  if (!url && results.length) {
+    const topUrls = results
+      .slice(0, 3)
+      .map((r) => (r as { url?: string }).url)
+      .filter((u): u is string => !!u && u.startsWith('http'))
+      .slice(0, 2)
+    if (topUrls.length) {
+      const timeout = (ms: number): Promise<never> =>
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))
+      const fetched = await Promise.allSettled(
+        topUrls.map((pu) => Promise.race([readPage(pu), timeout(7000)]))
+      )
+      for (let i = 0; i < topUrls.length; i++) {
+        const r = fetched[i]
+        if (r.status !== 'fulfilled' || !r.value) continue
+        const p = r.value as { title?: string; text?: string; content?: string } | string
+        const body = typeof p === 'string'
+          ? p
+          : [p.title, p.text || p.content].filter(Boolean).join('\n\n')
+        if (body.trim().length > 100) {
+          sections.push({
+            title: `Conteúdo completo: ${topUrls[i]}`,
+            body: body.slice(0, 5000),
+            priority: 1,
+            minChars: 2000
+          })
+        }
+      }
+    }
+  }
+
   if (url) {
     try {
       const page = await readPage(url)
+      const p = page as { title?: string; text?: string; content?: string } | string
+      const body = typeof p === 'string'
+        ? p
+        : [p.title, p.text || p.content].filter(Boolean).join('\n\n')
       sections.push({
         title: `Conteúdo da página ${url}`,
-        body: JSON.stringify(page),
+        body: body || JSON.stringify(page),
         priority: 1,
         minChars: 1000
       })
@@ -261,6 +302,175 @@ export async function gatherAuditorEvidence(
 }
 
 /**
+ * Coletor do Prometeu: LOGS DE ERRO em primeiro plano (vindos da ação ou do
+ * último comando), diagnóstico real do projeto e os arquivos citados no stack
+ * trace com outline. O log de erro é a seção de maior prioridade — é a matéria-
+ * prima do diagnóstico; o resto é contexto para localizar a causa raiz.
+ */
+export async function gatherDebuggerEvidence(
+  cfg: AppConfig,
+  root: string,
+  a: Acao,
+  goal: string,
+  signal?: AbortSignal,
+  progress?: ProgressFn
+): Promise<EvidencePackage> {
+  const notes: string[] = []
+  const sections: EvidenceSection[] = []
+  const errorLogs = String(a.logs_erro || a.logs || a.erro || a.stderr || '').trim()
+
+  if (errorLogs) {
+    sections.push({
+      title: 'Saída de erro (logs/stack trace)',
+      body: errorLogs,
+      priority: 1,
+      minChars: 2500
+    })
+  } else {
+    notes.push('nenhum log de erro recebido na ação: diagnóstico parte só do estado do projeto')
+  }
+
+  const [diag, status] = await Promise.all([
+    diagnoseProject(cfg, { root, signal, onProgress: progress }).catch((e) => { notes.push(`diagnóstico falhou: ${msg(e)}`); return null }),
+    runCodeGit(cfg, { root, operation: 'status', signal, onProgress: progress }).catch(() => null)
+  ])
+  if (diag) {
+    const checks = diag.checks
+      .map((c) => `- ${c.name} (${c.command}): ${c.ran ? c.summary : 'não rodou'}`)
+      .join('\n')
+    sections.push({
+      title: `Diagnóstico de ${diag.name} — ${diag.health.label}`,
+      body: [checks, diag.hints.join('\n')].filter(Boolean).join('\n'),
+      priority: 1,
+      minChars: 500
+    })
+  }
+  const statusOut = status?.stdout?.trim() || ''
+  if (statusOut) {
+    sections.push({ title: 'git status --short', body: statusOut, priority: 2, minChars: 200 })
+  }
+
+  // Usa extractErrorLocations para obter arquivo + linha exata de cada ponto
+  // do stack trace. Para cada localização lê ±30 linhas de contexto real em vez
+  // de apenas o outline — o Prometeu vê o código no ponto exato do erro.
+  const ws = summarizeCodeWorkspace(cfg, root)
+  const locations = extractErrorLocations(errorLogs, ws.files)
+  const codeContexts: string[] = []
+  const filesWithContext = new Set<string>()
+  for (const { file, line } of locations.slice(0, 4)) {
+    if (signal?.aborted) break
+    try {
+      const ctx = readCodeContext(cfg, root, file, line, 30)
+      codeContexts.push(`### ${file} (em torno da linha ${line})\n${ctx}`)
+      filesWithContext.add(file)
+    } catch {
+      /* arquivo inacessível: cai no outline abaixo */
+    }
+  }
+  if (codeContexts.length) {
+    sections.push({
+      title: 'Contexto de código nos pontos de erro',
+      body: codeContexts.join('\n\n'),
+      priority: 1,
+      minChars: 1500
+    })
+  }
+
+  // Para arquivos citados no log mas sem linha (ou que falharam no contexto),
+  // ainda fornece o outline como fallback.
+  const fromLogs = extractFilesFromErrorLogs(errorLogs, ws.files)
+  const remaining = Array.from(
+    new Set([
+      ...fromLogs.filter((f) => !filesWithContext.has(f)),
+      ...pickRelevantFiles(ws.files, `${goal} ${errorLogs.slice(0, 400)}`, 5)
+    ])
+  ).slice(0, 6)
+  const outlines: string[] = []
+  for (const file of remaining) {
+    if (signal?.aborted) break
+    try {
+      const ol = outlineCodeFile(cfg, { root, file })
+      if (!ol.items.length) continue
+      const items = ol.items.slice(0, 18).map((i) => `${i.kind} ${i.name} @ L${i.line}`).join('\n')
+      outlines.push(`### ${file} (${ol.totalLines} linhas)\n${items}`)
+    } catch {
+      /* arquivo binário/inacessível: pula sem ruído */
+    }
+  }
+  if (outlines.length) {
+    sections.push({
+      title: 'Arquivos suspeitos (outlines)',
+      body: outlines.join('\n\n'),
+      priority: 2,
+      minChars: 600
+    })
+  }
+  return evidenceOf(sections, notes)
+}
+
+/**
+ * Extrai localizações arquivo:linha de logs de erro/stack trace, confirmando
+ * cada caminho contra a lista real do workspace. Preferida ao invés de
+ * extractFilesFromErrorLogs quando o número de linha é essencial (Prometeu).
+ * Pura e testável.
+ */
+export function extractErrorLocations(
+  logs: string,
+  projectFiles: string[]
+): Array<{ file: string; line: number }> {
+  if (!logs || !projectFiles.length) return []
+  const found: Array<{ file: string; line: number }> = []
+  const normalized = new Map(projectFiles.map((f) => [f.toLowerCase(), f]))
+  // Casa "path/file.ts:456", "path/file.ts:456:7", "at file.ts (linha 456"
+  const re = /([\w./\\-]+\.(?:tsx?|jsx?|mjs|cjs|py|go|rs|java|rb))(?::(\d+)|\s+\((\d+))/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(logs)) && found.length < 6) {
+    const lineNum = parseInt(m[2] || m[3] || '0', 10)
+    if (!lineNum) continue
+    const raw = m[1].replace(/\\+/g, '/').replace(/^\.\//, '')
+    const parts = raw.toLowerCase().split('/')
+    for (let i = 0; i < parts.length; i++) {
+      const suffix = parts.slice(i).join('/')
+      const hit =
+        normalized.get(suffix) ||
+        projectFiles.find((f) => f.toLowerCase().endsWith(`/${suffix}`) || f.toLowerCase() === suffix)
+      if (hit && !found.some((x) => x.file === hit)) {
+        found.push({ file: hit, line: lineNum })
+        break
+      }
+    }
+  }
+  return found
+}
+
+/**
+ * Extrai caminhos de arquivos do projeto citados num log de erro/stack trace.
+ * Casa tanto caminhos com / quanto com \ (Windows) e confere contra a lista
+ * real de arquivos do workspace. Pura e testável.
+ */
+export function extractFilesFromErrorLogs(logs: string, projectFiles: string[]): string[] {
+  if (!logs || !projectFiles.length) return []
+  const found: string[] = []
+  const normalized = new Map(projectFiles.map((f) => [f.toLowerCase(), f]))
+  const re = /([\w./\\-]+\.(?:tsx?|jsx?|mjs|cjs|json|py|go|rs|java|rb|css|html|vue))(?=[\s:),'"]|$)/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(logs)) && found.length < 6) {
+    const raw = m[1].replace(/\\+/g, '/').replace(/^\.\//, '')
+    // Tenta casar pelo caminho completo e por sufixos progressivamente menores.
+    const parts = raw.toLowerCase().split('/')
+    for (let i = 0; i < parts.length; i++) {
+      const suffix = parts.slice(i).join('/')
+      const hit = normalized.get(suffix) || projectFiles.find((f) => f.toLowerCase().endsWith(`/${suffix}`) || f.toLowerCase() === suffix)
+      if (hit) {
+        if (!found.includes(hit)) found.push(hit)
+        break
+      }
+    }
+  }
+  return found
+}
+
+/**
  * Despachante: roteia para o coletor certo conforme o perfil. Falhas viram
  * `notes` no pacote — nunca derrubam o turno. Quando o módulo de programação
  * está desativado, devolve um pacote sinalizando a indisponibilidade no notes.
@@ -280,6 +490,7 @@ export async function gatherSubagentEvidence(
       return { sections: [], notes: ['ferramentas de programação desativadas: sem material de código'] }
     }
     if (profile.id === 'engineer') return await gatherEngineerEvidence(cfg, root, goal, signal, progress)
+    if (profile.id === 'debugger') return await gatherDebuggerEvidence(cfg, root, a, goal, signal, progress)
     return await gatherAuditorEvidence(cfg, root, signal, progress)
   } catch (e) {
     return { sections: [], notes: [`falha ao coletar material: ${msg(e)}`] }
@@ -327,7 +538,7 @@ export const compactSubagentContext = buildTaskContext
 // Verbos de DELEGAÇÃO (separados dos verbos de DOMÍNIO) — só consideramos que o
 // Ares prometeu chamar a Colmeia quando ele sinaliza encaminhamento explícito.
 const DELEGATION_RE =
-  /(?:\bvou\s+(?:pedir|chamar|acionar|consultar|encaminhar|delegar)|\bpeç[oa]\s+(?:para|à|ao)|\bdeixe?\s+(?:com|que)\s+(?:a|o)\s+|\bacionar\s+(?:a|o)\s+|\bdelegar\s+(?:para|à|ao)|\bencaminhar\s+(?:para|à|ao)|\bagora\s+com\s+(?:a|o)\s+|\bfica\s+com\s+(?:a|o)\s+|\bhefesto\s+(?:vai|projeta|desenh)|\bt[eê]mis\s+(?:fará|vai|audita)|\batena\s+(?:vai|investiga|pesquisa))/iu
+  /(?:\bvou\s+(?:pedir|chamar|acionar|consultar|encaminhar|delegar|passar)|\bpeç[oa]\s+(?:para|à|ao)|\bdeixe?\s+(?:com|que)\s+(?:a|o)\s+|\bacionar\s+(?:a|o)\s+|\bdelegar\s+(?:para|à|ao)|\bencaminhar\s+(?:para|à|ao)|\bagora\s+com\s+(?:a|o)\s+|\bfica\s+com\s+(?:a|o)\s+|\bhefesto\s+(?:vai|projeta|desenh)|\bt[eê]mis\s+(?:fará|vai|audita)|\batena\s+(?:vai|investiga|pesquisa)|\bprometeu\s+(?:vai|depura|investiga|analisa))/iu
 
 /**
  * Guarda determinística para a Colmeia: se o modelo PROMETE chamar um
@@ -353,12 +564,31 @@ export function inferPromisedHiveAction(fala: string, userText: string, acoes: A
   if (has(/\bt[eê]mis\b/iu) && has(/(audit|revis|valid|qualid|verificar|diagn[oó]stic|parecer|veredito|inspe[cç])/iu)) {
     return { tipo: 'subagente.auditar', objetivo: goal, contexto }
   }
+  if (has(/\bprometeu\b/iu) && has(/(depur|debug|erro|falha|exce[cç][aã]o|stack|trace|quebr|crash|bug)/iu)) {
+    return { tipo: 'subagente.depurar', objetivo: goal, contexto }
+  }
   return null
 }
 
-/** Instrução para a fala pós-relatório dos especialistas (na rodada seguinte). */
+/**
+ * Instrução para a fala pós-relatório dos especialistas (na rodada seguinte).
+ * Extrai validateCmd de cada relatório para incluir o comando exato no texto
+ * em vez do genérico "use o [VALIDAR]".
+ */
 export function hiveFollowupInstruction(results: unknown[], voice: boolean): string {
   const tipos = new Set(results.map((r) => (r as { tipo?: string })?.tipo).filter(Boolean))
+
+  // Parseia validateCmd e scope de cada relatório recebido.
+  const cmds = new Map<string, string>()
+  const scopes = new Map<string, string>()
+  for (const r of results) {
+    const o = r as { tipo?: string; resultado?: { relatorio?: string } }
+    if (!o.tipo || !o.resultado?.relatorio) continue
+    const tags = parseReportTags(o.resultado.relatorio)
+    if (tags.validateCmd) cmds.set(o.tipo, tags.validateCmd)
+    if (tags.scope) scopes.set(o.tipo, tags.scope)
+  }
+
   const parts: string[] = []
   if (tipos.has('subagente.pesquisar')) {
     parts.push(
@@ -368,17 +598,28 @@ export function hiveFollowupInstruction(results: unknown[], voice: boolean): str
     )
   }
   if (tipos.has('subagente.construir')) {
+    const validate = cmds.get('subagente.construir')
+    const scope = scopes.get('subagente.construir')
     parts.push(
       voice
-        ? 'BRIEFING DO HEFESTO: resuma [ESCOPO] e os [ARQUIVOS] em 2 a 4 frases e diga se aplica passo a passo ou se delega ao coder autônomo.'
-        : 'BRIEFING DO HEFESTO: sintetize [ESCOPO], [ARQUIVOS] (ordem) e [VALIDAR]. Decida explicitamente entre dois caminhos: (a) aplicar você mesmo com codigo.editar/criar seguindo o [PASSOS], OU (b) delegar ao coder autônomo via codigo.projeto. Nunca leia o relatório inteiro; destaque próximos passos acionáveis.'
+        ? `BRIEFING DO HEFESTO: resuma ${scope ? `"${scope.slice(0, 80)}"` : '[ESCOPO]'} em 1-2 frases e diga se aplica passo a passo ou se delega ao coder autônomo.`
+        : `BRIEFING DO HEFESTO: sintetize [ESCOPO], [ARQUIVOS] (ordem) e [TRECHOS] antes/depois. Decida entre: (a) aplicar você mesmo com codigo.editar/criar seguindo [PASSOS], OU (b) delegar ao coder autônomo via codigo.projeto se o [ESCOPO] recomendar. Após aplicar, valide com: ${validate ? `\`${validate}\`` : 'o comando do [VALIDAR]'}. Não leia o relatório inteiro — cite próximos passos.`
     )
   }
   if (tipos.has('subagente.auditar')) {
+    const validate = cmds.get('subagente.auditar')
     parts.push(
       voice
         ? 'AUDITORIA DA TÊMIS: comece pelo [VEREDITO] APROVADO/REPROVADO e cite só os problemas de gravidade alta/média.'
-        : 'AUDITORIA DA TÊMIS: comece pelo [VEREDITO] APROVADO/REPROVADO; depois liste os [PROBLEMAS] com arquivo:linha, gravidade e correção sugerida. Não inclua elogios nem itens cosméticos.'
+        : `AUDITORIA DA TÊMIS: comece pelo [VEREDITO] APROVADO/REPROVADO; depois liste os [PROBLEMAS] com arquivo:linha, gravidade e correção sugerida. Se REPROVADO, aplique as correções e valide com: ${validate ? `\`${validate}\`` : 'o comando do [VALIDAR]'}. Omita elogios e cosméticos.`
+    )
+  }
+  if (tipos.has('subagente.depurar')) {
+    const validate = cmds.get('subagente.depurar')
+    parts.push(
+      voice
+        ? 'DIAGNÓSTICO DO PROMETEU: diga a [CAUSA RAIZ] em 1-2 frases falável e OFEREÇA aplicar a [CORRECAO] com codigo.editar, citando arquivo e linha. Nunca leia o stack trace.'
+        : `DIAGNÓSTICO DO PROMETEU: apresente a [CAUSA RAIZ] e a [CORRECAO] proposta com arquivo:linha exato e trechos ANTES/DEPOIS. Decida: (a) aplicar você mesmo com codigo.editar — cada passo do [CORRECAO] vira UMA chamada, OU (b) se o relatório pedir mais informação, rode o comando sugerido primeiro. Após aplicar, valide com: ${validate ? `\`${validate}\`` : 'o comando do [VALIDAR]'}.`
     )
   }
   return parts.length ? `\n${parts.join('\n')}` : ''

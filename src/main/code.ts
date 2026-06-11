@@ -1,6 +1,6 @@
 import { spawnSync } from 'child_process'
 import { createHash } from 'crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, unlinkSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'path'
 import type {
@@ -106,6 +106,19 @@ function isInside(root: string, target: string): boolean {
   return rel === '' || (!!rel && !rel.startsWith('..') && !isAbsolute(rel))
 }
 
+/**
+ * Normaliza separadores de caminho vindos do LLM/usuário para o SO atual.
+ * No Windows o `path` aceita "/" nativamente; no Linux uma barra invertida é
+ * caractere VÁLIDO de nome de arquivo — "src\\main\\x.ts" viraria um arquivo
+ * único esquisito. Convertendo "\\" -> "/" fora do Windows, o mesmo JSON do
+ * modelo funciona idêntico nos dois sistemas. Pura e testável.
+ */
+export function normalizeCodePath(p: string): string {
+  const raw = String(p || '').trim()
+  if (!raw) return raw
+  return process.platform === 'win32' ? raw : raw.replace(/\\+/g, '/')
+}
+
 function displayPath(path: string): string {
   return path.split(/[\\/]+/).filter(Boolean).join('/')
 }
@@ -133,7 +146,7 @@ function assertAllowed(cfg: AppConfig, target: string): void {
 export function resolveCodeWorkspace(cfg: AppConfig, requested = ''): string {
   ensureEnabled(cfg)
   const base = resolve(codeConfig(cfg).workspaceRoot || process.cwd())
-  const raw = String(requested || '').trim()
+  const raw = normalizeCodePath(requested)
   const target = raw ? (isAbsolute(raw) ? resolve(raw) : resolve(base, raw)) : base
   assertAllowed(cfg, target)
   if (existsSync(target) && statSync(target).isFile()) return dirname(target)
@@ -141,10 +154,33 @@ export function resolveCodeWorkspace(cfg: AppConfig, requested = ''): string {
 }
 
 function resolveCodeFile(cfg: AppConfig, root: string, file: string): string {
-  const target = isAbsolute(file) ? resolve(file) : resolve(root, file)
+  const clean = normalizeCodePath(file)
+  const target = isAbsolute(clean) ? resolve(clean) : resolve(root, clean)
   assertAllowed(cfg, target)
   if (!isInside(root, target)) throw new Error(`Arquivo fora do workspace: ${file}`)
   return target
+}
+
+/**
+ * Lê ±contextLines linhas em torno de `line` (1-based) num arquivo do projeto.
+ * Prefixo "N: " em cada linha facilita o diagnóstico por número exato.
+ * Usado pelo Prometeu para ver o código real no ponto do erro.
+ */
+export function readCodeContext(
+  cfg: AppConfig,
+  root: string,
+  file: string,
+  line: number,
+  contextLines = 25
+): string {
+  const p = resolveCodeFile(cfg, root, file)
+  const lines = readFileSync(p, 'utf-8').split(/\r?\n/)
+  const start = Math.max(0, line - contextLines - 1)
+  const end = Math.min(lines.length, line + contextLines)
+  return lines
+    .slice(start, end)
+    .map((l, i) => `${start + i + 1}: ${l}`)
+    .join('\n')
 }
 
 function git(root: string, args: string[]): string | null {
@@ -522,6 +558,98 @@ export function readCodeFile(
     totalLines,
     truncated: end < totalLines || start > 1,
     content
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Skill `codigo.explicar`: análise de um trecho/arquivo para explicação ou
+// documentação rápida. Junta num único resultado tudo que o modelo precisa
+// para explicar com precisão: código com números de linha, mapa de símbolos,
+// imports/exports e métricas simples. Só leitura — quem redige a explicação
+// é o Ares na rodada seguinte.
+// ---------------------------------------------------------------------------
+
+/** Extrai os módulos importados de um arquivo (TS/JS/Python/Go básico). Pura. */
+export function parseImports(content: string, ext: string): string[] {
+  const out = new Set<string>()
+  const lines = String(content || '').split(/\r?\n/)
+  const e = String(ext || '').toLowerCase()
+  for (const line of lines.slice(0, 400)) {
+    if (e === '.py') {
+      const m = line.match(/^\s*(?:from\s+([\w.]+)\s+import|import\s+([\w.]+))/)
+      if (m) out.add(m[1] || m[2])
+      continue
+    }
+    const m =
+      line.match(/^\s*import\s+(?:[\w${},*\s]+\s+from\s+)?['"]([^'"]+)['"]/) ||
+      line.match(/\brequire\(\s*['"]([^'"]+)['"]\s*\)/)
+    if (m) out.add(m[1])
+  }
+  return [...out].slice(0, 40)
+}
+
+export interface CodeExplainResult {
+  root: string
+  file: string
+  language: string
+  startLine: number
+  endLine: number
+  totalLines: number
+  content: string
+  outline: OutlineItem[]
+  imports: string[]
+  exports: string[]
+  todoCount: number
+  hints: string[]
+}
+
+export function explainCode(
+  cfg: AppConfig,
+  opts: { root?: string; file: string; startLine?: number; endLine?: number }
+): CodeExplainResult {
+  const root = resolveCodeWorkspace(cfg, opts.root)
+  const abs = resolveCodeFile(cfg, root, String(opts.file || ''))
+  if (!existsSync(abs) || !statSync(abs).isFile()) throw new Error(`Arquivo não encontrado: ${opts.file}`)
+  const maxBytes = Math.max(1, codeConfig(cfg).maxFileKB) * 1024
+  if (!isLikelyText(abs, maxBytes)) throw new Error(`Arquivo muito grande ou binário: ${opts.file}`)
+
+  const all = readFileSync(abs, 'utf8')
+  const lines = all.split(/\r?\n/)
+  const totalLines = lines.length
+  const start = Math.max(1, Math.min(Number(opts.startLine) || 1, totalLines))
+  const requestedEnd = Number(opts.endLine) || 0
+  const end = Math.min(totalLines, Math.max(start, requestedEnd || start + 159))
+  const content = lines
+    .slice(start - 1, end)
+    .map((line, idx) => `${start + idx}: ${line}`)
+    .join('\n')
+
+  const ext = extname(abs)
+  const outline = outlineSource(all, ext)
+  const imports = parseImports(all, ext)
+  const exports = exportedNames(all)
+  const todoCount = lines.reduce((n, l) => (matchTodoLine(l) ? n + 1 : n), 0)
+
+  const hints: string[] = []
+  if (outline.length) hints.push(`${outline.length} símbolo(s) declarado(s)`)
+  if (exports.length) hints.push(`exporta: ${exports.slice(0, 6).join(', ')}${exports.length > 6 ? '…' : ''}`)
+  if (imports.length) hints.push(`depende de: ${imports.slice(0, 6).join(', ')}${imports.length > 6 ? '…' : ''}`)
+  if (todoCount) hints.push(`${todoCount} pendência(s) TODO/FIXME no arquivo`)
+  if (end < totalLines || start > 1) hints.push(`trecho parcial (${start}-${end} de ${totalLines} linhas)`)
+
+  return {
+    root,
+    file: relativeDisplayPath(root, abs),
+    language: languageFor(abs),
+    startLine: start,
+    endLine: end,
+    totalLines,
+    content,
+    outline,
+    imports,
+    exports,
+    todoCount,
+    hints
   }
 }
 
@@ -1225,12 +1353,18 @@ export function classifyCommand(cfg: AppConfig, command: string): CommandClassif
  */
 function platformShell(command: string): { file: string; args: string[] } {
   if (process.platform === 'win32') {
+    // -EncodedCommand (base64 UTF-16LE) elimina TODA a dança de escapes entre o
+    // JSON do modelo -> linha de comando do Windows -> parser do PowerShell:
+    // aspas aninhadas, cifrões e acentos chegam intactos. -NonInteractive evita
+    // prompts que travariam o turno.
+    const encoded = Buffer.from(command, 'utf16le').toString('base64')
     return {
       file: 'powershell.exe',
-      args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command]
+      args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded]
     }
   }
-  return { file: 'bash', args: ['-lc', command] }
+  // Linux/macOS: bash quando existir; sh é o fallback universal (containers/minimal).
+  return { file: existsSync('/bin/bash') || existsSync('/usr/bin/bash') ? 'bash' : 'sh', args: ['-lc', command] }
 }
 
 export function runCodeTerminal(
@@ -1322,8 +1456,149 @@ export function runCodeGit(
   throw new Error(`Operação Git não permitida: ${op}`)
 }
 
+// ---------------------------------------------------------------------------
+// Git avançado: diff ESTRUTURADO (arquivos + adições/remoções) e sugestão de
+// commit semântico (Conventional Commits) deduzida do conjunto de mudanças.
+// Continua só-leitura: commitar de fato passa pelo codigo.terminal com
+// autorização do usuário.
+// ---------------------------------------------------------------------------
+
+export interface GitDiffFileStat {
+  file: string
+  additions: number
+  deletions: number
+}
+
+/** Parseia a saída de `git diff --numstat` ("adds\tdels\tarquivo"). Pura e testável. */
+export function parseGitNumstat(out: string): GitDiffFileStat[] {
+  const files: GitDiffFileStat[] = []
+  for (const line of String(out || '').split(/\r?\n/)) {
+    const m = line.match(/^(\d+|-)\t(\d+|-)\t(.+)$/)
+    if (!m) continue
+    // Renames vêm como "{velho => novo}/x" ou "velho => novo": fica com o destino.
+    let file = m[3].trim().replace(/^"|"$/g, '')
+    file = file.replace(/\{[^}]*=>\s*([^}]*)\}/g, '$1').replace(/^.*\s=>\s/, '').replace(/\/{2,}/g, '/')
+    if (!file) continue
+    files.push({
+      file: displayPath(file),
+      additions: m[1] === '-' ? 0 : Number(m[1]),
+      deletions: m[2] === '-' ? 0 : Number(m[2])
+    })
+  }
+  return files
+}
+
+/** Escopo do commit: diretório dominante das mudanças (ex.: src/main -> "main"). Pura. */
+function commitScope(names: string[]): string {
+  const counts = new Map<string, number>()
+  for (const n of names) {
+    const parts = n.split('/')
+    const seg = parts[0] === 'src' && parts.length > 2 ? parts[1] : parts.length > 1 ? parts[0] : ''
+    if (seg) counts.set(seg, (counts.get(seg) || 0) + 1)
+  }
+  let best = ''
+  let max = 0
+  for (const [k, v] of counts) {
+    if (v > max) {
+      best = k
+      max = v
+    }
+  }
+  return max >= Math.ceil(names.length / 2) ? best : ''
+}
+
+/**
+ * Sugere uma mensagem de commit semântico a partir do diff estruturado e do
+ * `git status --short` (para detectar arquivos novos). Heurística determinística
+ * — o Ares pode refiná-la na fala, mas isto dá um ponto de partida correto.
+ * Pura e testável.
+ */
+export function suggestCommitMessage(files: GitDiffFileStat[], statusShort = ''): string {
+  if (!files.length) return ''
+  const names = files.map((f) => f.file)
+  const all = (re: RegExp): boolean => names.every((n) => re.test(n))
+  const newFiles = new Set(
+    String(statusShort || '')
+      .split(/\r?\n/)
+      .filter((l) => /^\s*(\?\?|A)/.test(l))
+      .map((l) => displayPath(l.replace(/^[^ ]+\s+/, '').trim().replace(/^"|"$/g, '')))
+  )
+  const hasNew = names.some((n) => newFiles.has(n))
+  const onlyConfig = all(/(^|\/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|tsconfig.*\.json|\.eslintrc.*|vite\.config.*|electron\.vite\.config.*|\.github\/)/i)
+
+  let type = 'refactor'
+  if (all(/\.(md|rst|txt)$/i)) type = 'docs'
+  else if (all(/(^|\/)(tests?|__tests__|spec)\//i) || all(/\.(test|spec)\.[jt]sx?$/i)) type = 'test'
+  else if (onlyConfig) type = 'chore'
+  else if (hasNew) type = 'feat'
+  else if (files.reduce((n, f) => n + f.additions, 0) <= files.reduce((n, f) => n + f.deletions, 0) + 10) type = 'fix'
+
+  const scope = commitScope(names)
+  const shortNames = names.map((n) => basename(n))
+  const what =
+    names.length === 1
+      ? `ajusta ${shortNames[0]}`
+      : `atualiza ${names.length} arquivos (${shortNames.slice(0, 3).join(', ')}${names.length > 3 ? '…' : ''})`
+  return `${type}${scope ? `(${scope})` : ''}: ${what}`
+}
+
+export interface GitStructuredDiff {
+  root: string
+  files: GitDiffFileStat[]
+  totalAdditions: number
+  totalDeletions: number
+  staged: number
+  suggestedCommit: string
+  summary: string
+}
+
+/**
+ * Diff estruturado do repositório: numstat (working tree + staged) somado por
+ * arquivo, totais e sugestão de commit semântico. Falável via `summary`.
+ */
+export async function gitStructuredDiff(
+  cfg: AppConfig,
+  opts: { root?: string; file?: string; signal?: AbortSignal; onProgress?: CodeProgressFn } = {}
+): Promise<GitStructuredDiff> {
+  const root = resolveCodeWorkspace(cfg, opts.root)
+  const file = opts.file ? relativeDisplayPath(root, resolveCodeFile(cfg, root, opts.file)) : ''
+  const pathArgs = file ? ['--', file] : []
+  const [unstaged, staged, status] = await Promise.all([
+    gitResult(cfg, root, ['diff', '--numstat', ...pathArgs], opts.signal, opts.onProgress),
+    gitResult(cfg, root, ['diff', '--numstat', '--cached', ...pathArgs], opts.signal, opts.onProgress),
+    gitResult(cfg, root, ['status', '--short'], opts.signal, opts.onProgress)
+  ])
+  if (!unstaged.ok && !staged.ok) {
+    throw new Error(unstaged.stderr.trim() || 'Não consegui ler o diff do Git (o diretório é um repositório?).')
+  }
+  const merged = new Map<string, GitDiffFileStat>()
+  for (const f of [...parseGitNumstat(unstaged.stdout), ...parseGitNumstat(staged.stdout)]) {
+    const cur = merged.get(f.file)
+    if (cur) {
+      cur.additions += f.additions
+      cur.deletions += f.deletions
+    } else {
+      merged.set(f.file, { ...f })
+    }
+  }
+  const files = [...merged.values()].sort((a, b) => b.additions + b.deletions - (a.additions + a.deletions))
+  const totalAdditions = files.reduce((n, f) => n + f.additions, 0)
+  const totalDeletions = files.reduce((n, f) => n + f.deletions, 0)
+  const stagedCount = parseGitNumstat(staged.stdout).length
+  const suggestedCommit = suggestCommitMessage(files, status.stdout)
+  const summary = files.length
+    ? `${files.length} arquivo(s) alterado(s), +${totalAdditions} −${totalDeletions}${suggestedCommit ? `. Commit sugerido: ${suggestedCommit}` : ''}`
+    : 'Sem alterações no diff.'
+  return { root, files: files.slice(0, 80), totalAdditions, totalDeletions, staged: stagedCount, suggestedCommit, summary }
+}
+
 function indexPath(root: string): string {
-  const dir = join(homedir(), '.config', 'ares', 'code-indexes')
+  // Windows guarda em %APPDATA%\ares (mesma base do userData); Unix em ~/.config/ares.
+  const base =
+    process.platform === 'win32'
+      ? join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'ares')
+      : join(homedir(), '.config', 'ares')
+  const dir = join(base, 'code-indexes')
   mkdirSync(dir, { recursive: true })
   const key = createHash('sha1').update(root).digest('hex')
   return join(dir, `${key}.json`)
@@ -1467,6 +1742,8 @@ export function previewCodePatch(cfg: AppConfig, opts: { root?: string; diff?: u
     for (const op of textOps) {
       const abs = resolveCodeFile(cfg, root, op.file)
       if (!existsSync(abs)) {
+        // Patch com "content" cria o arquivo novo; só find/replace exige existir.
+        if (op.content !== undefined) continue
         canApply = false
         warnings.push(`arquivo não encontrado: ${op.file}`)
         continue
@@ -1481,35 +1758,293 @@ export function previewCodePatch(cfg: AppConfig, opts: { root?: string; diff?: u
   return { root, files, additions, deletions, canApply, warnings }
 }
 
+// ---------------------------------------------------------------------------
+// Validação de sintaxe pós-patch (estilo AST barato, sem dependências):
+// JSON.parse para .json e um scanner de delimitadores balanceados — ciente de
+// strings, template literals, comentários e regex literais — para C-likes.
+// Não substitui o typecheck, mas pega o estrago típico de patch mal aplicado
+// (chave/parêntese a menos) e permite REVERTER automaticamente antes de
+// quebrar o build.
+// ---------------------------------------------------------------------------
+
+const SYNTAX_CHECK_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json', '.css'])
+
+// Palavras-chave após as quais "/" inicia um REGEX (e não uma divisão).
+const REGEX_PREFIX_WORDS = new Set([
+  'return', 'typeof', 'case', 'in', 'of', 'new', 'delete', 'void', 'instanceof', 'do', 'else', 'yield', 'await', 'throw'
+])
+
+/** Valida a sintaxe "estrutural" de um arquivo. Pura e testável. */
+export function validateSourceSyntax(content: string, ext: string): { ok: boolean; error?: string } {
+  const e = String(ext || '').toLowerCase()
+  if (e === '.json') {
+    try {
+      JSON.parse(content)
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: `JSON inválido: ${err instanceof Error ? err.message : String(err)}` }
+    }
+  }
+  if (!SYNTAX_CHECK_EXTS.has(e)) return { ok: true }
+
+  const pairs: Record<string, string> = { ')': '(', ']': '[', '}': '{' }
+  const stack: Array<{ ch: string; line: number }> = []
+  const n = content.length
+  let i = 0
+  let line = 1
+  let lastSig = '' // último caractere significativo (decide regex vs divisão)
+  let lastWord = '' // última palavra (keywords que antecedem regex)
+
+  const regexCanStart = (): boolean => {
+    if (REGEX_PREFIX_WORDS.has(lastWord)) return true
+    if (!lastSig) return true
+    return !/[A-Za-z0-9_$)\]}]/.test(lastSig)
+  }
+
+  while (i < n) {
+    const ch = content[i]
+    if (ch === '\n') {
+      line++
+      i++
+      continue
+    }
+    if (ch === '/' && content[i + 1] === '/') {
+      while (i < n && content[i] !== '\n') i++
+      continue
+    }
+    if (ch === '/' && content[i + 1] === '*') {
+      i += 2
+      while (i < n && !(content[i] === '*' && content[i + 1] === '/')) {
+        if (content[i] === '\n') line++
+        i++
+      }
+      i += 2
+      continue
+    }
+    if (ch === '"' || ch === "'") {
+      i++
+      while (i < n && content[i] !== ch) {
+        if (content[i] === '\\') i++
+        else if (content[i] === '\n') break // string não fechada na linha: tolera (CSS/erro pré-existente)
+        i++
+      }
+      i++
+      lastSig = ch
+      lastWord = ''
+      continue
+    }
+    if (ch === '`') {
+      i++
+      while (i < n) {
+        if (content[i] === '\\') {
+          i += 2
+          continue
+        }
+        if (content[i] === '\n') {
+          line++
+          i++
+          continue
+        }
+        if (content[i] === '`') break
+        if (content[i] === '$' && content[i + 1] === '{') {
+          // Expressão embutida: consome contando chaves e pulando strings internas.
+          i += 2
+          let depth = 1
+          while (i < n && depth > 0) {
+            const c = content[i]
+            if (c === '\\') i++
+            else if (c === '\n') line++
+            else if (c === '"' || c === "'") {
+              const q = c
+              i++
+              while (i < n && content[i] !== q) {
+                if (content[i] === '\\') i++
+                i++
+              }
+            } else if (c === '{') depth++
+            else if (c === '}') depth--
+            i++
+          }
+          continue
+        }
+        i++
+      }
+      i++
+      lastSig = '`'
+      lastWord = ''
+      continue
+    }
+    if (ch === '/' && e !== '.css' && regexCanStart()) {
+      // Regex literal: pula até a barra final (respeitando classes [...] e escapes).
+      const startLine = line
+      let j = i + 1
+      let inClass = false
+      let closed = false
+      while (j < n) {
+        const c = content[j]
+        if (c === '\\') {
+          j += 2
+          continue
+        }
+        if (c === '\n') break // regex não atravessa linha: trata como divisão mesmo
+        if (c === '[') inClass = true
+        else if (c === ']') inClass = false
+        else if (c === '/' && !inClass) {
+          closed = true
+          break
+        }
+        j++
+      }
+      if (closed) {
+        i = j + 1
+        lastSig = '/'
+        lastWord = ''
+        line = startLine
+        continue
+      }
+    }
+    if (ch === '(' || ch === '[' || ch === '{') {
+      stack.push({ ch, line })
+      lastSig = ch
+      lastWord = ''
+      i++
+      continue
+    }
+    if (ch === ')' || ch === ']' || ch === '}') {
+      const top = stack.pop()
+      if (!top || top.ch !== pairs[ch]) {
+        return { ok: false, error: `delimitador desbalanceado: "${ch}" inesperado na linha ${line}` }
+      }
+      lastSig = ch
+      lastWord = ''
+      i++
+      continue
+    }
+    if (/[A-Za-z_$]/.test(ch)) {
+      let j = i
+      while (j < n && /[A-Za-z0-9_$]/.test(content[j])) j++
+      lastWord = content.slice(i, j)
+      lastSig = content[j - 1]
+      i = j
+      continue
+    }
+    if (!/\s/.test(ch)) {
+      lastSig = ch
+      lastWord = ''
+    }
+    i++
+  }
+  if (stack.length) {
+    const top = stack[stack.length - 1]
+    return { ok: false, error: `"${top.ch}" aberto na linha ${top.line} sem fechamento` }
+  }
+  return { ok: true }
+}
+
+/**
+ * Compara a sintaxe antes/depois dos arquivos tocados pelo patch. Só acusa o
+ * arquivo que estava VÁLIDO antes e ficou inválido depois — arquivos que já
+ * vinham quebrados (ou que o scanner não entende) não geram falso rollback.
+ */
+function syntaxRegressions(
+  cfg: AppConfig,
+  root: string,
+  files: string[],
+  before: Map<string, string | null>
+): string[] {
+  const broken: string[] = []
+  for (const file of files) {
+    const ext = extname(file).toLowerCase()
+    if (!SYNTAX_CHECK_EXTS.has(ext)) continue
+    let abs: string
+    try {
+      abs = resolveCodeFile(cfg, root, file)
+    } catch {
+      continue
+    }
+    if (!existsSync(abs)) continue
+    const prev = before.get(file)
+    const prevOk = prev == null ? true : validateSourceSyntax(prev, ext).ok
+    if (!prevOk) continue
+    const after = validateSourceSyntax(readFileSync(abs, 'utf8'), ext)
+    if (!after.ok) broken.push(`${file}: ${after.error}`)
+  }
+  return broken
+}
+
 export function applyCodePatch(cfg: AppConfig, opts: { root?: string; diff?: unknown; patches?: unknown }): CodePatchApplyResult {
   if (!codeConfig(cfg).allowPatchApply) throw new Error('Aplicação de patches desativada nas Configurações.')
   const preview = previewCodePatch(cfg, opts)
   if (!preview.canApply) return { ...preview, applied: false, output: preview.warnings.join('\n') }
   const diff = patchDiff(opts)
+
+  // Snapshot dos arquivos afetados ANTES de tocar no disco: é a base do rollback
+  // automático quando o patch quebra a sintaxe de um arquivo que estava válido.
+  const snapshots = new Map<string, string | null>()
+  for (const file of preview.files) {
+    try {
+      const abs = resolveCodeFile(cfg, preview.root, file)
+      snapshots.set(file, existsSync(abs) ? readFileSync(abs, 'utf8') : null)
+    } catch {
+      /* arquivo fora do workspace já foi barrado no preview */
+    }
+  }
+  const rollback = (): void => {
+    for (const [file, prev] of snapshots) {
+      try {
+        const abs = resolveCodeFile(cfg, preview.root, file)
+        if (prev === null) {
+          if (existsSync(abs)) unlinkSync(abs)
+        } else {
+          writeFileSync(abs, prev, 'utf8')
+        }
+      } catch {
+        /* melhor esforço: segue revertendo os demais */
+      }
+    }
+  }
+
+  let applied = false
+  let output = ''
   if (diff) {
     const res = spawnSync('git', ['-C', preview.root, 'apply', '--whitespace=nowarn', '-'], {
       input: diff,
       encoding: 'utf8',
       timeout: 10000
     })
-    return {
-      ...preview,
-      applied: res.status === 0,
-      output: String(res.stderr || res.stdout || (res.status === 0 ? 'patch aplicado' : 'falha ao aplicar patch')).trim()
+    applied = res.status === 0
+    output = String(res.stderr || res.stdout || (applied ? 'patch aplicado' : 'falha ao aplicar patch')).trim()
+  } else {
+    for (const op of textPatches(opts)) {
+      const abs = resolveCodeFile(cfg, preview.root, op.file)
+      const current = existsSync(abs) ? readFileSync(abs, 'utf8') : ''
+      const next =
+        op.content !== undefined
+          ? op.content
+          : op.all
+            ? current.split(op.find || '').join(op.replace || '')
+            : current.replace(op.find || '', op.replace || '')
+      mkdirSync(dirname(abs), { recursive: true })
+      writeFileSync(abs, next, 'utf8')
+    }
+    applied = true
+    output = 'patch textual aplicado'
+  }
+
+  if (applied) {
+    const broken = syntaxRegressions(cfg, preview.root, preview.files, snapshots)
+    if (broken.length) {
+      rollback()
+      return {
+        ...preview,
+        applied: false,
+        reverted: true,
+        warnings: [...preview.warnings, ...broken],
+        output: `patch REVERTIDO automaticamente: a sintaxe quebrou em ${broken.join('; ')}`
+      }
     }
   }
-  for (const op of textPatches(opts)) {
-    const abs = resolveCodeFile(cfg, preview.root, op.file)
-    const current = existsSync(abs) ? readFileSync(abs, 'utf8') : ''
-    const next =
-      op.content !== undefined
-        ? op.content
-        : op.all
-          ? current.split(op.find || '').join(op.replace || '')
-          : current.replace(op.find || '', op.replace || '')
-    writeFileSync(abs, next, 'utf8')
-  }
-  return { ...preview, applied: true, output: 'patch textual aplicado' }
+  return { ...preview, applied, output }
 }
 
 // ---------------------------------------------------------------------------

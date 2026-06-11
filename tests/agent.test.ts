@@ -231,10 +231,54 @@ describe('agent — runTurn (orquestração do cérebro)', () => {
       []
     )
     expect(t?.tipo).toBe('subagente.auditar')
+    // Prometeu com delegação + domínio de erro/depuração -> aciona debugger.
+    const p = inferPromisedHiveAction(
+      'Vou passar esse stack trace ao Prometeu, ele vai depurar a causa raiz.',
+      'os testes quebraram com uma exceção estranha',
+      []
+    )
+    expect(p?.tipo).toBe('subagente.depurar')
     // Se já houver ação subagente.* no envelope, não infere de novo.
     expect(
       inferPromisedHiveAction('Vou pedir à Atena', 'pesquise X', [{ tipo: 'subagente.pesquisar', objetivo: 'X' }])
     ).toBeNull()
+  })
+
+  it('extractFilesFromErrorLogs acha arquivos do projeto citados no stack trace', async () => {
+    const { extractFilesFromErrorLogs } = await import('../src/main/agent/hive')
+    const files = ['src/main/code.ts', 'src/renderer/App.tsx', 'tests/code.test.ts']
+    const logs = [
+      'TypeError: x is not a function',
+      '    at greet (C:\\proj\\src\\main\\code.ts:42:7)',
+      '    at render (./src/renderer/App.tsx:10:3)',
+      '    at node:internal/modules/cjs/loader:1145:15'
+    ].join('\n')
+    expect(extractFilesFromErrorLogs(logs, files)).toEqual(['src/main/code.ts', 'src/renderer/App.tsx'])
+    expect(extractFilesFromErrorLogs('', files)).toEqual([])
+    expect(extractFilesFromErrorLogs(logs, [])).toEqual([])
+  })
+
+  it('extractErrorLocations extrai arquivo + número de linha do stack trace', async () => {
+    const { extractErrorLocations } = await import('../src/main/agent/hive')
+    const files = ['src/main/code.ts', 'src/renderer/App.tsx', 'src/main/agent/hive.ts']
+    const logs = [
+      'TypeError: Cannot read property "foo" of undefined',
+      '    at Object.run (C:\\proj\\src\\main\\code.ts:456:7)',
+      '    at render (./src/renderer/App.tsx:10:3)',
+      '    at node:internal/modules/cjs/loader:1145:15' // node interno: não deve aparecer
+    ].join('\n')
+
+    const locs = extractErrorLocations(logs, files)
+    expect(locs).toHaveLength(2)
+    expect(locs[0]).toEqual({ file: 'src/main/code.ts', line: 456 })
+    expect(locs[1]).toEqual({ file: 'src/renderer/App.tsx', line: 10 })
+
+    // Sem linha numérica não extrai localização
+    const noLine = extractErrorLocations('TypeError: foo failed\nat code.ts (sem linha)', files)
+    expect(noLine).toHaveLength(0)
+
+    expect(extractErrorLocations('', files)).toEqual([])
+    expect(extractErrorLocations(logs, [])).toEqual([])
   })
 
   it('cumpre promessa de acionar Atena mesmo quando o LLM esquece a ação JSON', async () => {

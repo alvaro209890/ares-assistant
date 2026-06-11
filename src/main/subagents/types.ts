@@ -9,6 +9,7 @@ export interface SubagentProfile {
   role: string // função em uma frase (vai para o relatório/atividade)
   systemPrompt: string
   temperature: number
+  reportMaxChars?: number // teto do relatório gerado (default 6000)
 }
 
 // Uma seção rotulada de um EvidencePackage. Cada agente recebe seu material em
@@ -49,11 +50,24 @@ export interface SubagentResult {
   durationMs: number
 }
 
+// Problema estruturado extraído do bloco [PROBLEMAS] do relatório da Têmis.
+export interface SubagentProblem {
+  file: string
+  line?: number
+  severity: string // 'alta' | 'média' | 'baixa' ou string livre
+  desc: string
+}
+
 // Tags extraídas best-effort do relatório (template sugerido nos prompts).
 // Permite ao Ares responder de forma mais robusta sem depender de regex no LLM
-// (ex.: usar `verdict` para decidir se vale rerodar checagens).
+// (ex.: usar `verdict` para decidir se vale rerodar checagens, `validateCmd`
+// para incluir o comando exato no follow-up em vez do genérico "[VALIDAR]").
 export interface SubagentReportTags {
   verdict?: 'APROVADO' | 'REPROVADO' | null
   files?: string[]
   risks?: string[]
+  rootCause?: string           // [CAUSA RAIZ] primeira linha/parágrafo (Prometeu)
+  validateCmd?: string         // [VALIDAR] primeiro comando extraído (todos)
+  scope?: string               // [ESCOPO] primeira linha (Hefesto)
+  problems?: SubagentProblem[] // [PROBLEMAS] estruturado (Têmis)
 }

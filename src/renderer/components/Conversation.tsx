@@ -64,13 +64,63 @@ function ActivityTimeline({ activities }: { activities: AgentActivityEvent[] }):
               {a.command || a.target || a.detail}
             </div>
           )}
-          {a.output && (
-            <pre className="mt-1 max-h-24 overflow-hidden whitespace-pre-wrap rounded-md border border-cyan-300/10 bg-black/25 p-2 font-mono text-[11px] text-cyan-100/65">
-              {a.output}
-            </pre>
-          )}
+          {a.output && <TerminalLog activity={a} />}
         </div>
       ))}
+    </div>
+  )
+}
+
+/**
+ * Mini-terminal ao vivo embutido no chat: a saída de comandos (npm test, build...)
+ * é transmitida de forma incremental e renderizada linha a linha, com rolagem
+ * automática, cursor pulsante enquanto roda e tinta âmbar quando o último fluxo
+ * foi stderr. Estilo HUD/console futurista, sem libs extras.
+ */
+function TerminalLog({ activity }: { activity: AgentActivityEvent }): JSX.Element {
+  const bodyRef = useRef<HTMLPreElement>(null)
+  const live = activity.status === 'running' || activity.status === 'output'
+  useEffect(() => {
+    const el = bodyRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [activity.output, activity.status])
+
+  const headDot = live
+    ? 'animate-pulse bg-emerald-300 shadow-glow'
+    : activity.status === 'error' || activity.ok === false
+      ? 'bg-rose-300'
+      : 'bg-cyan-300/50'
+  const bodyTint =
+    activity.stream === 'stderr' && live
+      ? 'text-amber-100/85'
+      : activity.status === 'error' || activity.ok === false
+        ? 'text-rose-100/80'
+        : 'text-emerald-100/80'
+
+  return (
+    <div className="mt-1 overflow-hidden rounded-md border border-cyan-300/15 bg-black/45">
+      <div className="flex items-center gap-2 border-b border-cyan-300/10 bg-cyan-400/5 px-2 py-1">
+        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${headDot}`} />
+        <span className="min-w-0 truncate font-mono text-[10px] text-cyan-200/60">
+          {activity.command || activity.title}
+        </span>
+        <span className="ml-auto shrink-0 font-mono text-[9px] uppercase tracking-wider text-cyan-300/40">
+          {live ? 'ao vivo' : activity.ok === false ? 'falhou' : 'concluído'}
+        </span>
+      </div>
+      <pre
+        ref={bodyRef}
+        className={`max-h-44 overflow-y-auto whitespace-pre-wrap break-words px-2.5 py-1.5 font-mono text-[11px] leading-relaxed ${bodyTint}`}
+      >
+        {activity.output}
+        {live && (
+          <motion.span
+            className="ml-0.5 inline-block h-3 w-1.5 translate-y-[2px] bg-emerald-300/90"
+            animate={{ opacity: [1, 0.15, 1] }}
+            transition={{ duration: 0.9, repeat: Infinity }}
+          />
+        )}
+      </pre>
     </div>
   )
 }

@@ -69,7 +69,8 @@ import {
   isDuplicateSpeech,
   sanitizeVoiceCodeFala,
   toolResultsPrompt,
-  voiceAwareUserContent
+  voiceAwareUserContent,
+  voiceToolAnnouncement
 } from './voiceCode'
 
 import {
@@ -221,177 +222,192 @@ export async function runTurn(
   const controller = new AbortController()
   const unregisterRun = registerRun(sessionId, controller)
   const signal = controller.signal
-  const session = getSession(sessionId)
-  // 16 mensagens recentes (era 12): melhora a continuidade de referências ("ele",
-  // "aquele arquivo") sem pesar — o resumo automático cobre o histórico mais antigo.
-  const recent = (session?.messages || []).slice(-16)
-  const hasPriorAssistant = recent.some((m) => m.role === 'assistant')
-  const suppressGreeting = hasPriorAssistant
-  const deltaTransform: DeltaTextTransform | undefined = suppressGreeting
-    ? (text) => stripRepeatedGreeting(text)
-    : undefined
-  const sys = buildSystemPrompt({
-    board: loadBoard(),
-    events: loadEvents(),
-    location: cfg.integrations.location,
-    codeContext: codePromptContext(cfg),
-    controlContext: controlPromptContext(cfg),
-    codingPrefs: codingPreferencesSummary(),
-    sessionContext: sessionContextSummary(),
-    brain: brainSummary(cfg),
-    summary: session?.summary,
-    voice,
-    hasPriorAssistant
-  })
-  const messages: ChatMessage[] = [
-    { role: 'system', content: sys },
-    ...recent.map((m) => ({ role: m.role, content: m.content }) as ChatMessage),
-    { role: 'user', content: voiceAwareUserContent(userText, voice) }
-  ]
-
-  trace.emit('phase', { n: 1, kind: 'initial' })
-  const env = parseEnvelope(await streamTurn(cfg, messages, 1, onDelta, 'both', deltaTransform, signal))
-  let fala = _finalFala(env.fala, suppressGreeting)
-  let falaVoz: string | undefined
-  const allNotes: string[] = []
-  const inferredHive = inferPromisedHiveAction(fala, userText, env.acoes)
-  if (inferredHive) {
-    env.acoes = [...env.acoes, inferredHive]
-    allNotes.push('colmeia corrigida: promessa convertida em ação real')
-    trace.emit('hive:inferred', { tipo: inferredHive.tipo })
-  }
-  let mutations = env.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo))
-  let queries = env.acoes.filter((a) => QUERY_TOOLS.has(a.tipo))
-
-  // Loop agêntico: o LLM pode ENCADEAR rodadas de ferramentas (buscar -> ler ->
-  // editar -> validar) num único turno. Cada rodada roda as consultas em PARALELO
-  // (Promise.all preserva a ordem), devolve os resultados e abre uma nova fase de
-  // streaming (fase nova = reset no cliente). Limitado a MAX_TOOL_ROUNDS para
-  // nunca entrar em ciclo; na última rodada o LLM é instruído a concluir.
-  let convo: ChatMessage[] = messages
-  let phase = 1
-  for (let round = 0; queries.length && round < MAX_TOOL_ROUNDS; round++) {
-    const results = await Promise.all(
-      queries.map((q) => runQuery(q, { cfg, sessionId, phase, signal, onDelta, onActivity, onHive, onProgress, trace }))
-    )
-    const codeMode = hasCodeAction(queries)
-    const proactive = proactiveCodeFollowup(cfg, results)
-    if (proactive) allNotes.push(proactive.note)
-    const lastRound = round === MAX_TOOL_ROUNDS - 1
-    convo = [
-      ...convo,
-      { role: 'assistant', content: fala || '...' },
-      {
-        role: 'system',
-        content:
-          toolResultsPrompt(results, voice, codeMode) +
-          hiveFollowupInstruction(results, voice) +
-          (proactive ? `\n${proactive.instruction}` : '') +
-          (lastRound
-            ? '\nLimite de rodadas de ferramentas atingido: responda AGORA ao usuário com o que tem, sem chamar novas ferramentas de consulta.'
-            : '')
-      }
+  // Tudo que pode lançar (provedor, parse, abort) roda dentro do try: a baixa do
+  // registro de cancelamento é garantida no finally — antes, uma exceção no meio
+  // do turno deixava o AbortController preso no registro da sessão para sempre.
+  try {
+    const session = getSession(sessionId)
+    // 16 mensagens recentes (era 12): melhora a continuidade de referências ("ele",
+    // "aquele arquivo") sem pesar — o resumo automático cobre o histórico mais antigo.
+    const recent = (session?.messages || []).slice(-16)
+    const hasPriorAssistant = recent.some((m) => m.role === 'assistant')
+    const suppressGreeting = hasPriorAssistant
+    const deltaTransform: DeltaTextTransform | undefined = suppressGreeting
+      ? (text) => stripRepeatedGreeting(text)
+      : undefined
+    const sys = buildSystemPrompt({
+      board: loadBoard(),
+      events: loadEvents(),
+      location: cfg.integrations.location,
+      codeContext: codePromptContext(cfg),
+      controlContext: controlPromptContext(cfg),
+      codingPrefs: codingPreferencesSummary(),
+      sessionContext: sessionContextSummary(),
+      brain: brainSummary(cfg),
+      summary: session?.summary,
+      voice,
+      hasPriorAssistant
+    })
+    const messages: ChatMessage[] = [
+      { role: 'system', content: sys },
+      ...recent.map((m) => ({ role: m.role, content: m.content }) as ChatMessage),
+      { role: 'user', content: voiceAwareUserContent(userText, voice) }
     ]
-    phase++
-    trace.emit('phase', { n: phase, kind: voice && codeMode ? 'voice+code' : 'normal', round })
-    if (voice && codeMode) {
-      const immediateSpoken = codeVoiceProgressSummary(results)
-      if (immediateSpoken) {
-        falaVoz = immediateSpoken
-        onDelta?.(` ${immediateSpoken}`, phase, 'speak')
-      }
-      const raw = await streamTurn(cfg, convo, phase, onDelta, 'display', deltaTransform, signal)
-      const envN = parseEnvelope(raw)
-      if (envN.fala) {
-        fala = _finalFala(envN.fala, suppressGreeting)
-        const spoken = sanitizeVoiceCodeFala(fala) || 'Análise concluída. Os detalhes principais estão na tela.'
-        falaVoz = spoken
-        if (!isDuplicateSpeech(spoken, immediateSpoken)) onDelta?.(` ${spoken}`, phase, 'speak')
-      } else if (!immediateSpoken) {
-        const fallback = 'Concluído. Os detalhes estão na tela.'
-        falaVoz = fallback
-        onDelta?.(` ${fallback}`, phase, 'speak')
-      }
-      mutations = mutations.concat(envN.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo)))
-      queries = lastRound ? [] : envN.acoes.filter((a) => QUERY_TOOLS.has(a.tipo))
-    } else {
-      const raw = await streamTurn(cfg, convo, phase, onDelta, 'both', deltaTransform, signal)
-      const envN = parseEnvelope(raw)
-      if (envN.fala) fala = _finalFala(envN.fala, suppressGreeting)
-      mutations = mutations.concat(envN.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo)))
-      queries = lastRound ? [] : envN.acoes.filter((a) => QUERY_TOOLS.has(a.tipo))
+
+    trace.emit('phase', { n: 1, kind: 'initial' })
+    const env = parseEnvelope(await streamTurn(cfg, messages, 1, onDelta, 'both', deltaTransform, signal))
+    let fala = _finalFala(env.fala, suppressGreeting)
+    let falaVoz: string | undefined
+    const allNotes: string[] = []
+    const inferredHive = inferPromisedHiveAction(fala, userText, env.acoes)
+    if (inferredHive) {
+      env.acoes = [...env.acoes, inferredHive]
+      allNotes.push('colmeia corrigida: promessa convertida em ação real')
+      trace.emit('hive:inferred', { tipo: inferredHive.tipo })
     }
-  }
+    let mutations = env.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo))
+    let queries = env.acoes.filter((a) => QUERY_TOOLS.has(a.tipo))
 
-  mutations = memoryFallback(userText, mutations)
-  const validated = validateActions(mutations)
-  allNotes.push(...validated.notes)
+    // Loop agêntico: o LLM pode ENCADEAR rodadas de ferramentas (buscar -> ler ->
+    // editar -> validar) num único turno. Cada rodada roda as consultas em PARALELO
+    // (Promise.all preserva a ordem), devolve os resultados e abre uma nova fase de
+    // streaming (fase nova = reset no cliente). Limitado a MAX_TOOL_ROUNDS para
+    // nunca entrar em ciclo; na última rodada o LLM é instruído a concluir.
+    let convo: ChatMessage[] = messages
+    let phase = 1
+    for (let round = 0; queries.length && round < MAX_TOOL_ROUNDS; round++) {
+      // Voz assíncrona NÃO-BLOQUEANTE: anuncia em uma frase curta o que vai rodar
+      // agora, em paralelo com a execução (a fala toca enquanto as ferramentas
+      // trabalham). Na primeira rodada o próprio modelo já anunciou via streaming;
+      // nas rodadas seguintes (e quando a fala veio vazia) este é o único som
+      // antes do heartbeat dos 15 s.
+      if (voice && hasCodeAction(queries) && (round > 0 || !fala.trim())) {
+        const announce = voiceToolAnnouncement(queries)
+        if (announce) onDelta?.(` ${announce}`, phase, 'speak')
+      }
+      const results = await Promise.all(
+        queries.map((q) => runQuery(q, { cfg, sessionId, phase, signal, onDelta, onActivity, onHive, onProgress, trace }))
+      )
+      const codeMode = hasCodeAction(queries)
+      const proactive = proactiveCodeFollowup(cfg, results)
+      if (proactive) allNotes.push(proactive.note)
+      const lastRound = round === MAX_TOOL_ROUNDS - 1
+      convo = [
+        ...convo,
+        { role: 'assistant', content: fala || '...' },
+        {
+          role: 'system',
+          content:
+            toolResultsPrompt(results, voice, codeMode) +
+            hiveFollowupInstruction(results, voice) +
+            (proactive ? `\n${proactive.instruction}` : '') +
+            (lastRound
+              ? '\nLimite de rodadas de ferramentas atingido: responda AGORA ao usuário com o que tem, sem chamar novas ferramentas de consulta.'
+              : '')
+        }
+      ]
+      phase++
+      trace.emit('phase', { n: phase, kind: voice && codeMode ? 'voice+code' : 'normal', round })
+      if (voice && codeMode) {
+        const immediateSpoken = codeVoiceProgressSummary(results)
+        if (immediateSpoken) {
+          falaVoz = immediateSpoken
+          onDelta?.(` ${immediateSpoken}`, phase, 'speak')
+        }
+        const raw = await streamTurn(cfg, convo, phase, onDelta, 'display', deltaTransform, signal)
+        const envN = parseEnvelope(raw)
+        if (envN.fala) {
+          fala = _finalFala(envN.fala, suppressGreeting)
+          const spoken = sanitizeVoiceCodeFala(fala) || 'Análise concluída. Os detalhes principais estão na tela.'
+          falaVoz = spoken
+          if (!isDuplicateSpeech(spoken, immediateSpoken)) onDelta?.(` ${spoken}`, phase, 'speak')
+        } else if (!immediateSpoken) {
+          const fallback = 'Concluído. Os detalhes estão na tela.'
+          falaVoz = fallback
+          onDelta?.(` ${fallback}`, phase, 'speak')
+        }
+        mutations = mutations.concat(envN.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo)))
+        queries = lastRound ? [] : envN.acoes.filter((a) => QUERY_TOOLS.has(a.tipo))
+      } else {
+        const raw = await streamTurn(cfg, convo, phase, onDelta, 'both', deltaTransform, signal)
+        const envN = parseEnvelope(raw)
+        if (envN.fala) fala = _finalFala(envN.fala, suppressGreeting)
+        mutations = mutations.concat(envN.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo)))
+        queries = lastRound ? [] : envN.acoes.filter((a) => QUERY_TOOLS.has(a.tipo))
+      }
+    }
 
-  // Portão de confiança: ações destrutivas (apagar/limpar/remover) só executam após
-  // confirmação. O LLM pergunta na fala; aqui garantimos que nada destrutivo roda
-  // sem o "sim" — mesmo se o LLM falhar.
-  let toApply = validated.valid
-  let heldQuestion: string | undefined
-  let outcome: 'none' | 'held' | 'applied' | 'confirmed' | 'cancelled' = 'none'
-  if (cfg.ui.confirmDestructive !== false) {
-    const pend = getPendingConfirm(sessionId)
-    const decision = decideConfirmation({ pending: pend?.actions ?? null, proposed: validated.valid, userText })
-    toApply = decision.apply
-    outcome = decision.outcome
-    heldQuestion = decision.question
-    if (decision.hold && decision.hold.length) setPendingConfirm(sessionId, decision.hold, decision.question || 'Confirma?')
-    else clearPendingConfirm(sessionId)
-  }
+    mutations = memoryFallback(userText, mutations)
+    const validated = validateActions(mutations)
+    allNotes.push(...validated.notes)
 
-  // Snapshot para "desfazer": antes de alterar qualquer dado, guarda o estado atual.
-  if (toApply.length) pushUndo(userDataDir(), userText.slice(0, 80))
+    // Portão de confiança: ações destrutivas (apagar/limpar/remover) só executam após
+    // confirmação. O LLM pergunta na fala; aqui garantimos que nada destrutivo roda
+    // sem o "sim" — mesmo se o LLM falhar.
+    let toApply = validated.valid
+    let heldQuestion: string | undefined
+    let outcome: 'none' | 'held' | 'applied' | 'confirmed' | 'cancelled' = 'none'
+    if (cfg.ui.confirmDestructive !== false) {
+      const pend = getPendingConfirm(sessionId)
+      const decision = decideConfirmation({ pending: pend?.actions ?? null, proposed: validated.valid, userText })
+      toApply = decision.apply
+      outcome = decision.outcome
+      heldQuestion = decision.question
+      if (decision.hold && decision.hold.length) setPendingConfirm(sessionId, decision.hold, decision.question || 'Confirma?')
+      else clearPendingConfirm(sessionId)
+    }
 
-  const memoryIdsBefore = new Set(loadMemory().map((f) => f.id))
-  const { board, notes, changedBoard, memoryQuestions } = applyMutations(toApply)
-  const createdMemoryQuestions = loadMemory()
-    .filter((f) => !memoryIdsBefore.has(f.id) && f.review === 'possible_conflict' && f.conflictQuestion)
-    .map((f) => String(f.conflictQuestion))
-  memoryQuestions.push(...createdMemoryQuestions)
-  allNotes.push(...notes)
-  if (toApply.length) trace.emit('mutation', { count: toApply.length, outcome })
+    // Snapshot para "desfazer": antes de alterar qualquer dado, guarda o estado atual.
+    if (toApply.length) pushUndo(userDataDir(), userText.slice(0, 80))
 
-  // Ajusta a fala exibida conforme a confirmação (a fala falada é a do streaming).
-  if (outcome === 'held') {
-    if (!/\?/.test(fala)) fala = heldQuestion || fala
-    allNotes.push('aguardando confirmação')
-  } else if (outcome === 'cancelled') {
-    allNotes.push('cancelado')
-  }
-  if (memoryQuestions.length && !/\?/.test(fala)) {
-    fala = `${fala}\n\n${memoryQuestions[0]}`
-  }
+    const memoryIdsBefore = new Set(loadMemory().map((f) => f.id))
+    const { board, notes, changedBoard, memoryQuestions } = applyMutations(toApply)
+    const createdMemoryQuestions = loadMemory()
+      .filter((f) => !memoryIdsBefore.has(f.id) && f.review === 'possible_conflict' && f.conflictQuestion)
+      .map((f) => String(f.conflictQuestion))
+    memoryQuestions.push(...createdMemoryQuestions)
+    allNotes.push(...notes)
+    if (toApply.length) trace.emit('mutation', { count: toApply.length, outcome })
 
-  appendMessages(sessionId, [
-    { id: uid('m'), role: 'user', content: userText, ts: Date.now() },
-    { id: uid('m'), role: 'assistant', content: fala, ts: Date.now() }
-  ])
-  // O resumo de contexto é uma otimização para turnos FUTUROS — não deve atrasar
-  // a resposta atual nem a liberação para o próximo comando. Roda em segundo plano.
-  void summarizeIfNeeded(sessionId)
+    // Ajusta a fala exibida conforme a confirmação (a fala falada é a do streaming).
+    if (outcome === 'held') {
+      if (!/\?/.test(fala)) fala = heldQuestion || fala
+      allNotes.push('aguardando confirmação')
+    } else if (outcome === 'cancelled') {
+      allNotes.push('cancelado')
+    }
+    if (memoryQuestions.length && !/\?/.test(fala)) {
+      fala = `${fala}\n\n${memoryQuestions[0]}`
+    }
 
-  unregisterRun()
-  trace.end({ voice, phases: phase, rounds: phase - 1, mutations: toApply.length })
-  // Se alguma ação (ia.raciocinio/ia.modelo) alterou a config do cérebro durante o
-  // turno, devolve a config nova para o renderer refletir nos seletores na hora.
-  const cfgAfter = readConfig()
-  const brainChanged = JSON.stringify(cfgAfter.nineRouter) !== JSON.stringify(cfg.nineRouter)
-  return {
-    fala,
-    board,
-    memory: loadMemory(),
-    events: loadEvents(),
-    lists: loadLists(),
-    quickNotes: loadNotes(),
-    reminders: loadReminders(),
-    notes: allNotes,
-    changedBoard,
-    ...(falaVoz ? { falaVoz } : {}),
-    ...(brainChanged ? { config: cfgAfter } : {})
+    appendMessages(sessionId, [
+      { id: uid('m'), role: 'user', content: userText, ts: Date.now() },
+      { id: uid('m'), role: 'assistant', content: fala, ts: Date.now() }
+    ])
+    // O resumo de contexto é uma otimização para turnos FUTUROS — não deve atrasar
+    // a resposta atual nem a liberação para o próximo comando. Roda em segundo plano.
+    void summarizeIfNeeded(sessionId)
+
+    trace.end({ voice, phases: phase, rounds: phase - 1, mutations: toApply.length })
+    // Se alguma ação (ia.raciocinio/ia.modelo) alterou a config do cérebro durante o
+    // turno, devolve a config nova para o renderer refletir nos seletores na hora.
+    const cfgAfter = readConfig()
+    const brainChanged = JSON.stringify(cfgAfter.nineRouter) !== JSON.stringify(cfg.nineRouter)
+    return {
+      fala,
+      board,
+      memory: loadMemory(),
+      events: loadEvents(),
+      lists: loadLists(),
+      quickNotes: loadNotes(),
+      reminders: loadReminders(),
+      notes: allNotes,
+      changedBoard,
+      ...(falaVoz ? { falaVoz } : {}),
+      ...(brainChanged ? { config: cfgAfter } : {})
+    }
+  } finally {
+    unregisterRun()
   }
 }
 

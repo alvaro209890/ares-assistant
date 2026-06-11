@@ -63,6 +63,18 @@ const AGENT_META: Record<
     bubble: 'border-emerald-300/35 bg-emerald-400/12 text-emerald-100',
     bubbleTail: 'border-emerald-300/35 bg-[#081a14]',
     idleBubble: 'A balança está calibrada.'
+  },
+  debugger: {
+    name: 'Prometeu',
+    role: 'Depurador · erros e causa raiz',
+    initial: 'P',
+    ring: 'border-rose-300/60',
+    avatarBg: 'from-rose-400/30 to-red-500/10 text-rose-100',
+    accentText: 'text-rose-200',
+    activeCard: 'border-rose-300/50 bg-rose-400/10 shadow-glow',
+    bubble: 'border-rose-300/35 bg-rose-400/12 text-rose-100',
+    bubbleTail: 'border-rose-300/35 bg-[#1c0a10]',
+    idleBubble: 'A tocha está acesa. Traga o erro.'
   }
 }
 

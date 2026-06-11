@@ -6,6 +6,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { AppConfig } from '../src/shared/types'
 import {
   applyCodePatch,
+  explainCode,
+  normalizeCodePath,
+  parseGitNumstat,
+  parseImports,
+  suggestCommitMessage,
+  validateSourceSyntax,
   assessDiagnosisHealth,
   buildCodeIndex,
   classifyCommand,
@@ -604,5 +610,125 @@ describe('codigo.todo — pendências no código', () => {
     expect(item?.line).toBe(1)
     expect(item?.text).toContain('melhorar cobertura')
     expect(res.summary).toMatch(/pendências? marcadas?/)
+  })
+})
+
+describe('normalizeCodePath — separadores multiplataforma', () => {
+  it('preserva no Windows e converte contrabarras fora dele', () => {
+    const out = normalizeCodePath('src\\main\\code.ts')
+    if (process.platform === 'win32') expect(out).toBe('src\\main\\code.ts')
+    else expect(out).toBe('src/main/code.ts')
+    expect(normalizeCodePath('  src/x.ts  ')).toBe('src/x.ts')
+    expect(normalizeCodePath('')).toBe('')
+  })
+})
+
+describe('codigo.explicar — análise de trecho para explicação', () => {
+  it('devolve trecho numerado, outline, imports e exports', () => {
+    const r = explainCode(config(), { file: 'src/feature.ts' })
+    expect(r.file).toBe('src/feature.ts')
+    expect(r.content).toContain('1: import { greet }')
+    expect(r.imports).toContain('./main')
+    expect(r.exports).toContain('message')
+    expect(r.totalLines).toBeGreaterThan(0)
+  })
+
+  it('respeita o recorte de linhas pedido', () => {
+    const r = explainCode(config(), { file: 'src/main.ts', startLine: 2, endLine: 2 })
+    expect(r.startLine).toBe(2)
+    expect(r.endLine).toBe(2)
+    expect(r.content.trim().startsWith('2:')).toBe(true)
+    expect(r.hints.join(' ')).toMatch(/trecho parcial/)
+  })
+
+  it('parseImports cobre TS/JS e Python', () => {
+    expect(parseImports("import x from 'lib'\nconst y = require('outra')", '.ts')).toEqual(['lib', 'outra'])
+    expect(parseImports('from os import path\nimport sys', '.py')).toEqual(['os', 'sys'])
+  })
+})
+
+describe('git estruturado — numstat e commit semântico', () => {
+  it('parseGitNumstat lê adições/remoções e tolera binários', () => {
+    const out = '12\t3\tsrc/main.ts\n-\t-\tassets/logo.png\n0\t7\tREADME.md'
+    expect(parseGitNumstat(out)).toEqual([
+      { file: 'src/main.ts', additions: 12, deletions: 3 },
+      { file: 'assets/logo.png', additions: 0, deletions: 0 },
+      { file: 'README.md', additions: 0, deletions: 7 }
+    ])
+  })
+
+  it('parseGitNumstat resolve renames para o caminho de destino', () => {
+    const out = '5\t1\tsrc/{velho => novo}/mod.ts'
+    expect(parseGitNumstat(out)).toEqual([{ file: 'src/novo/mod.ts', additions: 5, deletions: 1 }])
+  })
+
+  it('suggestCommitMessage classifica docs/test/feat/fix com escopo dominante', () => {
+    expect(suggestCommitMessage([{ file: 'README.md', additions: 4, deletions: 1 }])).toMatch(/^docs: /)
+    expect(suggestCommitMessage([{ file: 'tests/code.test.ts', additions: 9, deletions: 0 }])).toMatch(/^test/)
+    expect(
+      suggestCommitMessage([{ file: 'src/main/novo.ts', additions: 30, deletions: 0 }], '?? src/main/novo.ts')
+    ).toMatch(/^feat\(main\): /)
+    expect(suggestCommitMessage([{ file: 'src/main/code.ts', additions: 2, deletions: 5 }])).toMatch(/^fix\(main\): /)
+    expect(suggestCommitMessage([])).toBe('')
+  })
+})
+
+describe('validateSourceSyntax — validação estrutural pós-patch', () => {
+  it('aprova código válido com strings, template literals, regex e comentários', () => {
+    const ok = [
+      'const re = /\\{+/g // chaves no regex não contam',
+      "const s = '} } }'",
+      'const t = `a ${fn({ x: 1 })} b`',
+      'function f(a: number): number { return a * 2 }',
+      '/* { [ ( */'
+    ].join('\n')
+    expect(validateSourceSyntax(ok, '.ts').ok).toBe(true)
+  })
+
+  it('reprova delimitadores desbalanceados e JSON inválido', () => {
+    expect(validateSourceSyntax('function f() { return 1', '.ts').ok).toBe(false)
+    expect(validateSourceSyntax('const a = (1 + 2))', '.ts').ok).toBe(false)
+    expect(validateSourceSyntax('{ "a": 1, }', '.json').ok).toBe(false)
+    expect(validateSourceSyntax('{ "a": 1 }', '.json').ok).toBe(true)
+  })
+
+  it('ignora extensões fora do escopo do scanner', () => {
+    expect(validateSourceSyntax('{{{', '.md').ok).toBe(true)
+  })
+
+  it('regex após return não conta as chaves internas', () => {
+    expect(validateSourceSyntax('function f() { return /\\{/.test(x) }', '.ts').ok).toBe(true)
+  })
+})
+
+describe('codigo.patch.aplicar — rollback automático em sintaxe quebrada', () => {
+  it('reverte o patch que quebra a sintaxe e preserva o arquivo original', () => {
+    writeProjectFile('src/sane.ts', 'export function ok(): number {\n  return 1\n}\n')
+    const before = readFileSync(join(root, 'src/sane.ts'), 'utf8')
+    const r = applyCodePatch(config(), {
+      patches: [{ file: 'src/sane.ts', find: 'return 1\n}', replace: 'return 1\n' }]
+    })
+    expect(r.applied).toBe(false)
+    expect(r.reverted).toBe(true)
+    expect(r.output).toMatch(/REVERTIDO/i)
+    expect(readFileSync(join(root, 'src/sane.ts'), 'utf8')).toBe(before)
+  })
+
+  it('mantém aplicado o patch sintaticamente saudável', () => {
+    writeProjectFile('src/healthy.ts', 'export const N = 1\n')
+    const r = applyCodePatch(config(), {
+      patches: [{ file: 'src/healthy.ts', find: 'N = 1', replace: 'N = 2' }]
+    })
+    expect(r.applied).toBe(true)
+    expect(r.reverted).toBeUndefined()
+    expect(readFileSync(join(root, 'src/healthy.ts'), 'utf8')).toContain('N = 2')
+  })
+
+  it('cria arquivo novo via patch textual com content', () => {
+    const r = applyCodePatch(config(), {
+      patches: [{ file: 'src/criado-pelo-patch.ts', content: 'export const novo = true\n' }]
+    })
+    expect(r.applied).toBe(true)
+    expect(existsSync(join(root, 'src/criado-pelo-patch.ts'))).toBe(true)
   })
 })

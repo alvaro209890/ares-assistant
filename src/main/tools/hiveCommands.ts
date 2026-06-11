@@ -5,6 +5,7 @@
 import { loadMemory } from '../data'
 import {
   AUDITOR,
+  DEBUGGER,
   ENGINEER,
   RESEARCHER,
   executeSubagentTask,
@@ -31,7 +32,9 @@ function makeHiveCommand(tipo: string, profile: SubagentProfile, label: string):
           ? 'Reunindo fontes na web...'
           : profile.id === 'engineer'
             ? 'Mapeando o projeto...'
-            : 'Rodando o diagnóstico do projeto...'
+            : profile.id === 'debugger'
+              ? 'Coletando logs de erro e estado do projeto...'
+              : 'Rodando o diagnóstico do projeto...'
 
       const r = await beating(
         (async () => {
@@ -64,5 +67,6 @@ function makeHiveCommand(tipo: string, profile: SubagentProfile, label: string):
 export const hiveCommands: ToolCommand[] = [
   makeHiveCommand('subagente.pesquisar', RESEARCHER, 'Atena investigando'),
   makeHiveCommand('subagente.construir', ENGINEER, 'Hefesto projetando'),
-  makeHiveCommand('subagente.auditar', AUDITOR, 'Têmis auditando')
+  makeHiveCommand('subagente.auditar', AUDITOR, 'Têmis auditando'),
+  makeHiveCommand('subagente.depurar', DEBUGGER, 'Prometeu depurando')
 ]

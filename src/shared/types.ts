@@ -339,7 +339,7 @@ export type AgentActivityKind =
   | 'tool'
 
 // --- Colmeia (subagentes especialistas orquestrados pelo Ares) ---
-export type SubagentId = 'researcher' | 'engineer' | 'auditor'
+export type SubagentId = 'researcher' | 'engineer' | 'auditor' | 'debugger'
 export type WorkerPhase = 'idle' | 'thinking' | 'done' | 'error'
 
 // Status de um subagente, transmitido em tempo real ao renderer (aba Escritório).
@@ -464,6 +464,7 @@ export interface CodePatchPreview {
 export interface CodePatchApplyResult extends CodePatchPreview {
   applied: boolean
   output: string
+  reverted?: boolean // true = aplicado e DESFEITO automaticamente (quebrou a sintaxe)
 }
 
 export type CodeEditMode = 'replace' | 'insert_before' | 'insert_after' | 'line_range'

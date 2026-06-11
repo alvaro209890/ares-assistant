@@ -18,6 +18,7 @@ describe('Colmeia — bubbleText (balões condizentes com a fase)', () => {
     expect(bubbleText(worker())).toContain('investigação')
     expect(bubbleText(worker({ id: 'engineer', label: 'Hefesto' }))).toContain('Forja')
     expect(bubbleText(worker({ id: 'auditor', label: 'Têmis' }))).toContain('balança')
+    expect(bubbleText(worker({ id: 'debugger', label: 'Prometeu' }))).toContain('erro')
   })
 
   it('trabalhando mostra o detalhe real do trabalho', () => {
@@ -34,12 +35,13 @@ describe('Colmeia — bubbleText (balões condizentes com a fase)', () => {
 })
 
 describe('Colmeia — HiveDashboard', () => {
-  it('renderiza o Ares e os três especialistas pelo nome', () => {
+  it('renderiza o Ares e os quatro especialistas pelo nome', () => {
     const html = renderToStaticMarkup(<HiveDashboard workers={HIVE_IDLE} aresState="idle" />)
     expect(html).toContain('ARES')
     expect(html).toContain('Atena')
     expect(html).toContain('Hefesto')
     expect(html).toContain('Têmis')
+    expect(html).toContain('Prometeu')
     expect(html).toContain('PRONTIDÃO')
   })
 

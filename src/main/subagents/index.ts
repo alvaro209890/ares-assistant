@@ -3,12 +3,13 @@
 export type {
   EvidencePackage,
   EvidenceSection,
+  SubagentProblem,
   SubagentProfile,
   SubagentReportTags,
   SubagentResult,
   SubagentTask
 } from './types'
-export { RESEARCHER, ENGINEER, AUDITOR, SUBAGENT_PROFILES, getSubagentProfile } from './profiles'
+export { RESEARCHER, ENGINEER, AUDITOR, DEBUGGER, SUBAGENT_PROFILES, getSubagentProfile } from './profiles'
 export {
   executeSubagentTask,
   buildTaskPrompt,
