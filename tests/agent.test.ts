@@ -156,6 +156,21 @@ describe('agent — runTurn (orquestração do cérebro)', () => {
     expect(deltas.some((d) => d.phase === 2 && d.kind === 'both' && d.chunk.includes('São quatro'))).toBe(true)
   })
 
+  it('finaliza com a fala parcial quando o stream cai apos emitir texto', async () => {
+    const sid = createSession().id
+    stream.mockImplementation(async (_cfg: unknown, _msgs: unknown, onDelta: (d: string) => void) => {
+      onDelta('{"fala":"Claude Fable 5 é um nome que não corresponde')
+      throw new Error('stream interrompido')
+    })
+    const deltas: string[] = []
+
+    const r = await runTurn(sid, 'pergunta do claude fable 5', false, (chunk) => deltas.push(chunk))
+
+    expect(r.fala).toContain('Claude Fable 5')
+    expect(deltas.join('')).toContain('Claude Fable 5')
+    expect(r.notes).toEqual([])
+  })
+
   it('cumpre promessa de acionar Atena mesmo quando o LLM esquece a ação JSON', async () => {
     const sid = createSession().id
     brain

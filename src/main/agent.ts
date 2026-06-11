@@ -1350,12 +1350,15 @@ async function streamTurn(
   transform?: DeltaTextTransform,
   signal?: AbortSignal
 ): Promise<string> {
-  if (!onDelta) return chatJSON(cfg, messages, true)
+  if (!onDelta) return chatJSON(cfg, messages, true, { signal })
   let cumulative = ''
   let emitted = 0
+  let lastText = ''
   const pump = (full: string): void => {
     const { text } = extractFalaPrefix(full)
-    const out = transform ? transform(text, phase, kind) : text
+    const rawOut = transform ? transform(text, phase, kind) : text
+    const out = rawOut.length >= lastText.length ? rawOut : lastText
+    lastText = out
     if (out.length > emitted) {
       onDelta(out.slice(emitted), phase, kind)
       emitted = out.length
@@ -1373,8 +1376,10 @@ async function streamTurn(
     }
     return full
   } catch (e) {
-    if (emitted > 0) throw e // já falamos parte: não dá para refazer com segurança
-    const full = await chatJSON(cfg, messages, true)
+    // Se o provedor derrubar o stream depois de emitir fala, finaliza com o texto já
+    // recebido em vez de deixar o turno pendente/erro na UI.
+    if (emitted > 0) return JSON.stringify({ fala: lastText, acoes: [] })
+    const full = await chatJSON(cfg, messages, true, { signal })
     const env = parseEnvelope(full)
     if (env.fala) onDelta(transform ? transform(env.fala, phase, kind) : env.fala, phase, kind)
     return full
