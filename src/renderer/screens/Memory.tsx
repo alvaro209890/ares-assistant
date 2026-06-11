@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useAres } from '../lib/store'
 import Select from '../components/Select'
-import type { MemoryCategory, MemoryFact } from '../../shared/types'
+import type { MemoryCategory, MemoryContradictionAction, MemoryFact } from '../../shared/types'
 import { MEMORY_CATEGORIES, MEMORY_CATEGORY_LABEL } from '../../shared/types'
 
 const CATEGORY_OPTIONS = MEMORY_CATEGORIES.map((c) => ({ value: c, label: MEMORY_CATEGORY_LABEL[c] }))
@@ -24,6 +24,7 @@ export default function Memory(): JSX.Element {
     addMemory,
     updateMemory,
     approveMemory,
+    resolveMemory,
     removeMemory,
     sessions,
     currentSessionId,
@@ -115,6 +116,7 @@ export default function Memory(): JSX.Element {
                   key={m.id}
                   fact={m}
                   onApprove={() => approveMemory(m.id)}
+                  onResolve={(action) => resolveMemory(m.id, action)}
                   onCategory={(c) => updateMemory(m.id, { category: c })}
                   onDelete={() => removeMemory(m.id)}
                 />
@@ -224,21 +226,42 @@ function FactRow({
 function PendingRow({
   fact,
   onApprove,
+  onResolve,
   onCategory,
   onDelete
 }: {
   fact: MemoryFact
   onApprove: () => void
+  onResolve: (action: MemoryContradictionAction) => void
   onCategory: (c: MemoryCategory) => void
   onDelete: () => void
 }): JSX.Element {
+  const conflict = fact.review === 'possible_conflict' && !!fact.conflictQuestion
   return (
     <article className="rounded-lg border border-amber-300/15 bg-black/20 p-2.5">
+      {conflict && (
+        <p className="mb-2 rounded-lg border border-amber-300/20 bg-amber-400/5 px-2 py-1.5 text-xs text-amber-100/90">
+          {fact.conflictQuestion}
+        </p>
+      )}
       <p className="text-sm text-cyan-50">{fact.text}</p>
       <MemoryMeta fact={fact} />
       <div className="mt-2 flex items-center gap-2">
         <CategoryPill fact={fact} onCategory={onCategory} />
-        <button onClick={onApprove} className="ml-auto rounded-full border border-emerald-300/40 px-2 py-0.5 text-[10px] text-emerald-200 hover:bg-emerald-400/10">
+        {conflict && (
+          <>
+            <button onClick={() => onResolve('keep_old')} className="ml-auto rounded-full border border-cyan-300/30 px-2 py-0.5 text-[10px] text-cyan-200 hover:bg-cyan-400/10">
+              MANTER ANTIGO
+            </button>
+            <button onClick={() => onResolve('update_to_new')} className="rounded-full border border-emerald-300/40 px-2 py-0.5 text-[10px] text-emerald-200 hover:bg-emerald-400/10">
+              USAR NOVO
+            </button>
+            <button onClick={() => onResolve('merge')} className="rounded-full border border-blue-300/35 px-2 py-0.5 text-[10px] text-blue-200 hover:bg-blue-400/10">
+              MESCLAR
+            </button>
+          </>
+        )}
+        <button onClick={onApprove} className={`${conflict ? 'hidden' : 'ml-auto'} rounded-full border border-emerald-300/40 px-2 py-0.5 text-[10px] text-emerald-200 hover:bg-emerald-400/10`}>
           ✓ SALVAR
         </button>
         <button onClick={onDelete} className="rounded-full border border-red-300/30 px-2 py-0.5 text-[10px] text-red-200/80 hover:bg-red-400/10">

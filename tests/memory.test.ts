@@ -12,7 +12,16 @@ vi.mock('electron', () => ({
 }))
 
 import { mkdirSync, rmSync } from 'node:fs'
-import { addFact, appendMessages, createSession, loadMemory, memoryPromptBlock, searchSessions, updateFact } from '../src/main/data'
+import {
+  addFact,
+  appendMessages,
+  createSession,
+  loadMemory,
+  memoryPromptBlock,
+  resolveContradiction,
+  searchSessions,
+  updateFact
+} from '../src/main/data'
 
 beforeEach(() => {
   rmSync(TMP, { recursive: true, force: true })
@@ -64,6 +73,49 @@ describe('memória estilo Hermes', () => {
     const facts = loadMemory()
     expect(facts).toHaveLength(2)
     expect(facts.some((f) => f.status === 'pending' && f.review === 'possible_conflict')).toBe(true)
+  })
+
+  it('cria pergunta resolvivel quando novo fato contradiz perfil existente', () => {
+    addFact('eu moro em SP', { category: 'perfil', source: 'manual', status: 'active' })
+    addFact('eu moro no Rio', { category: 'perfil', source: 'manual', status: 'active' })
+
+    const facts = loadMemory()
+    const pending = facts.find((f) => f.status === 'pending' && f.review === 'possible_conflict')
+    expect(pending?.conflictWith).toBeTruthy()
+    expect(pending?.conflictQuestion).toContain('Qual informacao devo manter')
+  })
+
+  it('resolve contradicao atualizando ou mantendo fatos', () => {
+    addFact('eu moro em SP', { category: 'perfil', source: 'manual', status: 'active' })
+    addFact('eu moro no Rio', { category: 'perfil', source: 'manual', status: 'active' })
+    let pending = loadMemory().find((f) => f.status === 'pending')!
+
+    resolveContradiction(pending.id, 'update_to_new')
+    expect(loadMemory().filter((f) => f.status === 'active')).toHaveLength(1)
+    expect(loadMemory()[0].text).toContain('Rio')
+
+    addFact('eu moro em SP', { category: 'perfil', source: 'manual', status: 'active' })
+    pending = loadMemory().find((f) => f.status === 'pending')!
+    resolveContradiction(pending.id, 'keep_old')
+    expect(loadMemory().some((f) => f.status === 'pending')).toBe(false)
+  })
+
+  it('agrupa quase duplicatas em uma entrada mais completa', () => {
+    addFact('prefere respostas curtas', { category: 'preferencias', source: 'manual', status: 'active' })
+    addFact('prefere respostas curtas e objetivas', { category: 'preferencias', source: 'manual', status: 'active' })
+
+    const facts = loadMemory()
+    expect(facts).toHaveLength(1)
+    expect(facts[0].text).toContain('objetivas')
+  })
+
+  it('prioriza perfil/preferencias e registra uso ao montar prompt', () => {
+    addFact('o usuario trabalha no projeto Ares', { category: 'projetos', source: 'manual', status: 'active' })
+    addFact('prefere respostas diretas', { category: 'preferencias', source: 'manual', status: 'active' })
+
+    const block = memoryPromptBlock()
+    expect(block).toContain('prefere respostas diretas')
+    expect(loadMemory().some((f) => f.text.includes('prefere') && (f.usageCount || 0) > 0)).toBe(true)
   })
 
   it('injeta memória em bloco delimitado e com uso resumido', () => {

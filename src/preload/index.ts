@@ -13,6 +13,7 @@ import type {
   DiagnosticsResult,
   HiveWorkerStatus,
   MemoryCategory,
+  MemoryContradictionAction,
   MemoryFact,
   NewsItem,
   Note,
@@ -48,6 +49,8 @@ const api = {
       patch: { text?: string; category?: MemoryCategory; status?: 'active' | 'pending' }
     ): Promise<MemoryFact[]> => ipcRenderer.invoke('memory:update', id, patch),
     approve: (id: string): Promise<MemoryFact[]> => ipcRenderer.invoke('memory:approve', id),
+    resolve: (id: string, action: MemoryContradictionAction): Promise<MemoryFact[]> =>
+      ipcRenderer.invoke('memory:resolve', id, action),
     remove: (id: string): Promise<MemoryFact[]> => ipcRenderer.invoke('memory:remove', id),
     autoExtract: (sessionId: string): Promise<MemoryFact[]> => ipcRenderer.invoke('memory:autoExtract', sessionId)
   },

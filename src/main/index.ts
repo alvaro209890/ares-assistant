@@ -24,6 +24,7 @@ import {
   addFact,
   updateFact,
   approveFact,
+  resolveContradiction,
   removeFact,
   loadEvents,
   addEvent,
@@ -52,6 +53,7 @@ import type {
   Checklist,
   DeepPartial,
   MemoryCategory,
+  MemoryContradictionAction,
   ReasoningLevel,
   Recurrence,
   Reminder,
@@ -173,6 +175,7 @@ function registerIpc(): void {
     updateFact(id, patch)
   )
   ipcMain.handle('memory:approve', (_e, id: string) => approveFact(id))
+  ipcMain.handle('memory:resolve', (_e, id: string, action: MemoryContradictionAction) => resolveContradiction(id, action))
   ipcMain.handle('memory:remove', (_e, id: string) => removeFact(id))
   ipcMain.handle('memory:autoExtract', (_e, sessionId: string) => extractFacts(sessionId))
 

@@ -168,6 +168,7 @@ export const MEMORY_CATEGORY_LABEL: Record<MemoryCategory, string> = {
 }
 
 export type MemoryTarget = 'user' | 'memory'
+export type MemoryContradictionAction = 'keep_old' | 'update_to_new' | 'merge'
 
 export interface MemoryFact {
   id: string
@@ -181,6 +182,11 @@ export interface MemoryFact {
   confidence?: number // 0..1 para extrações automáticas
   evidence?: string[] // pequenos trechos que justificam a memória
   review?: 'ok' | 'possible_conflict' | 'low_confidence'
+  usageCount?: number // quantas vezes o fato foi escolhido para contexto
+  lastUsedAt?: number // epoch ms da última injeção/recuperação
+  expiresAt?: number // memórias temporárias/contexto de sessão expiram após este horário
+  conflictWith?: string // id do fato ativo que conflita com esta pendência
+  conflictQuestion?: string // pergunta pronta para o Ares esclarecer com o usuário
 }
 
 export interface StoredMessage {

@@ -100,7 +100,7 @@ describe('colmeia — relevantMemories (recuperação semântica por tokens)', (
   it('recupera o fato mais parecido com o objetivo', () => {
     const out = relevantMemories('auditar o projeto Ares Electron', facts)
     expect(out[0]).toContain('Ares')
-    expect(out).not.toContain('O usuário prefere café sem açúcar')
+    expect(out).toContain('O usuário prefere café sem açúcar')
   })
 
   it('ignora fatos pendentes e devolve vazio sem objetivo', () => {

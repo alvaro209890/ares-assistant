@@ -116,10 +116,11 @@ const asCategory = (c: unknown): MemoryCategory | undefined =>
   MEMORY_CATEGORIES.includes(c as MemoryCategory) ? (c as MemoryCategory) : undefined
 const norm = (s: unknown) => String(s ?? '').toLowerCase().trim()
 
-function applyMutations(acoes: Acao[]): { board: Board; notes: string[]; changedBoard: boolean } {
+function applyMutations(acoes: Acao[]): { board: Board; notes: string[]; changedBoard: boolean; memoryQuestions: string[] } {
   let board = loadBoard()
   const original = board
   const notes: string[] = []
+  const memoryQuestions: string[] = []
   for (const a of acoes) {
     if (a.tipo.startsWith('tarefa.') || a.tipo.startsWith('coluna.')) {
       const r = applyBoardAction(board, a)
@@ -187,7 +188,7 @@ function applyMutations(acoes: Acao[]): { board: Board; notes: string[]; changed
   }
   const changedBoard = board !== original
   if (changedBoard) saveBoard(board)
-  return { board, notes, changedBoard }
+  return { board, notes, changedBoard, memoryQuestions }
 }
 
 function memoryFallback(userText: string, acoes: Acao[]): Acao[] {
@@ -345,7 +346,12 @@ export async function runTurn(
   // Snapshot para "desfazer": antes de alterar qualquer dado, guarda o estado atual.
   if (toApply.length) pushUndo(userDataDir(), userText.slice(0, 80))
 
-  const { board, notes, changedBoard } = applyMutations(toApply)
+  const memoryIdsBefore = new Set(loadMemory().map((f) => f.id))
+  const { board, notes, changedBoard, memoryQuestions } = applyMutations(toApply)
+  const createdMemoryQuestions = loadMemory()
+    .filter((f) => !memoryIdsBefore.has(f.id) && f.review === 'possible_conflict' && f.conflictQuestion)
+    .map((f) => String(f.conflictQuestion))
+  memoryQuestions.push(...createdMemoryQuestions)
   allNotes.push(...notes)
   if (toApply.length) trace.emit('mutation', { count: toApply.length, outcome })
 
@@ -355,6 +361,9 @@ export async function runTurn(
     allNotes.push('aguardando confirmação')
   } else if (outcome === 'cancelled') {
     allNotes.push('cancelado')
+  }
+  if (memoryQuestions.length && !/\?/.test(fala)) {
+    fala = `${fala}\n\n${memoryQuestions[0]}`
   }
 
   appendMessages(sessionId, [

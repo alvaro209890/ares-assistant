@@ -1,6 +1,6 @@
 import type { AppConfig, ChatMessage, HiveWorkerStatus, MemoryFact } from '../../shared/types'
 import { chatJSON } from '../ninerouter'
-import { tokenSimilarity } from '../memory'
+import { fuzzyMemorySimilarity, memoryRelevanceScore } from '../memory'
 import type {
   EvidencePackage,
   SubagentProfile,
@@ -27,8 +27,17 @@ export function relevantMemories(goal: string, facts: MemoryFact[], max = 5, min
   if (!goal.trim() || !facts.length) return []
   return facts
     .filter((f) => f.status === 'active')
-    .map((f) => ({ text: f.text, score: tokenSimilarity(goal, f.text) }))
-    .filter((s) => s.score >= minScore)
+    .map((f) => ({
+      text: f.text,
+      score: memoryRelevanceScore(f, goal),
+      similarity: fuzzyMemorySimilarity(goal, f.text),
+      category: f.category
+    }))
+    .filter((s) => {
+      if (s.category === 'perfil' || s.category === 'preferencias') return true
+      if (s.category === 'outros') return s.similarity >= Math.max(0.04, minScore * 0.6)
+      return s.similarity >= minScore
+    })
     .sort((a, b) => b.score - a.score)
     .slice(0, max)
     .map((s) => s.text)

@@ -12,6 +12,7 @@ import type {
   DeepPartial,
   HiveWorkerStatus,
   MemoryCategory,
+  MemoryContradictionAction,
   MemoryFact,
   Note,
   Recurrence,
@@ -172,6 +173,7 @@ interface AresStore {
   addMemory: (text: string, category?: MemoryCategory) => Promise<void>
   updateMemory: (id: string, patch: { text?: string; category?: MemoryCategory; status?: 'active' | 'pending' }) => Promise<void>
   approveMemory: (id: string) => Promise<void>
+  resolveMemory: (id: string, action: MemoryContradictionAction) => Promise<void>
   removeMemory: (id: string) => Promise<void>
   addEvent: (event: {
     title: string
@@ -1041,6 +1043,11 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     showToast('fato confirmado')
   }, [showToast])
 
+  const resolveMemory = useCallback(async (id: string, action: MemoryContradictionAction) => {
+    setMemory(await window.ares.memory.resolve(id, action))
+    showToast('conflito de memoria resolvido')
+  }, [showToast])
+
   const removeMemory = useCallback(async (id: string) => {
     setMemory(await window.ares.memory.remove(id))
   }, [])
@@ -1280,6 +1287,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     addMemory,
     updateMemory,
     approveMemory,
+    resolveMemory,
     removeMemory,
     addEvent,
     removeEvent,
