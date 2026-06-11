@@ -552,7 +552,6 @@ export function clearSpeechQueue(): void {
   resolveIdle()
 }
 
-const SENTENCE_RE = /.*?(?:[.!?…]+(?=\s|["')\]}*_]|$)|[\n]+)["')\]}*_]*/g
 const SENTENCE_PLACEHOLDER_PREFIX = '\uE000'
 const SENTENCE_PLACEHOLDER_SUFFIX = '\uE001'
 const SENTENCE_ABBREVIATIONS = [
@@ -626,15 +625,23 @@ export function splitSentences(
   const scan = protectedText.text
   let lastIndex = 0
   let m: RegExpExecArray | null
-  SENTENCE_RE.lastIndex = 0
-  while ((m = SENTENCE_RE.exec(scan))) {
+
+  // Constrói dinamicamente a RegExp com base em final.
+  // Se final = false, o fim de string ($) não é considerado âncora para pontuação.
+  const sentenceRe = new RegExp(
+    `.*?(?:[.!?…]+(?=\\s|["')\\]}*_]${final ? '|$' : ''})|[\\n]+)["')\\]}*_]*`,
+    'g'
+  )
+
+  sentenceRe.lastIndex = 0
+  while ((m = sentenceRe.exec(scan))) {
     const s = protectedText.restore(m[0].trim())
     // Apenas enfileira frases que tenham pelo menos uma letra ou número
     if (s && /[\p{L}\p{N}]/u.test(s)) {
       sentences.push(s)
       log('debug', `splitSentences: matched regex sentence="${s}"`)
     }
-    lastIndex = SENTENCE_RE.lastIndex
+    lastIndex = sentenceRe.lastIndex
   }
   let rest = protectedText.restore(scan.slice(lastIndex))
   // Sem frase completa ainda E nada falado neste turno: corta a primeira oração

@@ -72,16 +72,25 @@ export function mergeActivityEvent(events: AgentActivityEvent[] = [], event: Age
   return next
 }
 
+/**
+ * Fallback de fala no final do turno. Anti-repetição: se o streaming já
+ * enfileirou frases parciais (queuedSpeech = true), o fallback NUNCA refala
+ * o texto completo (result.fala). Usa apenas o resumo de voz (falaVoz) para
+ * a última fase se ela não teve fala — evita que o Ares repita tudo.
+ */
 export function finalSpeechFallback(
   result: Pick<AgentTurnResult, 'fala' | 'falaVoz'>,
   queuedSpeech: boolean,
   finalPhaseQueuedSpeech: boolean
 ): string {
   const voiceSummary = result.falaVoz?.trim()
-  if (voiceSummary && !finalPhaseQueuedSpeech) return voiceSummary
   const fullSpeech = result.fala.trim()
-  if (!finalPhaseQueuedSpeech && fullSpeech) return fullSpeech
-  if (!queuedSpeech && fullSpeech) return fullSpeech
+  // Nada foi falado em nenhuma fase do turno — fala o texto completo.
+  if (!queuedSpeech && fullSpeech) return voiceSummary || fullSpeech
+  // A última fase não teve fala pelo streaming, mas fases anteriores sim.
+  // Usa APENAS o resumo de voz (falaVoz) para não repetir tudo.
+  if (!finalPhaseQueuedSpeech && voiceSummary) return voiceSummary
+  // Já houve fala na última fase — nada a complementar.
   return ''
 }
 

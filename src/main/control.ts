@@ -112,7 +112,10 @@ export function resolveOpenTarget(target: string, which: WhichFn = realWhich, fi
     process.platform === 'win32' ? ['/c', 'start', '', target] : [target]
 
   // Esquema explícito (algo:...): só permite navegação/arquivo seguros.
-  const scheme = raw.match(/^([a-zA-Z][\w+.-]*):/)
+  // Esquema explícito (algo:...): só permite navegação/arquivo seguros.
+  // Evitamos confundir letra de unidade do Windows (C:\...) como esquema de URL.
+  const isWindowsDrive = /^[a-zA-Z]:[\\/]/u.test(raw)
+  const scheme = !isWindowsDrive && raw.match(/^([a-zA-Z][\w+.-]*):/)
   if (scheme) {
     const s = scheme[1].toLowerCase()
     if (/^(https?|file|mailto|ftp|ms-settings)$/.test(s))

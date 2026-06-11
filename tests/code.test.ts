@@ -288,6 +288,17 @@ describe('terminal com autorização', () => {
     expect(classifyCommand(config(), 'mkfs.ext4 /dev/sda1').tier).toBe('blocked')
   })
 
+  it('classifica comandos por default com a lista completa do Ares', () => {
+    const defaultCfg = config()
+    delete (defaultCfg.integrations.code as any).terminalSafe // força o fallback para DEFAULT_TERMINAL_SAFE
+
+    expect(classifyCommand(defaultCfg, 'touch arquivo.ts').tier).toBe('allowed')
+    expect(classifyCommand(defaultCfg, 'mkdir nova-pasta').tier).toBe('allowed')
+    expect(classifyCommand(defaultCfg, 'git commit -m "feat: nova feature"').tier).toBe('allowed')
+    expect(classifyCommand(defaultCfg, 'npm install').tier).toBe('allowed')
+    expect(classifyCommand(defaultCfg, 'rm arquivo.ts').tier).toBe('confirm') // exclusão ainda pede confirmação
+  })
+
   it('roda comando seguro direto, sem pedir autorização', async () => {
     const r = await runCodeTerminal(config(), { command: 'echo ares-terminal-ok' })
 

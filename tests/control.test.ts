@@ -87,6 +87,25 @@ describe('controle do computador — resolveOpenTarget', () => {
   it('reclama quando não há alvo', () => {
     expect(resolveOpenTarget('', which([]), noApp).kind).toBe('error')
   })
+
+  it('abre caminhos absolutos do Windows sem tratar letra de drive como esquema', () => {
+    // Criamos um arquivo temporário físico para o existsSync retornar true
+    const fs = require('fs')
+    const path = require('path')
+    const os = require('os')
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ares-open-test-'))
+    const tempFile = path.join(tempDir, 'jogo.html')
+    fs.writeFileSync(tempFile, 'html content')
+
+    const plan = resolveOpenTarget(tempFile, which([]), noApp)
+    expect(plan.kind).toBe('path')
+    if (process.platform === 'win32') {
+      expect(plan.cmd).toBe('cmd')
+      expect(plan.args).toContain(tempFile)
+    }
+
+    fs.rmSync(tempDir, { recursive: true, force: true })
+  })
 })
 
 describe('controle do computador — audioBackend', () => {

@@ -5,11 +5,14 @@ import {
   computeLengthScale,
   computeNoise,
   detectTone,
+  expandForeignWords,
   expandTechAcronyms,
   intToPtBR,
+  normalizeModelNames,
   normalizePtNumbers,
   normalizeSymbols,
   prepareText,
+  simplifyUrls,
   tightenWavSilence
 } from '../src/main/speech'
 
@@ -67,7 +70,7 @@ describe('fala neural (speech)', () => {
   })
 
   it('usa um silêncio entre frases natural (uma respiração curta)', () => {
-    expect(PIPER_SENTENCE_SILENCE).toBe('0.20')
+    expect(PIPER_SENTENCE_SILENCE).toBe('0.05')
   })
 
   it('limpa markdown e listas antes de preparar a fala', () => {
@@ -209,5 +212,117 @@ describe('expressividade (noise)', () => {
       expect(n.noiseW).toBeGreaterThanOrEqual(0.68)
       expect(n.noiseW).toBeLessThanOrEqual(0.82)
     }
+  })
+})
+
+describe('datas com mês abreviado', () => {
+  it('converte DD/MMM/YYYY para extenso', () => {
+    expect(normalizePtNumbers('prazo em 12/mar/2026')).toBe(
+      'prazo em doze de março de dois mil e vinte e seis'
+    )
+    expect(normalizePtNumbers('início 1/jan/2025')).toBe(
+      'início primeiro de janeiro de dois mil e vinte e cinco'
+    )
+    expect(normalizePtNumbers('entrega 15/dez/2024')).toBe(
+      'entrega quinze de dezembro de dois mil e vinte e quatro'
+    )
+  })
+
+  it('aceita separador com hífen (DD-MMM-YYYY)', () => {
+    expect(normalizePtNumbers('até 5-jun-2026')).toBe(
+      'até cinco de junho de dois mil e vinte e seis'
+    )
+  })
+
+  it('é case-insensitive para abreviações de mês', () => {
+    expect(normalizePtNumbers('em 10/MAR/2026')).toBe(
+      'em dez de março de dois mil e vinte e seis'
+    )
+    expect(normalizePtNumbers('em 10/Mar/2026')).toBe(
+      'em dez de março de dois mil e vinte e seis'
+    )
+  })
+})
+
+describe('pronúncia de palavras estrangeiras', () => {
+  it('substitui GitHub, TypeScript e outras palavras técnicas', () => {
+    expect(expandForeignWords('veja no GitHub')).toBe('veja no guitrábe')
+    expect(expandForeignWords('usando TypeScript')).toBe('usando táipi iscrípt')
+    expect(expandForeignWords('fiz um deploy')).toBe('fiz um deplói')
+    expect(expandForeignWords('abriu uma issue')).toBe('abriu uma íchiu')
+  })
+
+  it('é case-insensitive', () => {
+    expect(expandForeignWords('GITHUB')).toBe('guitrábe')
+    expect(expandForeignWords('github')).toBe('guitrábe')
+    expect(expandForeignWords('GitHub')).toBe('guitrábe')
+  })
+
+  it('não mexe em palavras que não estão no dicionário', () => {
+    expect(expandForeignWords('Hefesto e Atena')).toBe('Hefesto e Atena')
+    expect(expandForeignWords('palavra normal')).toBe('palavra normal')
+  })
+
+  it('pronuncia nomes de IA corretamente', () => {
+    expect(expandForeignWords('o modelo Claude')).toBe('o modelo clóde')
+    expect(expandForeignWords('usando Gemini')).toBe('usando gémini')
+    expect(expandForeignWords('instale o GPT')).toContain('gê pê tê')
+  })
+})
+
+describe('normalização de nomes de modelos de IA', () => {
+  it('normaliza gemini-2.5-flash', () => {
+    const result = normalizeModelNames('uso o gemini-2.5-flash')
+    expect(result).toContain('dois ponto cinco')
+    expect(result).not.toContain('2.5')
+  })
+
+  it('normaliza claude-3.5-sonnet', () => {
+    const result = normalizeModelNames('rodando claude-3.5-sonnet')
+    expect(result).toContain('três ponto cinco')
+  })
+
+  it('normaliza gpt-4o', () => {
+    const result = normalizeModelNames('testei gpt-4o')
+    expect(result).toContain('quatro')
+  })
+
+  it('normaliza llama-3.1', () => {
+    const result = normalizeModelNames('usando llama-3.1')
+    expect(result).toContain('três ponto um')
+  })
+})
+
+describe('simplificação de URLs', () => {
+  it('substitui URL do GitHub por link do guitrábe', () => {
+    expect(simplifyUrls('veja https://github.com/user/repo para mais')).toBe(
+      'veja link do guitrábe para mais'
+    )
+  })
+
+  it('substitui URL genérica por link', () => {
+    expect(simplifyUrls('acesse https://exemplo.com/path/to/page')).toBe(
+      'acesse link'
+    )
+  })
+
+  it('não mexe em texto sem URL', () => {
+    expect(simplifyUrls('texto normal sem links')).toBe('texto normal sem links')
+  })
+})
+
+describe('prepareText integra todas as normalizações', () => {
+  it('processa texto com data abreviada, palavra estrangeira e modelo', () => {
+    const out = prepareText('Até 12/mar/2026, faça deploy no GitHub usando gemini-2.5-flash.')
+    expect(out).toContain('março')
+    expect(out).toContain('deplói')
+    expect(out).toContain('guitrábe')
+    expect(out).not.toContain('2.5')
+  })
+
+  it('simplifica URLs dentro do prepareText', () => {
+    const out = prepareText('Veja https://github.com/user/repo para detalhes.')
+    expect(out).toContain('link do guitrábe')
+    expect(out).not.toContain('https')
   })
 })

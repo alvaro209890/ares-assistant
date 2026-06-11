@@ -10,7 +10,7 @@
  * vírgulas agora preservadas (ver prepareText), as pausas internas voltam a existir, então
  * este valor cobre apenas a separação entre frases.
  */
-export const PIPER_SENTENCE_SILENCE = '0.20'
+export const PIPER_SENTENCE_SILENCE = '0.05'
 
 // Nomes das letras em pt-BR, para soletrar siglas que o Piper não pronuncia bem.
 const LETTER_PT: Record<string, string> = {
@@ -185,6 +185,12 @@ const MONTHS_PT = [
   'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'
 ]
 
+// Abreviações de meses pt-BR (com e sem ponto) → índice 1–12.
+const MONTH_ABBREV: Record<string, number> = {
+  jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6,
+  jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12
+}
+
 /** Data por extenso ("10 de junho de 2026"); null se dia/mês inválidos. */
 function dateToPtBR(year: number, month: number, day: number): string | null {
   if (month < 1 || month > 12 || day < 1 || day > 31) return null
@@ -216,6 +222,13 @@ export function normalizePtNumbers(text: string): string {
   t = t.replace(/\b(\d{1,2})\/(\d{1,2})\/(20\d{2})\b/g, (m, d: string, mo: string, y: string) => {
     return dateToPtBR(Number(y), Number(mo), Number(d)) || m
   })
+  // Data com mês abreviado: 12/mar/2026, 15-jan-2025, 1/dez/2024.
+  t = t.replace(/\b(\d{1,2})[/-](jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\.?[/-](20\d{2})\b/gi,
+    (m, d: string, mo: string, y: string) => {
+      const month = MONTH_ABBREV[mo.toLowerCase()]
+      return month ? (dateToPtBR(Number(y), month, Number(d)) || m) : m
+    }
+  )
   // Unidades de dados/tempo: 16 GB, 512MB, 120 ms.
   t = t.replace(/\b(\d+(?:,\d+)?)\s?(TB|GB|MB|KB|ms)\b/g, (m, num: string, unit: string) => {
     const words = DATA_UNIT_WORDS[unit.toUpperCase()]
@@ -297,6 +310,166 @@ export function normalizeSymbols(text: string): string {
     .replace(/\s@\s/g, ' arroba ')
 }
 
+// ---------------------------------------------------------------------------
+// Dicionário de pronúncia para palavras estrangeiras/técnicas.
+// O Piper pt-BR lê essas palavras com fonemas incorretos ou engolidos.
+// Mapeamos para a grafia fonética que o modelo neural pronuncia corretamente.
+// Chaves em minúsculo; a busca é case-insensitive.
+// ---------------------------------------------------------------------------
+
+const FOREIGN_WORDS: Record<string, string> = {
+  github: 'guitrábe',
+  gitlab: 'guitlébe',
+  bitbucket: 'bítibâquete',
+  claude: 'clóde',
+  gemini: 'gémini',
+  copilot: 'côpailote',
+  docker: 'dóquer',
+  flutter: 'fláter',
+  python: 'páithon',
+  react: 'riéqui',
+  nextjs: 'néquist jei ésse',
+  nuxt: 'nâquist',
+  typescript: 'táipi iscrípt',
+  javascript: 'djaváscrípt',
+  markdown: 'márk dáun',
+  webhook: 'uébi rruque',
+  deploy: 'deplói',
+  merge: 'mêrdje',
+  branch: 'brânch',
+  commit: 'comíte',
+  pipeline: 'páipilaine',
+  frontend: 'frónt énd',
+  backend: 'béque énd',
+  endpoint: 'énd poínt',
+  middleware: 'mídou uér',
+  framework: 'fréimuôrque',
+  kubernetes: 'cubernétis',
+  terraform: 'tèrrafórm',
+  vercel: 'versél',
+  supabase: 'supabéise',
+  vite: 'víte',
+  webpack: 'uébi péque',
+  electron: 'eléctron',
+  runtime: 'rântáime',
+  dashboard: 'déchbôrde',
+  cache: 'quéche',
+  stack: 'istéque',
+  script: 'iscrípt',
+  sprint: 'isprínt',
+  feature: 'fítcher',
+  release: 'rilísse',
+  issue: 'íchiu',
+  token: 'tôquem',
+  prompt: 'prômpt',
+  router: 'rôuter',
+  plugin: 'plâguin',
+  layout: 'lêiaúte',
+  template: 'têmpleite',
+  snippet: 'isníppete',
+  swagger: 'isuéger',
+  cluster: 'clâster',
+  container: 'contêiner',
+  download: 'daunlôude',
+  upload: 'aplôude',
+  update: 'apidêite',
+  upgrade: 'apigrêide',
+  rollback: 'rôubéque',
+  callback: 'colbéque',
+  overflow: 'ôverflôu',
+  timeout: 'táimeáute',
+  startup: 'istártâpi',
+  setup: 'setâpi',
+  login: 'lóguim',
+  logout: 'lógáute',
+  feedback: 'fídbéque',
+  workspace: 'uôrquisipéisse',
+  benchmark: 'bêntchimarque',
+  string: 'istríng',
+  boolean: 'buliâno',
+  integer: 'íntedjer',
+  float: 'flôute',
+  null: 'nâl',
+  undefined: 'ândifáind',
+  async: 'êissínque',
+  await: 'êiuêite',
+  yield: 'íelde',
+  default: 'difólte',
+  interface: 'ínterfeice',
+  abstract: 'ábistréqui',
+  override: 'ôverráide',
+  extends: 'équisténds',
+  implements: 'ímpleménts',
+  package: 'péquedj',
+  import: 'impórte',
+  export: 'équisporte',
+  require: 'requáire',
+  module: 'módiule',
+  openai: 'ôpen êi ái',
+  chatgpt: 'tchéte gê pê tê',
+  gpt: 'gê pê tê',
+  llama: 'lhâma',
+  llm: 'éle éle ême',
+  embedding: 'embéding',
+  fine: 'fáine',
+  tuning: 'tiúning',
+  sonnet: 'sónete',
+  haiku: 'ráiku',
+  opus: 'ôpus',
+  flash: 'flésh',
+  thinking: 'thínking',
+}
+
+// Regex das palavras estrangeiras, do mais longo pro mais curto para evitar match parcial.
+const FOREIGN_RE = new RegExp(
+  `\\b(${Object.keys(FOREIGN_WORDS).sort((a, b) => b.length - a.length).join('|')})\\b`,
+  'gi'
+)
+
+/** Substitui palavras estrangeiras/técnicas pela pronúncia fonética pt-BR. */
+export function expandForeignWords(text: string): string {
+  return text.replace(FOREIGN_RE, (m) => FOREIGN_WORDS[m.toLowerCase()] ?? m)
+}
+
+// ---------------------------------------------------------------------------
+// Normalização de nomes de modelos de IA (gemini-2.5-flash, gpt-4o, etc.)
+// ---------------------------------------------------------------------------
+
+/**
+ * Normaliza nomes de modelos de IA para fala natural. Exemplos:
+ *   gemini-2.5-flash  → gémini dois ponto cinco flésh
+ *   gpt-4o            → gê pê tê quatro ó
+ *   claude-3.5-sonnet  → clóde três ponto cinco sónete
+ *   llama-3.1          → lhâma três ponto um
+ */
+export function normalizeModelNames(text: string): string {
+  // Padrão: palavra-número.número-sufixo (com variações)
+  return text.replace(
+    /\b(gemini|gpt|claude|llama|mistral|phi|qwen|deepseek|codestral|command)[-\s]?(\d+(?:[.]\d+)*)[-\s]?(pro|flash|ultra|nano|lite|sonnet|haiku|opus|turbo|preview|mini|small|medium|large|thinking|it|instruct|chat|base|latest|o)?\b/gi,
+    (_m, name: string, ver: string, suffix?: string) => {
+      const namePhonetic = FOREIGN_WORDS[name.toLowerCase()] ?? name
+      const verParts = ver.split('.').map((s: string) => intToPtBR(Number(s)) ?? s).join(' ponto ')
+      const suffPhonetic = suffix ? ` ${FOREIGN_WORDS[suffix.toLowerCase()] ?? suffix}` : ''
+      return `${namePhonetic} ${verParts}${suffPhonetic}`
+    }
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Simplificação de URLs e caminhos para fala.
+// ---------------------------------------------------------------------------
+
+/** Remove URLs completas e substitui por "link" ou só o domínio. */
+export function simplifyUrls(text: string): string {
+  // URLs completas: https://github.com/user/repo → "link do guitrábe"
+  return text
+    .replace(/https?:\/\/(?:www\.)?([a-zA-Z0-9.-]+)[^\s)\]]*/, (_m, domain: string) => {
+      const base = domain.split('.')[0]
+      const phonetic = FOREIGN_WORDS[base.toLowerCase()]
+      return phonetic ? `link do ${phonetic}` : `link`
+    })
+}
+
 /** Remove marcação visual que faz o TTS soletrar ruído em voz alta. */
 export function cleanSpeechMarkup(text: string): string {
   return String(text || '')
@@ -312,12 +485,18 @@ export function cleanSpeechMarkup(text: string): string {
 
 /**
  * Pré-processa o texto para a síntese: normaliza números/símbolos, pronuncia siglas
- * técnicas e ajusta a pontuação. As vírgulas são PRESERVADAS (viram pausa curta natural no
- * Piper) — antes eram apagadas, o que deixava a fala apressada e monótona. Mantemos a
- * pontuação forte para a respiração entre frases.
+ * técnicas e palavras estrangeiras, normaliza nomes de modelos de IA, e ajusta a
+ * pontuação. As vírgulas são PRESERVADAS (viram pausa curta natural no Piper).
  */
 export function prepareText(text: string): string {
-  return expandTechAcronyms(normalizeSymbols(normalizePtNumbers(cleanSpeechMarkup(text))))
+  let t = cleanSpeechMarkup(text)
+  t = simplifyUrls(t)
+  t = normalizePtNumbers(t)
+  t = normalizeSymbols(t)
+  t = normalizeModelNames(t)
+  t = expandTechAcronyms(t)
+  t = expandForeignWords(t)
+  return t
     .replace(/\b(senhor|senhora)\s*[,;:]\s*/gi, '$1. ')
     .replace(/\s*;\s*/g, ', ')
     .replace(/\s*,\s*/g, ', ')
@@ -386,8 +565,8 @@ export interface WavTrimOptions {
  * formato não for o esperado (não-WAV, estéreo, float) — nunca lança.
  */
 export function tightenWavSilence(wav: Buffer, opts: WavTrimOptions = {}): Buffer {
-  const maxLeadingMs = opts.maxLeadingMs ?? 60
-  const maxTrailingMs = opts.maxTrailingMs ?? 130
+  const maxLeadingMs = opts.maxLeadingMs ?? 30
+  const maxTrailingMs = opts.maxTrailingMs ?? 70
   if (!wav || wav.length <= WAV_HEADER_BYTES) return wav
   if (wav.toString('ascii', 0, 4) !== 'RIFF' || wav.toString('ascii', 8, 12) !== 'WAVE') return wav
   // Só o layout canônico do Piper (fmt PCM16 mono + data no offset 36) é tratado.

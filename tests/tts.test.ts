@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { clearSpeechQueue, enqueueSentence, normalizeSpeechText, speak, splitSentences, whenSpeechQueueIdle } from '../src/renderer/lib/tts'
+import { finalSpeechFallback } from '../src/renderer/lib/store'
 
 class MockUtterance {
   text: string
@@ -171,7 +172,7 @@ describe('tts', () => {
 
   it('nao quebra fala em extensoes de arquivo e pontos internos a palavras', () => {
     installSpeechMock()
-    const split = splitSentences('arquivos de layout do ArcGIS (PQC_Area_da_queima.mxd, Distancia_T_I.mxd, etc.), usados para montar mapas finais.', false)
+    const split = splitSentences('arquivos de layout do ArcGIS (PQC_Area_da_queima.mxd, Distancia_T_I.mxd, etc.), usados para montar mapas finais.', true)
     expect(split.sentences).toEqual([
       'arquivos de layout do ArcGIS (PQC_Area_da_queima.mxd, Distancia_T_I.mxd, etc.), usados para montar mapas finais.'
     ])
@@ -228,7 +229,7 @@ describe('tts', () => {
 
   it('eager não age em texto curto nem quando já existe frase completa', () => {
     installSpeechMock()
-    expect(splitSentences('Claro, senhor.', false, { eager: true }).sentences).toEqual(['Claro, senhor.'])
+    expect(splitSentences('Claro, senhor.', true, { eager: true }).sentences).toEqual(['Claro, senhor.'])
     expect(splitSentences('Oi, tudo bem', false, { eager: true }).sentences).toEqual([])
   })
 
@@ -253,5 +254,53 @@ describe('tts', () => {
     const split = splitSentences('Quer que eu analise algum desses projetos com mais profundidade?.', true)
     expect(split.sentences).toEqual(['Quer que eu analise algum desses projetos com mais profundidade?.'])
     expect(split.rest).toBe('')
+  })
+
+  it('nao quebra numeros com ponto (milhar) no meio da transmissao (streaming)', () => {
+    installSpeechMock()
+    // Caso 1: o buffer termina exatamente no ponto (ex: "está com 2.")
+    const split1 = splitSentences('está com 2.', false)
+    expect(split1.sentences).toEqual([])
+    expect(split1.rest).toBe('está com 2.')
+
+    // Caso 2: o buffer recebe o restante do número (ex: "está com 2.000 itens")
+    const split2 = splitSentences('está com 2.000 itens', false)
+    expect(split2.sentences).toEqual([])
+    expect(split2.rest).toBe('está com 2.000 itens')
+
+    // Caso 3: fim do fluxo (final = true) com o número com ponto
+    const split3 = splitSentences('está com 2.000 itens.', true)
+    expect(split3.sentences).toEqual(['está com 2.000 itens.'])
+    expect(split3.rest).toBe('')
+  })
+})
+
+describe('finalSpeechFallback (anti-repetição)', () => {
+  it('fala texto completo quando nada foi enfileirado pelo streaming', () => {
+    const result = { fala: 'Pronto, tudo certo.', falaVoz: '' }
+    expect(finalSpeechFallback(result, false, false)).toBe('Pronto, tudo certo.')
+  })
+
+  it('prefere falaVoz quando nada foi enfileirado e falaVoz existe', () => {
+    const result = { fala: 'Resposta longa com detalhes.', falaVoz: 'Pronto, senhor.' }
+    expect(finalSpeechFallback(result, false, false)).toBe('Pronto, senhor.')
+  })
+
+  it('NÃO refala texto completo quando streaming já falou frases', () => {
+    const result = { fala: 'Resposta longa repetida.', falaVoz: '' }
+    // queuedSpeech=true, finalPhaseQueuedSpeech=true: já falou na última fase
+    expect(finalSpeechFallback(result, true, true)).toBe('')
+  })
+
+  it('usa falaVoz quando última fase não teve fala mas fases anteriores sim', () => {
+    const result = { fala: 'Texto completo.', falaVoz: 'Resumo de voz.' }
+    // queuedSpeech=true (fases anteriores falaram), finalPhaseQueuedSpeech=false
+    expect(finalSpeechFallback(result, true, false)).toBe('Resumo de voz.')
+  })
+
+  it('não fala nada se streaming já cobriu tudo e não há falaVoz', () => {
+    const result = { fala: 'Texto completo.', falaVoz: '' }
+    // queuedSpeech=true (fases anteriores falaram), finalPhaseQueuedSpeech=false, sem falaVoz
+    expect(finalSpeechFallback(result, true, false)).toBe('')
   })
 })

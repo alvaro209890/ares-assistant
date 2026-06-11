@@ -128,10 +128,43 @@ const DEFAULT_CONFIG: AppConfig = {
         'git branch',
         'git show',
         'git remote',
+        'git add',
+        'git commit',
+        'git checkout',
+        'git restore',
+        'git stash',
+        'git merge',
+        'git pull',
+        'git fetch',
+        'git init',
+        'touch',
+        'mkdir',
         'node --version',
         'npm --version',
         'npm ls',
-        'npx tsc --noEmit'
+        'npm install',
+        'npm ci',
+        'npm run',
+        'pnpm install',
+        'pnpm run',
+        'yarn install',
+        'yarn run',
+        'bun install',
+        'bun run',
+        'npx',
+        'tsc',
+        'npx tsc',
+        'vite',
+        'node',
+        'python',
+        'python3',
+        'make',
+        'go run',
+        'go build',
+        'go test',
+        'cargo run',
+        'cargo build',
+        'cargo test'
       ]
     },
     control: {
@@ -263,6 +296,11 @@ export function ensureConfig(): AppConfig {
   if (!cfg.grog.apiKey) {
     const detected = detectGroqKey()
     if (detected) cfg.grog.apiKey = detected
+  }
+  // Migração: se o usuário já tem uma config mas com a lista antiga de terminalSafe (que não tinha 'touch'),
+  // atualizamos a lista dele com os novos padrões que incluem comandos de criação/edição.
+  if (cfg.integrations?.code?.terminalSafe && !cfg.integrations.code.terminalSafe.includes('touch')) {
+    cfg.integrations.code.terminalSafe = DEFAULT_CONFIG.integrations.code.terminalSafe
   }
   // Reescreve a config (preenchendo campos novos do merge) sem descartar dados.
   persist(cfg)

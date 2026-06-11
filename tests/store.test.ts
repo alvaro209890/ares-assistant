@@ -33,10 +33,9 @@ describe('renderer store — fallback de fala final', () => {
     expect(finalSpeechFallback({ fala: 'Resposta final simples.' }, false, false)).toBe('Resposta final simples.')
   })
 
-  it('usa fala final quando fases anteriores falaram mas a fase final nao entrou na fila', () => {
-    expect(finalSpeechFallback({ fala: 'Atena concluiu a pesquisa com as fontes recentes.' }, true, false)).toBe(
-      'Atena concluiu a pesquisa com as fontes recentes.'
-    )
+  it('nao refala o texto completo quando fases anteriores ja falaram sem falaVoz (anti-repeticao)', () => {
+    // Anti-repetição: queuedSpeech=true e sem falaVoz → não repete o texto completo.
+    expect(finalSpeechFallback({ fala: 'Atena concluiu a pesquisa com as fontes recentes.' }, true, false)).toBe('')
   })
 
   it('atualiza atividade por id e agrupa os outputs sob a mesma atividade', () => {

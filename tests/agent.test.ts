@@ -309,14 +309,14 @@ describe('agent — runTurn (orquestração do cérebro)', () => {
   it('emite waiting quando terminal precisa de autorização', async () => {
     updateConfig({ integrations: { code: { workspaceRoot: TMP, allowedRoots: [TMP], terminalAutoApprove: false } } })
     const sid = createSession().id
-    nextEnvelope('Vou preparar o comando.', [{ tipo: 'codigo.terminal', comando: 'npm install left-pad' }])
-    nextEnvelope('Autoriza executar npm install left-pad?', [])
+    nextEnvelope('Vou preparar o comando.', [{ tipo: 'codigo.terminal', comando: 'ping google.com' }])
+    nextEnvelope('Autoriza executar ping google.com?', [])
     const activities: AgentActivityEvent[] = []
 
     await runTurn(sid, 'instale left-pad', false, undefined, (a) => activities.push(a))
 
     expect(activities.some((a) => a.kind === 'terminal' && a.status === 'running')).toBe(true)
-    expect(activities.some((a) => a.kind === 'terminal' && a.status === 'waiting' && a.command === 'npm install left-pad')).toBe(true)
+    expect(activities.some((a) => a.kind === 'terminal' && a.status === 'waiting' && a.command === 'ping google.com')).toBe(true)
   })
 
   it('emite amostra de output em comando permitido', async () => {
