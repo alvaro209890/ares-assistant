@@ -1,15 +1,14 @@
 import { motion } from 'framer-motion'
 import { useAres } from '../lib/store'
 import HiveDashboard from '../components/HiveDashboard'
-import Conversation from '../components/Conversation'
-import Controls from '../components/Controls'
 import StateIndicator from '../components/StateIndicator'
+import ChatPanel from '../components/ChatPanel'
 
 // Aba "Escritório": a Colmeia em ação. Painel da equipe à esquerda (Ares +
 // especialistas com balões do que estão fazendo) e o chat unificado (texto +
 // voz) à direita — quem fala com o usuário continua sendo só o Ares.
 export default function Office(): JSX.Element {
-  const { aresState, conversation, status, hiveWorkers } = useAres()
+  const { aresState, status, hiveWorkers } = useAres()
   const activeCount = hiveWorkers.filter((w) => w.phase === 'thinking').length
 
   return (
@@ -48,22 +47,7 @@ export default function Office(): JSX.Element {
         </section>
 
         {/* Chat unificado (texto + voz) */}
-        <section className="glass flex min-h-[420px] min-w-0 flex-col rounded-2xl p-4">
-          <div className="mb-3 flex items-center justify-between px-1">
-            <h3 className="text-xs title-track text-cyan-300/60">CONVERSA COM O ARES</h3>
-            {status && (
-              <span className="max-w-[55%] truncate rounded-full border border-amber-300/20 bg-black/25 px-3 py-1 text-[11px] text-amber-200/85">
-                {status}
-              </span>
-            )}
-          </div>
-          <div className="min-h-0 flex-1">
-            <Conversation messages={conversation} />
-          </div>
-          <div className="mt-3">
-            <Controls />
-          </div>
-        </section>
+        <ChatPanel title="CONVERSA COM O ARES" status={status} controls />
       </div>
     </motion.div>
   )

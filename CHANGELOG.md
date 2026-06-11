@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.34.0 - 2026-06-10
+
+Foco: estabilidade da voz atual, Colmeia mais confiavel, chat unico entre Assistente/Escritorio e limpeza local solicitada pelo usuario.
+
+- **Voz Piper preservada**: `auto` e `piper` nao caem mais automaticamente para Web Speech. Se uma frase falha, o Ares registra o erro e libera o turno sem trocar para uma voz inferior.
+- **Resposta final falada apos Atena**: corrigido o caso em que a Atena pesquisava, o Ares mostrava o resultado no chat, mas a resposta final nao entrava na fila de voz.
+- **Chat compartilhado**: Assistente e Escritorio usam o mesmo painel de conversa, historico, selecao de chats e botao de nova conversa.
+- **Colmeia com guarda deterministica**: se o Ares promete acionar Atena/Hefesto/Temis e o modelo esquece a acao JSON, o runtime executa a acao correta.
+- **Atena mais atual e completa**: pesquisas passam a coletar busca normal, busca focada em recencia e noticias do Google News RSS; o relatorio exige datas, fontes, divergencias e incertezas.
+- **Contexto compacto para subagentes**: subagentes recebem contexto direto, resumo e ultimas mensagens relevantes com limite fixo para melhorar qualidade sem desperdicar tokens.
+- **Estabilidade Electron/IPC**: envio de eventos tolera renderer destruido; Linux ganhou fallback grafico para reduzir queda por GPU.
+- **Dados locais limpos**: chats e memorias foram apagados; ficou apenas a memoria de perfil com o nome `Alvaro`, preservando APIs ja configuradas.
+- 307 testes passando (2 skipped).
+
 ## 0.31.0 - 2026-06-10
 
 Foco: agente de programação com mais ferramentas (inspiradas nas tools Glob/Outline/Grep/MultiEdit de agentes como Claude Code/openclaude), voz que acompanha o trabalho e conversa contínua que segue viva durante tarefas longas.

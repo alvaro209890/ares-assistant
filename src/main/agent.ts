@@ -542,9 +542,32 @@ async function gatherSubagentEvidence(
   try {
     if (profile.id === 'researcher') {
       const parts: string[] = []
-      const results = await webSearch(String(a.consulta || goal))
+      const query = String(a.consulta || goal)
+      const now = new Date()
+      parts.push(
+        `Data da pesquisa: ${now.toLocaleString('pt-BR')} (ISO ${now.toISOString()}). Priorize fontes/notícias mais recentes e cite datas.`
+      )
+      const [results, recentResults, news] = await Promise.all([
+        webSearch(query, 6).catch(() => []),
+        webSearch(`${query} notícias recentes lançamento atualização ${now.getFullYear()}`, 6).catch(() => []),
+        getNews(query, 8).catch(() => [])
+      ])
       if (Array.isArray(results) && results.length) {
         parts.push('Resultados de busca:\n' + results.map((r) => `- ${r.title} (${r.url}): ${r.snippet}`).join('\n'))
+      }
+      if (Array.isArray(recentResults) && recentResults.length) {
+        parts.push(
+          'Resultados focados em recência:\n' +
+            recentResults.map((r) => `- ${r.title} (${r.url}): ${r.snippet}`).join('\n')
+        )
+      }
+      if (Array.isArray(news) && news.length) {
+        parts.push(
+          'Notícias recentes (Google News RSS):\n' +
+            news
+              .map((n) => `- ${n.title}${n.source ? ` — ${n.source}` : ''}${n.published ? ` — ${n.published}` : ''}${n.link ? ` (${n.link})` : ''}`)
+              .join('\n')
+        )
       }
       const url = String(a.url || a.endereco || '').trim()
       if (url) {
@@ -926,7 +949,7 @@ async function runQuery(
             onHive?.({ id: profile.id, label: profile.label, phase: 'thinking', detail: gatherDetail, updatedAt: Date.now() })
             const task: SubagentTask = {
               goal,
-              context: a.contexto ? String(a.contexto) : undefined,
+              context: compactSubagentContext(sessionId, a.contexto ? String(a.contexto) : undefined),
               evidence: await gatherSubagentEvidence(profile, a, cfg, goal, signal, progress),
               memories: relevantMemories(goal, loadMemory())
             }
@@ -1012,6 +1035,14 @@ function proactiveCodeFollowup(
   }
 }
 
+function researchFollowupInstruction(results: unknown[], voice: boolean): string {
+  const hasResearch = results.some((r) => (r as { tipo?: string })?.tipo === 'subagente.pesquisar')
+  if (!hasResearch) return ''
+  return voice
+    ? '\nPESQUISA DA ATENA: dê uma resposta mais completa que o normal, mas falável: 3 a 5 frases com o achado principal, datas, fontes principais e qualquer incerteza relevante.'
+    : '\nPESQUISA DA ATENA: responda de forma completa e organizada, com achado principal, datas/linha do tempo, fontes principais e incertezas. Não invente detalhes fora do relatório.'
+}
+
 function applyMutations(acoes: Acao[]): { board: Board; notes: string[]; changedBoard: boolean } {
   let board = loadBoard()
   const original = board
@@ -1093,6 +1124,52 @@ function memoryFallback(userText: string, acoes: Acao[]): Acao[] {
     userText.match(/(?:minha preferência é|eu prefiro|prefiro)\s+(.+)/i)
   const fact = match?.[1]?.replace(/[.!?]+$/, '').trim()
   return fact ? [...acoes, { tipo: 'memoria.salvar', fato: fact }] : acoes
+}
+
+export function compactSubagentContext(
+  sessionId: string,
+  actionContext?: string,
+  maxChars = 2200
+): string | undefined {
+  const session = getSession(sessionId)
+  const parts: string[] = []
+  const ctx = String(actionContext || '').trim()
+  if (ctx) parts.push(`Contexto do turno:\n${ctx.slice(0, 900)}`)
+  if (session?.summary?.trim()) parts.push(`Resumo da conversa:\n${session.summary.trim().slice(0, 700)}`)
+  const recent = (session?.messages || [])
+    .slice(-6)
+    .map((m) => `${m.role === 'user' ? 'Usuário' : 'Ares'}: ${m.content.replace(/\s+/g, ' ').trim().slice(0, 260)}`)
+    .filter((line) => line.length > 12)
+  if (recent.length) parts.push(`Últimas mensagens relevantes:\n${recent.join('\n')}`)
+  const out = parts.join('\n\n').trim()
+  return out ? out.slice(0, maxChars) : undefined
+}
+
+/**
+ * Guarda determinística para a Colmeia: se o modelo "promete" chamar um
+ * especialista, mas esquece de emitir a ação JSON, o runtime cumpre a promessa.
+ */
+export function inferPromisedHiveAction(fala: string, userText: string, acoes: Acao[]): Acao | null {
+  if (acoes.some((a) => String(a.tipo || '').startsWith('subagente.'))) return null
+  const combined = `${fala}\n${userText}`.toLowerCase()
+  const promised = /(?:vou|irei|vamos|deixe|pedir|acionar|chamar|consultar|delegar|encaminhar|agora com|com a|com o)/iu.test(
+    combined
+  )
+  if (!promised) return null
+  const goal = userText.trim() || fala.trim()
+  if (!goal) return null
+  const contexto = 'Ação inferida pelo runtime: o Ares prometeu acionar a Colmeia, mas o modelo não emitiu a ação JSON.'
+
+  if (/\batena\b/iu.test(combined) && /(pesquis|investig|buscar|fonte|web|documenta|consulta|not[ií]cia|lan[çc]ament)/iu.test(combined)) {
+    return { tipo: 'subagente.pesquisar', objetivo: goal, consulta: goal, contexto }
+  }
+  if (/\bhefesto\b/iu.test(combined) && /(constru|implement|program|c[oó]digo|projet|arquitet|editar|criar)/iu.test(combined)) {
+    return { tipo: 'subagente.construir', objetivo: goal, contexto }
+  }
+  if (/\bt[eê]mis\b/iu.test(combined) && /(audit|revis|valid|test|qualidade|verificar|diagn[oó]stic)/iu.test(combined)) {
+    return { tipo: 'subagente.auditar', objetivo: goal, contexto }
+  }
+  return null
 }
 
 // Canal do delta: 'both' (exibe no chat E fala — padrão), 'display' (só texto na tela,
@@ -1290,6 +1367,10 @@ async function streamTurn(
       pump(cumulative)
     }, signal)
     pump(full)
+    if (emitted === 0) {
+      const env = parseEnvelope(full)
+      if (env.fala) onDelta(transform ? transform(env.fala, phase, kind) : env.fala, phase, kind)
+    }
     return full
   } catch (e) {
     if (emitted > 0) throw e // já falamos parte: não dá para refazer com segurança
@@ -1362,6 +1443,11 @@ export async function runTurn(
   let fala = finalFala(env.fala, suppressGreeting)
   let falaVoz: string | undefined
   const allNotes: string[] = []
+  const inferredHive = inferPromisedHiveAction(fala, userText, env.acoes)
+  if (inferredHive) {
+    env.acoes = [...env.acoes, inferredHive]
+    allNotes.push('colmeia corrigida: promessa convertida em ação real')
+  }
   let mutations = env.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo))
   let queries = env.acoes.filter((a) => QUERY_TOOLS.has(a.tipo))
 
@@ -1388,6 +1474,7 @@ export async function runTurn(
         role: 'system',
         content:
           toolResultsPrompt(results, voice, codeMode) +
+          researchFollowupInstruction(results, voice) +
           (proactive ? `\n${proactive.instruction}` : '') +
           (lastRound
             ? '\nLimite de rodadas de ferramentas atingido: responda AGORA ao usuário com o que tem, sem chamar novas ferramentas de consulta.'

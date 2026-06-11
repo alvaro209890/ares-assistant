@@ -27,6 +27,12 @@ describe('renderer store — fallback de fala final', () => {
     expect(finalSpeechFallback({ fala: 'Resposta final simples.' }, false, false)).toBe('Resposta final simples.')
   })
 
+  it('usa fala final quando fases anteriores falaram mas a fase final nao entrou na fila', () => {
+    expect(finalSpeechFallback({ fala: 'Atena concluiu a pesquisa com as fontes recentes.' }, true, false)).toBe(
+      'Atena concluiu a pesquisa com as fontes recentes.'
+    )
+  })
+
   it('atualiza atividade por id e preserva outputs como eventos separados', () => {
     const base: AgentActivityEvent = {
       id: 'act-1',

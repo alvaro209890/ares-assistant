@@ -52,6 +52,7 @@ export function finalSpeechFallback(
   const voiceSummary = result.falaVoz?.trim()
   if (voiceSummary && !finalPhaseQueuedSpeech) return voiceSummary
   const fullSpeech = result.fala.trim()
+  if (!finalPhaseQueuedSpeech && fullSpeech) return fullSpeech
   if (!queuedSpeech && fullSpeech) return fullSpeech
   return ''
 }
@@ -564,9 +565,20 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
             .then((mem) => setMemory(mem))
             .catch(() => {})
         }
-        if (speak) await waitForSpeechWithBargeIn()
-        setAresState('idle')
         busyRef.current = false
+        if (speak && queuedSpeech) {
+          const speechDone = waitForSpeechWithBargeIn()
+            .catch((e) => setStatus(`Voz: ${errMsg(e)}`))
+            .finally(() => {
+              if (!busyRef.current && (aresStateRef.current === 'speaking' || aresStateRef.current === 'thinking')) {
+                setAresState('idle')
+              }
+            })
+          // No modo contínuo por voz, ainda esperamos a fala para evitar auto-escuta.
+          if (viaVoice && continuousRef.current) await speechDone
+        } else {
+          setAresState('idle')
+        }
       } catch (e) {
         off()
         offActivity()

@@ -20,11 +20,30 @@ vi.mock('../src/main/ninerouter', () => ({
   streamChat: vi.fn()
 }))
 
+vi.mock('../src/main/tools', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/main/tools')>()
+  return {
+    ...actual,
+    webSearch: vi.fn(async () => [
+      { title: 'Fonte de teste', url: 'https://example.com/fonte', snippet: 'Resultado controlado.' }
+    ]),
+    getNews: vi.fn(async () => [
+      {
+        title: 'Notícia recente de teste',
+        link: 'https://example.com/noticia',
+        source: 'Fonte Teste',
+        published: 'Wed, 10 Jun 2026 12:00:00 GMT'
+      }
+    ]),
+    readPage: vi.fn(async () => ({ title: 'Página de teste', text: 'Conteúdo controlado.' }))
+  }
+})
+
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AgentActivityEvent } from '../src/shared/types'
 import { chatJSON, streamChat } from '../src/main/ninerouter'
-import { runTurn, stripRepeatedGreeting } from '../src/main/agent'
+import { compactSubagentContext, runTurn, stripRepeatedGreeting } from '../src/main/agent'
 import { createSession } from '../src/main/data'
 import { updateConfig } from '../src/main/config'
 
@@ -79,6 +98,20 @@ describe('agent — runTurn (orquestração do cérebro)', () => {
     expect(r.memory.some((f) => /ponto e vírgula/i.test(f.text))).toBe(true)
   })
 
+  it('monta contexto compacto para subagentes sem carregar historico inteiro', async () => {
+    const sid = createSession().id
+    nextEnvelope('Primeira resposta.', [])
+    await runTurn(sid, 'Meu projeto atual é o Ares e quero melhorar a Colmeia.')
+    nextEnvelope('Segunda resposta.', [])
+    await runTurn(sid, 'A Atena deve priorizar notícias recentes.')
+
+    const ctx = compactSubagentContext(sid, 'Contexto direto da ação', 500)
+
+    expect(ctx).toContain('Contexto direto da ação')
+    expect(ctx).toContain('Atena deve priorizar notícias recentes')
+    expect(ctx!.length).toBeLessThanOrEqual(500)
+  })
+
   it('ignora ação inválida e registra uma nota', async () => {
     const sid = createSession().id
     nextEnvelope('Feito.', [{ tipo: 'tarefa.criar' }]) // sem título -> inválida
@@ -99,6 +132,52 @@ describe('agent — runTurn (orquestração do cérebro)', () => {
 
     expect(brain).toHaveBeenCalledTimes(2)
     expect(r.fala).toBe('São quatro, senhor.')
+  })
+
+  it('streama a fala final mesmo quando a fase pós-ferramenta vem como texto solto', async () => {
+    const sid = createSession().id
+    const envelopes = [
+      JSON.stringify({ fala: 'Vou calcular.', acoes: [{ tipo: 'calcular', expressao: '2+2' }] }),
+      'São quatro, senhor.'
+    ]
+    let i = 0
+    stream.mockImplementation(async (_cfg: unknown, _msgs: unknown, onDelta: (d: string) => void) => {
+      const text = envelopes[i++] ?? ''
+      onDelta(text)
+      return text
+    })
+    const deltas: { chunk: string; phase: number; kind: string }[] = []
+
+    const r = await runTurn(sid, 'quanto é dois mais dois', false, (chunk, phase, kind = 'both') =>
+      deltas.push({ chunk, phase, kind })
+    )
+
+    expect(r.fala).toBe('São quatro, senhor.')
+    expect(deltas.some((d) => d.phase === 2 && d.kind === 'both' && d.chunk.includes('São quatro'))).toBe(true)
+  })
+
+  it('cumpre promessa de acionar Atena mesmo quando o LLM esquece a ação JSON', async () => {
+    const sid = createSession().id
+    brain
+      .mockResolvedValueOnce(JSON.stringify({ fala: 'Vou pesquisar isso agora com a Atena.', acoes: [] }))
+      .mockResolvedValueOnce('Atena encontrou uma fonte de teste e confirmou o fato principal.')
+      .mockResolvedValueOnce(JSON.stringify({ fala: 'Atena confirmou o fato principal com fonte controlada.', acoes: [] }))
+    const hive: string[] = []
+
+    const r = await runTurn(
+      sid,
+      'Pesquise para mim sobre o modelo lançado hoje.',
+      false,
+      undefined,
+      undefined,
+      (status) => hive.push(`${status.id}:${status.phase}`)
+    )
+
+    expect(brain).toHaveBeenCalledTimes(3)
+    expect(hive).toContain('researcher:thinking')
+    expect(hive).toContain('researcher:done')
+    expect(r.fala).toContain('Atena confirmou')
+    expect(r.notes).toContain('colmeia corrigida: promessa convertida em ação real')
   })
 
   it('encadeia rodadas de ferramentas: consulta da 2ª fase também executa', async () => {

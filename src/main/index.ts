@@ -64,6 +64,13 @@ app.setName('ares')
 // No Linux, o Chromium do Electron desliga a síntese de voz por padrão.
 // Habilita o speech-dispatcher para a voz Web Speech (reserva) sair no áudio.
 app.commandLine.appendSwitch('enable-speech-dispatcher')
+// Em alguns drivers Linux o processo de GPU do Chromium falha no boot e derruba a
+// janela inteira. SwiftShader mantém WebGL/Canvas por software em vez de travar.
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('disable-gpu-sandbox')
+  app.commandLine.appendSwitch('use-gl', 'swiftshader')
+  app.commandLine.appendSwitch('enable-unsafe-swiftshader')
+}
 
 let mainWindow: BrowserWindow | null = null
 
@@ -203,18 +210,25 @@ function registerIpc(): void {
   // A "fala" é transmitida em tempo real via evento 'chat:delta'; o invoke
   // resolve com o resultado final (board, memória, eventos, notas).
   ipcMain.handle('chat:ask', async (event, payload: { sessionId: string; text: string; voice?: boolean }) => {
+    const sendToRenderer = (channel: string, data: unknown): void => {
+      try {
+        if (!event.sender.isDestroyed()) event.sender.send(channel, data)
+      } catch (e) {
+        logger.warn('ipc', `não consegui enviar ${channel}; renderer indisponível`, e)
+      }
+    }
     return runTurn(
       payload.sessionId,
       payload.text,
       !!payload.voice,
       (chunk, phase, kind = 'both') => {
-        if (!event.sender.isDestroyed()) event.sender.send('chat:delta', { chunk, phase, kind })
+        sendToRenderer('chat:delta', { chunk, phase, kind })
       },
       (activity) => {
-        if (!event.sender.isDestroyed()) event.sender.send('chat:activity', activity)
+        sendToRenderer('chat:activity', activity)
       },
       (status) => {
-        if (!event.sender.isDestroyed()) event.sender.send('agent:hive-update', status)
+        sendToRenderer('agent:hive-update', status)
       }
     )
   })

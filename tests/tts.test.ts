@@ -84,10 +84,12 @@ describe('tts', () => {
     vi.unstubAllGlobals()
   })
 
-  it('cai para Web Speech quando Piper passa do timeout com retry em modo Piper', async () => {
+  it('mantem Piper como voz atual e nao cai para Web Speech quando ha timeout', async () => {
     const { speakCalls } = installSpeechMock()
+    const onError = vi.fn()
+    const onEnd = vi.fn()
 
-    const done = speak('teste curto', { engine: 'piper' })
+    const done = speak('teste curto', { engine: 'piper', onError, onEnd })
     await vi.advanceTimersByTimeAsync(3500)
     await vi.advanceTimersByTimeAsync(180)
     await vi.advanceTimersByTimeAsync(3500)
@@ -95,7 +97,9 @@ describe('tts', () => {
     await done
 
     expect(window.ares.tts.synthesize).toHaveBeenCalledTimes(2)
-    expect(speakCalls).toEqual(['teste curto'])
+    expect(speakCalls).toEqual([])
+    expect(onError).toHaveBeenCalledWith(expect.stringContaining('Piper'))
+    expect(onEnd).toHaveBeenCalledTimes(1)
   })
 
   it('em auto no Windows usa o Piper primeiro (voz neural)', async () => {
@@ -140,18 +144,21 @@ describe('tts', () => {
     expect(onEnd).toHaveBeenCalledTimes(1)
   })
 
-  it('cai para Web Speech quando o Piper falha em modo auto', async () => {
+  it('em modo auto mantem a voz neural e nao rebaixa para Web Speech quando Piper falha', async () => {
     const { speakCalls } = installSpeechMock()
     installAudioMock()
+    const onError = vi.fn()
+    const onEnd = vi.fn()
     window.ares.tts.synthesize = vi.fn(() => Promise.reject(new Error('piper indisponível')))
 
-    const done = speak('fallback web', { engine: 'auto' })
+    const done = speak('fallback web', { engine: 'auto', onError, onEnd })
     await vi.advanceTimersByTimeAsync(500) // esgota as tentativas do Piper (com retry)
-    await vi.advanceTimersByTimeAsync(20) // onend do Web Speech
     await done
 
     expect(window.ares.tts.synthesize).toHaveBeenCalledTimes(2) // PIPER_MAX_RETRIES
-    expect(speakCalls).toEqual(['fallback web'])
+    expect(speakCalls).toEqual([])
+    expect(onError).toHaveBeenCalledWith(expect.stringContaining('Piper'))
+    expect(onEnd).toHaveBeenCalledTimes(1)
   })
 
   it('nao quebra fala em dois-pontos ou ponto-e-virgula', () => {

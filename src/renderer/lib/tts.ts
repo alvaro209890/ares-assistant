@@ -433,20 +433,14 @@ async function speakInternal(text: string, opts: SpeakOptions, cancelBefore: boo
     log('debug', `speakInternal: prefers Piper engine`)
     const ok = await piperSpeak(clean, opts)
     if (ok) return
-    log('warn', `speakInternal: Piper failed, trying web fallback`)
-    const webResult = await webSpeak(clean, opts)
-    if (webResult === 'failed') opts.onEnd?.()
+    log('warn', `speakInternal: Piper failed; keeping configured neural voice and not falling back to Web Speech`)
+    opts.onError?.('Voz neural Piper falhou nesta frase. Mantive a voz atual e liberei o Ares.')
+    opts.onEnd?.()
     return
   }
   log('debug', `speakInternal: prefers Web Speech engine`)
   const webResult = await webSpeak(clean, opts)
   if (webResult === 'ok' || webResult === 'cancelled') return
-  if (opts.engine !== 'web') {
-    log('warn', `speakInternal: Web Speech failed, trying Piper fallback`)
-    const ok = await piperSpeak(clean, opts, true)
-    if (!ok) opts.onEnd?.()
-    return
-  }
   opts.onEnd?.()
 }
 
