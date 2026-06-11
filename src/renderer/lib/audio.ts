@@ -54,7 +54,7 @@ export function getLevel(): number {
   return Math.min(1, Math.sqrt(sum / _timeBuf.length) * 3.2)
 }
 
-const waitFrame = () => new Promise<number>((resolve) => requestAnimationFrame(resolve))
+const waitFrame = () => new Promise<number>((resolve) => setTimeout(resolve, 16))
 
 /** Começa a gravar (push-to-talk). Reaproveita o stream já aberto. */
 export async function startRecording(): Promise<void> {
@@ -132,9 +132,9 @@ export async function recordUntilSilence(
       const silentEnough = spoke && now - lastVoice > silenceMs && now - start > 900
       const hardStop = now - start > maxMs
       if (waitedTooLong || silentEnough || hardStop) return resolve()
-      requestAnimationFrame(tick)
+      setTimeout(tick, 16)
     }
-    requestAnimationFrame(tick)
+    setTimeout(tick, 16)
   })
 
   const { blob, mimeType: mt } = await stopRecording()
