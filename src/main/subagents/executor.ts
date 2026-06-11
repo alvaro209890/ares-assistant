@@ -1,13 +1,22 @@
 import type { AppConfig, ChatMessage, HiveWorkerStatus, MemoryFact } from '../../shared/types'
 import { chatJSON } from '../ninerouter'
 import { tokenSimilarity } from '../memory'
-import type { SubagentProfile, SubagentResult, SubagentTask } from './types'
+import type {
+  EvidencePackage,
+  SubagentProfile,
+  SubagentReportTags,
+  SubagentResult,
+  SubagentTask
+} from './types'
+import { renderEvidencePackage } from './evidence'
 
 export type HiveStatusFn = (status: HiveWorkerStatus) => void
 
 // Relatórios são para o Ares sintetizar, não para exibição bruta: um teto evita
-// estourar o contexto da rodada seguinte.
+// estourar o contexto da rodada seguinte. EVIDENCE_BUDGET controla o tamanho do
+// material COLETADO (entrada) — separado do tamanho do relatório (saída).
 const REPORT_MAX_CHARS = 6000
+const EVIDENCE_BUDGET = 18000
 
 /**
  * Recupera os fatos da memória de longo prazo mais parecidos com o objetivo
@@ -25,13 +34,25 @@ export function relevantMemories(goal: string, facts: MemoryFact[], max = 5, min
     .map((s) => s.text)
 }
 
+/**
+ * Renderiza o campo `evidence` da tarefa para texto: aceita EvidencePackage
+ * (caminho novo, com orçamento por seção) ou string crua (compat com chamadores
+ * antigos e testes). Sem alocação extra quando o material já vier pronto.
+ */
+function renderEvidenceField(ev: SubagentTask['evidence']): string {
+  if (!ev) return ''
+  if (typeof ev === 'string') return ev.trim()
+  return renderEvidencePackage(ev, EVIDENCE_BUDGET).trim()
+}
+
 /** Monta a mensagem de tarefa enviada ao subagente. Pura e testável. */
 export function buildTaskPrompt(task: SubagentTask): string {
   const parts = [`OBJETIVO:\n${task.goal.trim()}`]
   if (task.context?.trim()) parts.push(`CONTEXTO DO ARES (o que já se sabe/fez neste turno):\n${task.context.trim()}`)
-  if (task.evidence?.trim()) parts.push(`MATERIAL COLETADO (use como fonte primária):\n${task.evidence.trim()}`)
+  const evText = renderEvidenceField(task.evidence)
+  if (evText) parts.push(`MATERIAL COLETADO (use como fonte primária):\n${evText}`)
   if (task.memories?.length) parts.push(`MEMÓRIA DE LONGO PRAZO (fatos sobre o usuário/projetos):\n- ${task.memories.join('\n- ')}`)
-  parts.push('Produza seu relatório técnico agora.')
+  parts.push('Produza seu relatório técnico agora, seguindo os blocos rotulados do seu papel.')
   return parts.join('\n\n')
 }
 
@@ -77,4 +98,37 @@ export function summarizeReport(report: string): string {
   const firstLine = report.split('\n').find((l) => l.trim()) ?? ''
   const sentence = firstLine.split(/(?<=[.!?])\s/)[0] ?? firstLine
   return sentence.trim().slice(0, 120)
+}
+
+/**
+ * Extração best-effort de tags do relatório (template sugerido nos prompts).
+ * Devolve o que conseguir achar; ausências são `undefined`. Pura e testável.
+ * Usada pelo Ares para decidir follow-ups (ex.: se Têmis reprovou, oferecer
+ * rerodar checagens) sem o LLM precisar adivinhar a estrutura.
+ */
+export function parseReportTags(report: string): SubagentReportTags {
+  const tags: SubagentReportTags = {}
+  const text = String(report || '')
+  const verdictMatch = text.match(/\[?\s*VEREDITO\s*\]?\s*[:\-]?\s*(APROVADO|REPROVADO)/i)
+  if (verdictMatch) tags.verdict = verdictMatch[1].toUpperCase() as 'APROVADO' | 'REPROVADO'
+
+  const filesBlock = text.match(/\[\s*ARQUIVOS\s*\]\s*\n([\s\S]*?)(?=\n\s*\[|$)/i)
+  if (filesBlock) {
+    const files = filesBlock[1]
+      .split(/\r?\n/)
+      .map((l) => l.replace(/^[-*\d.)\s]+/, '').trim())
+      .map((l) => l.split(/[\s(:]/)[0])
+      .filter((f) => f && /[./\\]/.test(f))
+    if (files.length) tags.files = Array.from(new Set(files)).slice(0, 30)
+  }
+
+  const risksBlock = text.match(/\[\s*RISCOS\s*\]\s*\n([\s\S]*?)(?=\n\s*\[|$)/i)
+  if (risksBlock) {
+    const risks = risksBlock[1]
+      .split(/\r?\n/)
+      .map((l) => l.replace(/^[-*\s]+/, '').trim())
+      .filter((l) => l.length > 4)
+    if (risks.length) tags.risks = risks.slice(0, 15)
+  }
+  return tags
 }

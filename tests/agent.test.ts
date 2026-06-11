@@ -43,7 +43,14 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AgentActivityEvent } from '../src/shared/types'
 import { chatJSON, streamChat } from '../src/main/ninerouter'
-import { compactSubagentContext, hiveFollowupInstruction, runTurn, stripRepeatedGreeting } from '../src/main/agent'
+import {
+  buildTaskContext,
+  compactSubagentContext,
+  hiveFollowupInstruction,
+  inferPromisedHiveAction,
+  runTurn,
+  stripRepeatedGreeting
+} from '../src/main/agent'
 import { createSession } from '../src/main/data'
 import { updateConfig } from '../src/main/config'
 
@@ -118,9 +125,25 @@ describe('agent — runTurn (orquestração do cérebro)', () => {
       false
     )
 
-    expect(out).toContain('PLANO DO HEFESTO')
+    expect(out).toContain('BRIEFING DO HEFESTO')
     expect(out).toContain('AUDITORIA DA TÊMIS')
     expect(out).toContain('APROVADO/REPROVADO')
+    // O briefing agora orienta o Ares a escolher entre aplicar passo-a-passo OU
+    // delegar ao coder autônomo, sem duplicar trabalho.
+    expect(out).toMatch(/codigo\.projeto|coder autônomo/i)
+  })
+
+  it('buildTaskContext mistura contexto direto + últimas mensagens; é alias de compactSubagentContext', async () => {
+    const sid = createSession().id
+    nextEnvelope('Primeira.', [])
+    await runTurn(sid, 'Quero refatorar o módulo de auth desta semana.')
+
+    const ctx = buildTaskContext(sid, 'Próximo: aplicar refactor em src/main/code.ts')
+    expect(ctx).toContain('Contexto direto do turno')
+    expect(ctx).toContain('Próximo: aplicar refactor em src/main/code.ts')
+    expect(ctx).toContain('refatorar o módulo de auth')
+    // back-compat: nome antigo deve apontar pra mesma função.
+    expect(buildTaskContext).toBe(compactSubagentContext)
   })
 
   it('ignora ação inválida e registra uma nota', async () => {
@@ -180,6 +203,38 @@ describe('agent — runTurn (orquestração do cérebro)', () => {
     expect(r.fala).toContain('Claude Fable 5')
     expect(deltas.join('')).toContain('Claude Fable 5')
     expect(r.notes).toEqual([])
+  })
+
+  it('inferPromisedHiveAction: exige delegação clara + nome do especialista + domínio compatível', () => {
+    // Verbo de leitura genérico não dispara (era falso positivo antes).
+    expect(inferPromisedHiveAction('Vou ler o arquivo.', 'leia o código.', [])).toBeNull()
+    // Cita o nome mas sem verbo de delegação claro -> null.
+    expect(inferPromisedHiveAction('A Atena seria útil aqui.', 'me ajude com isso', [])).toBeNull()
+    // Atena com delegação explícita + domínio de pesquisa -> aciona Atena.
+    const a = inferPromisedHiveAction(
+      'Vou pedir para a Atena pesquisar isso.',
+      'pesquise sobre o novo modelo lançado hoje',
+      []
+    )
+    expect(a?.tipo).toBe('subagente.pesquisar')
+    // Hefesto com "vai desenhar" -> aciona engineer.
+    const h = inferPromisedHiveAction(
+      'Hefesto vai desenhar a mudança no módulo de auth.',
+      'preciso refatorar o módulo de auth com plano claro',
+      []
+    )
+    expect(h?.tipo).toBe('subagente.construir')
+    // Têmis fará / audita -> aciona auditor.
+    const t = inferPromisedHiveAction(
+      'Vou pedir à Têmis para auditar o diff.',
+      'revise o diff atual e aponte riscos',
+      []
+    )
+    expect(t?.tipo).toBe('subagente.auditar')
+    // Se já houver ação subagente.* no envelope, não infere de novo.
+    expect(
+      inferPromisedHiveAction('Vou pedir à Atena', 'pesquise X', [{ tipo: 'subagente.pesquisar', objetivo: 'X' }])
+    ).toBeNull()
   })
 
   it('cumpre promessa de acionar Atena mesmo quando o LLM esquece a ação JSON', async () => {

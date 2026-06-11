@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { buildChatBody } from '../src/main/ninerouter'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { buildChatBody, chatJSON } from '../src/main/ninerouter'
 import type { AppConfig, ChatMessage, ReasoningLevel } from '../src/shared/types'
 
 const cfgWith = (baseUrl: string, reasoning: ReasoningLevel = 'alto', model = 'm'): AppConfig =>
@@ -38,5 +38,53 @@ describe('buildChatBody (reasoning_effort)', () => {
     const s = buildChatBody(cfgWith('https://api.openai.com/v1'), msgs, { stream: true })
     expect(s.stream).toBe(true)
     expect(s.response_format).toBeUndefined()
+  })
+})
+
+describe('chatJSON retry transitório', () => {
+  let realFetch: typeof globalThis.fetch
+  beforeEach(() => {
+    realFetch = globalThis.fetch
+  })
+  afterEach(() => {
+    globalThis.fetch = realFetch
+  })
+
+  const okResp = (content: string): Response =>
+    new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  const errResp = (status: number, body = 'fail'): Response =>
+    new Response(body, { status })
+
+  it('retentativa após 503 transitório, terminando em sucesso', async () => {
+    const fetchMock = vi.fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(errResp(503))
+      .mockResolvedValueOnce(okResp('pronto'))
+    globalThis.fetch = fetchMock
+    const out = await chatJSON(cfgWith('http://localhost:20128/v1'), msgs, false)
+    expect(out).toBe('pronto')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('NÃO retenta 401 (auth não é transitório)', async () => {
+    const fetchMock = vi.fn<typeof globalThis.fetch>().mockResolvedValue(errResp(401, 'unauthorized'))
+    globalThis.fetch = fetchMock
+    await expect(chatJSON(cfgWith('http://localhost:20128/v1'), msgs, false)).rejects.toThrow(/401/)
+    // 2 chamadas no máximo (sem reasoning fallback): a chamada inicial e a sem-reasoning de compat.
+    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(2)
+  })
+
+  it('desiste após esgotar tentativas em 5xx', async () => {
+    const fetchMock = vi.fn<typeof globalThis.fetch>().mockResolvedValue(errResp(502))
+    globalThis.fetch = fetchMock
+    await expect(chatJSON(cfgWith('http://localhost:20128/v1'), msgs, false)).rejects.toThrow(/502/)
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(3) // 1 + 2 retries
+  })
+
+  it('respeita aborto do usuário sem nova tentativa', async () => {
+    const fetchMock = vi.fn<typeof globalThis.fetch>().mockResolvedValue(errResp(503))
+    globalThis.fetch = fetchMock
+    const ctrl = new AbortController()
+    ctrl.abort()
+    await expect(chatJSON(cfgWith('http://localhost:20128/v1'), msgs, false, { signal: ctrl.signal })).rejects.toThrow(/abort/i)
   })
 })

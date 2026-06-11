@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.36.0 - 2026-06-11
+
+Foco: refatoração arquitetural do núcleo do agente. `src/main/agent.ts` foi de monolito de ~1900 LOC para fachada de ~450 LOC, com responsabilidades extraídas em módulos focados sob `src/main/agent/`. Contratos tipados, observabilidade leve por turno e política de retry explícita no provedor.
+
+- **Decomposição de `agent.ts`**: extraído em 7 módulos focados sob [src/main/agent/](src/main/agent):
+  - [agent/types.ts](src/main/agent/types.ts) — `ToolResult` discriminado (`ToolOk<T> | ToolErr`), helpers `toolOk()` / `toolErr()`, tipos compartilhados (`DeltaFn`, `ActivityFn`, `ProgressFn`).
+  - [agent/prompt.ts](src/main/agent/prompt.ts) — PERSONA, `toolDocs()`, `dateAnchors()`, `buildSystemPrompt()`, helpers de cérebro, ações `ia.raciocinio` / `ia.modelo`.
+  - [agent/activity.ts](src/main/agent/activity.ts) — `codeActivityMeta()`, `emitActivity()`, `createProgressActivity()`, `announceLongTask()`.
+  - [agent/hive.ts](src/main/agent/hive.ts) — Colmeia inteira: `gather*Evidence`, `buildTaskContext`, `inferPromisedHiveAction`, `hiveFollowupInstruction`, `proactiveCodeFollowup`.
+  - [agent/router.ts](src/main/agent/router.ts) — despacho tipado de ferramentas (`runQuery(a, ctx)` retornando `ToolResult`).
+  - [agent/stream.ts](src/main/agent/stream.ts) — `streamTurn()`, `finalFala()`, `validateActions()`, **`classifyProviderError()`**.
+  - [agent/trace.ts](src/main/agent/trace.ts) — `TurnTrace` com cap de 200 eventos.
+- **Contratos tipados**: cada ferramenta agora devolve `ToolResult<T>` discriminado em vez de `unknown` com convenção implícita. Helpers `toolOk(tipo, data)` / `toolErr(tipo, msg)` substituem a repetição de `{ tipo, resultado, erro }` em 38+ cases do router.
+- **Observabilidade por turno (`TurnTrace`)**: cada `runTurn` cria um trace com eventos rotulados (`turn:start`, `phase`, `tool:start/end`, `hive:gather/report/inferred`, `mutation`, `fallback`). No-op por padrão; ativável com `ARES_TRACE=1` para inspeção em desenvolvimento.
+- **`classifyProviderError`**: classificação de falhas de LLM em 8 categorias (`abort` / `timeout` / `transient` / `auth` / `rate` / `bad_request` / `parse` / `unknown`), cada uma com flag `retryable`. Usada por `streamTurn` (decisão de fallback) e disponível para o orquestrador.
+- **Retry transitório no `ninerouter`**: política explícita — 1 tentativa + até 2 retries com backoff 300ms/900ms, exclusivamente em `408/425/429/5xx` ou erro de rede sem status. `401/403/404` lançam imediatamente. Aborto do usuário respeitado em qualquer ponto. Fallbacks de compat (`reasoning_effort`/`response_format`) agora só disparam em `400/422`, fechando o leak onde 401 disparava 6 chamadas.
+- **`streamTurn` mais resiliente**: consulta `classifyProviderError`. Aborto não cai para `chatJSON`. Stream caído após emitir texto → finaliza com o parcial (evita duplicar fala). Stream caído sem emitir → tenta `chatJSON` uma vez.
+- **Compatibilidade preservada**: `agent.ts` re-exporta toda a superfície pública conhecida (`stripRepeatedGreeting`, `compactSubagentContext`, `buildTaskContext`, `hiveFollowupInstruction`, `inferPromisedHiveAction`, `buildBriefing`, `briefingToSpeech`). Nada precisa mudar em `src/main/index.ts` nem nos consumidores externos.
+- **Testes novos**: 17 testes (`tests/agent-stream.test.ts`, `tests/agent-trace.test.ts`, retry no `tests/ninerouter.test.ts`).
+- **Documentação**: nova [docs/AGENT-ARQUITETURA.md](docs/AGENT-ARQUITETURA.md) com o mapa de módulos, contratos e instruções de tracing.
+- 353 testes passando (eram 336).
+
+## 0.35.0 - 2026-06-11
+
+Foco: redesign profundo da Colmeia para programação real — separação Hefesto x coder autônomo, pacotes de evidência tipados, auditoria por escopo (não por chars), protocolo mais sólido.
+
+- **Hefesto vira tech-lead, sem competir com o executor**: o construtor não escreve mais o projeto inteiro — entrega um BRIEFING tagueado (`[ESCOPO]`/`[ARQUIVOS]`/`[PASSOS]`/`[RISCOS]`/`[VALIDAR]`) que o Ares usa para aplicar passo-a-passo com `codigo.editar/criar` OU delegar ao coder autônomo (`codigo.projeto`). Os dois caminhos ficaram explícitos no prompt-system; nunca mais o LLM chama os dois para o mesmo objetivo.
+- **EvidencePackage tipado (`src/main/subagents/evidence.ts`)**: pacotes de evidência substituem `evidence: string` truncada por chars. Cada seção rotulada tem `priority` e `minChars`; o renderer aloca orçamento por seção (essenciais primeiro), com truncamento que preserva fronteira de linha. Falhas de coleta viram `notes` separadas.
+- **Hefesto recebe contexto útil de verdade**: agora coletamos workspace + estado git + **outlines dos arquivos relevantes ao objetivo** (ranking por tokens + arquivos modificados no git status), no lugar de uma lista crua de 120 arquivos.
+- **Auditoria por arquivo, não por corte de chars**: Têmis recebe diagnóstico + `git status --short` + um bloco `outline + diff` POR arquivo alterado (até 8). Acabou o `diff.slice(0, 12000)` que cortava hunks no meio.
+- **Têmis abre com `[VEREDITO]`**: template tagueado (APROVADO/REPROVADO + `[RESUMO]` + `[PROBLEMAS]` com arquivo:linha + gravidade). Novo `parseReportTags(report)` extrai veredito/arquivos/riscos de forma testável.
+- **Contexto orientado a tarefa**: `buildTaskContext` (alias retrocompatível `compactSubagentContext`) inclui contexto direto + preferências de código + último arquivo editado + último comando OK + resumo + amostragem de mensagens recentes.
+- **Protocolo da Colmeia mais conservador**: `inferPromisedHiveAction` agora exige três sinais conjuntos (verbo de delegação clara + nome do especialista + verbo de domínio compatível). Verbos genéricos como "vou ler o arquivo" não disparam mais falsos positivos.
+- **Atena com pacote estruturado**: busca + busca focada em recência + Google News + página opcional viraram seções rotuladas com cota mínima por bloco — orçamento total de ~18k chars distribuído por prioridade.
+- **Documentação refeita**: `docs/COLMEIA-SUBAGENTES.md` reflete os novos papéis, EvidencePackage, hand-off Hefesto↔coder autônomo e a guarda determinística.
+- **Testes**: subagents.test.ts agora cobre `renderEvidencePackage`, `truncateSmart`, `pickRelevantFiles`, `parseGitStatusFiles`, `parseReportTags` e o protocolo conservador (`inferPromisedHiveAction`).
+
 ## 0.34.0 - 2026-06-10
 
 Foco: estabilidade da voz atual, Colmeia mais confiavel, chat unico entre Assistente/Escritorio e limpeza local solicitada pelo usuario.

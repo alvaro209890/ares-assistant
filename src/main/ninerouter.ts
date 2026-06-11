@@ -28,9 +28,30 @@ export function buildChatBody(cfg: AppConfig, messages: ChatMessage[], opts: Bod
   return body
 }
 
+// Quanto tempo esperar entre tentativas em falha TRANSITÓRIA. Pequeno o suficiente
+// para não atrasar a UX, mas evita que uma flap de rede mate o turno todo.
+const TRANSIENT_RETRY_DELAYS_MS = [300, 900]
+const TRANSIENT_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504])
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => resolve(), ms)
+    signal?.addEventListener('abort', () => { clearTimeout(t); reject(new Error('abort')) })
+  })
+}
+
 /**
  * Chamada não-streaming ao 9 Router que retorna o conteúdo do assistente.
- * Tenta pedir resposta em JSON (response_format); se o upstream recusar, repete sem.
+ * Política em camadas:
+ *   1) Tenta com response_format JSON + reasoning_effort quando suportado.
+ *   2) Se a resposta vier 4xx que não seja 408/425/429, repete sem reasoning_effort
+ *      (compat com provedores que recusam o campo).
+ *   3) Se ainda for ruim e wantJson=true, repete sem response_format.
+ *   4) Em status TRANSITÓRIO (408/425/429/5xx) ou erro de rede, faz retry com
+ *      backoff (TRANSIENT_RETRY_DELAYS_MS), no máximo 2 tentativas adicionais.
+ *      AbortSignal interrompe o retry imediatamente.
+ * Em sucesso, lê o content do assistente. Em falha definitiva, lança Error com
+ * mensagem padronizada que o classifyProviderError consegue parsear.
  */
 export async function chatJSON(
   cfg: AppConfig,
@@ -49,24 +70,59 @@ export async function chatJSON(
     return fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.any(signals) })
   }
 
-  let res: Response
-  try {
-    res = await call(wantJson, true)
-    // Fallbacks de compatibilidade: 1) sem reasoning_effort, 2) sem response_format.
-    if (!res.ok) res = await call(wantJson, false)
-    if (!res.ok && wantJson) res = await call(false, false)
-  } catch (err: any) {
-    throw new Error(
-      `Não consegui falar com o cérebro em ${cfg.nineRouter.baseUrl}. ` +
-        `Verifique a conexão/credenciais. Detalhe: ${err?.message || err}`
-    )
+  // Tentativa única. Só desce pros fallbacks de compat (sem reasoning_effort,
+  // depois sem response_format) quando o status sugere recusa do CAMPO — 400/422.
+  // Outros 4xx (auth/not found) ou 5xx caem direto para a camada de retry externa.
+  const isCompatFallback = (status: number): boolean => status === 400 || status === 422
+  const tryOnce = async (): Promise<Response> => {
+    let res = await call(wantJson, true)
+    if (!res.ok && isCompatFallback(res.status)) res = await call(wantJson, false)
+    if (!res.ok && wantJson && isCompatFallback(res.status)) res = await call(false, false)
+    return res
   }
-  if (!res.ok) {
+
+  const maxAttempts = 1 + TRANSIENT_RETRY_DELAYS_MS.length
+  let lastError: unknown
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (opts.signal?.aborted) throw new Error('abort')
+    let res: Response | null = null
+    try {
+      res = await tryOnce()
+    } catch (err: any) {
+      if (err?.name === 'AbortError' || /abort/i.test(String(err?.message || ''))) {
+        throw err instanceof Error ? err : new Error(String(err))
+      }
+      lastError = err
+      // Falha de rede (sem status): vale tentar de novo até esgotar.
+      if (attempt === maxAttempts - 1) {
+        throw new Error(
+          `Não consegui falar com o cérebro em ${cfg.nineRouter.baseUrl}. ` +
+            `Verifique a conexão/credenciais. Detalhe: ${err?.message || err}`
+        )
+      }
+      const delay = TRANSIENT_RETRY_DELAYS_MS[attempt]
+      if (delay) {
+        try { await sleep(delay, opts.signal) } catch { throw new Error('abort') }
+      }
+      continue
+    }
+    if (res.ok) {
+      const json = (await res.json()) as any
+      return json?.choices?.[0]?.message?.content ?? ''
+    }
+    // Falha de status: erro padronizado para o classifyProviderError ler depois.
     const txt = await res.text().catch(() => '')
-    throw new Error(`O provedor respondeu ${res.status}. ${txt.slice(0, 300)}`)
+    const err = new Error(`O provedor respondeu ${res.status}. ${txt.slice(0, 300)}`)
+    lastError = err
+    // 4xx que não seja transitório (auth/notfound/...): lança imediatamente.
+    if (!TRANSIENT_STATUSES.has(res.status) || attempt === maxAttempts - 1) throw err
+    // 5xx/transitório: espera e retenta.
+    const delay = TRANSIENT_RETRY_DELAYS_MS[attempt]
+    if (delay) {
+      try { await sleep(delay, opts.signal) } catch { throw new Error('abort') }
+    }
   }
-  const json = (await res.json()) as any
-  return json?.choices?.[0]?.message?.content ?? ''
+  throw lastError instanceof Error ? lastError : new Error(String(lastError || 'falha desconhecida'))
 }
 
 /**
