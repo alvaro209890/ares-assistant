@@ -320,8 +320,23 @@ function summarizeCodeResult(tipo: string, resultado: Record<string, unknown>, e
       return `Indice do projeto atualizado com ${oneOrMany(count, 'arquivo', 'arquivos')}`
     }
     case 'codigo.projeto': {
+      const ok = resultado.ok === true
+      const done = resultado.done === true || resultado.ok === true
+      const steps = num(resultado.steps)
       const summary = str(resultado.summary)
-      return summary || 'Coder autonomo concluiu a etapa solicitada'
+      const transcript = arr(resultado.transcript).map(obj)
+      const failures = transcript.flatMap((t) => arr(t.ran).map(obj).filter((r) => r.ran && !r.ok))
+      if (ok) {
+        return summary || 'Coder autônomo concluiu o objetivo com sucesso.'
+      }
+      if (failures.length > 0) {
+        const failedCmds = failures.map((r) => `"${str(r.command)}"`).join(', ')
+        return `O coder autônomo falhou na verificação dos comandos: ${failedCmds}.`
+      }
+      if (!done) {
+        return `O coder autônomo não conseguiu concluir o objetivo após rodar ${oneOrMany(steps, 'passo', 'passos')}.`
+      }
+      return 'O coder autônomo encontrou problemas durante a execução.'
     }
     default:
       return ''

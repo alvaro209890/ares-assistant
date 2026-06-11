@@ -201,6 +201,14 @@ export function isLongRunningCommand(command: string): boolean {
   return LONG_RUNNING_RE.test(c)
 }
 
+const SERVER_COMMAND_RE =
+  /\b(dev|start|watch|server|nodemon|live-server|vite|http-server|http\.server|webpack-dev-server|browser-sync|serve|develop)\b/i
+
+export function isServerCommand(command: string): boolean {
+  const c = String(command || '').trim().toLowerCase()
+  return SERVER_COMMAND_RE.test(c)
+}
+
 /**
  * Após editar/aplicar um patch, qual comando de validação oferecer proativamente.
  * Prioriza teste; na ausência, build/typecheck/lint. Retorna null se nada se aplicar.
@@ -1227,7 +1235,7 @@ function platformShell(command: string): { file: string; args: string[] } {
 
 export function runCodeTerminal(
   cfg: AppConfig,
-  opts: { root?: string; command: string; approved?: boolean; signal?: AbortSignal; onProgress?: CodeProgressFn }
+  opts: { root?: string; command: string; approved?: boolean; sessionId?: string; signal?: AbortSignal; onProgress?: CodeProgressFn }
 ): Promise<CodeTerminalResult> {
   // Guardas SÍNCRONAS (lançam antes de retornar a Promise).
   if (codeConfig(cfg).terminalEnabled === false) throw new Error('Terminal desativado nas Configurações.')
@@ -1247,16 +1255,19 @@ export function runCodeTerminal(
 
   const started = Date.now()
   const shell = platformShell(command)
+  const background = isServerCommand(command)
   return spawnAsync(shell.file, shell.args, {
     cwd: root,
     timeoutMs: execTimeout(cfg),
     signal: opts.signal,
-    onChunk: (stream, chunk) => opts.onProgress?.({ stream, chunk })
+    onChunk: (stream, chunk) => opts.onProgress?.({ stream, chunk }),
+    background,
+    sessionId: opts.sessionId
   }).then((res) => ({
     ...empty,
     requiresApproval: false,
     ran: true,
-    ok: !res.timedOut && !res.aborted && res.code === 0,
+    ok: res.background ? true : (!res.timedOut && !res.aborted && res.code === 0),
     code: res.code,
     stdout: res.timedOut ? '' : res.stdout.slice(0, 16000),
     stderr: res.aborted

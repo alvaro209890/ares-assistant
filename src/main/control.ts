@@ -103,7 +103,12 @@ type FindAppFn = (name: string) => StartMenuApp | null
 const realFindApp: FindAppFn = (name) => (process.platform === 'win32' ? findStartMenuApp(name) : null)
 
 /** Decide COMO abrir o alvo (sem executar). Pura: testável com `which`/`findApp` injetados. */
-export function resolveOpenTarget(target: string, which: WhichFn = realWhich, findApp: FindAppFn = realFindApp): OpenPlan {
+export function resolveOpenTarget(
+  target: string,
+  which: WhichFn = realWhich,
+  findApp: FindAppFn = realFindApp,
+  workspaceRoot?: string
+): OpenPlan {
   const raw = String(target || '').trim()
   if (!raw) return { kind: 'error', detail: 'diga o que devo abrir' }
 
@@ -153,8 +158,17 @@ export function resolveOpenTarget(target: string, which: WhichFn = realWhich, fi
     return { kind: 'error', detail: `nenhum aplicativo encontrado para "${lower}"` }
   }
 
-  // Caminho existente (absoluto ou relativo ao HOME).
-  const path = isAbsolute(raw) ? raw : resolve(homedir(), raw)
+  // Caminho existente (absoluto ou relativo ao workspace/HOME).
+  let path = raw
+  if (!isAbsolute(raw)) {
+    if (workspaceRoot && existsSync(resolve(workspaceRoot, raw))) {
+      path = resolve(workspaceRoot, raw)
+    } else if (existsSync(resolve(process.cwd(), raw))) {
+      path = resolve(process.cwd(), raw)
+    } else {
+      path = resolve(homedir(), raw)
+    }
+  }
   if (existsSync(path)) return { kind: 'path', cmd: opener, args: openArgs(path), label: path }
 
   // Binário direto no PATH.
@@ -172,7 +186,8 @@ export function resolveOpenTarget(target: string, which: WhichFn = realWhich, fi
 
 export function runOpen(cfg: AppConfig, target: string): DesktopActionResult {
   ensureEnabled(cfg)
-  const plan = resolveOpenTarget(target)
+  const workspaceRoot = cfg.integrations.code?.workspaceRoot
+  const plan = resolveOpenTarget(target, realWhich, realFindApp, workspaceRoot)
   if (plan.kind === 'error') return { ok: false, action: 'abrir', detail: plan.detail || 'não foi possível abrir' }
   try {
     const child = spawn(plan.cmd as string, plan.args as string[], { detached: true, stdio: 'ignore' })

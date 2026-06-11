@@ -3,6 +3,8 @@
 // sessão, o que mata o processo em andamento no spawnAsync (build/install/coder travado)
 // sem derrubar nem travar o app. Puro (sem Electron), portanto testável.
 
+import { killAllBackgroundProcesses, killBackgroundProcesses } from './exec'
+
 const bySession = new Map<string, Set<AbortController>>()
 
 /** Registra um controller para a sessão. Retorna a função de baixa (idempotente). */
@@ -23,6 +25,7 @@ export function registerRun(sessionId: string, controller: AbortController): () 
 
 /** Aborta tudo que estiver rodando na sessão. Retorna quantos foram abortados. */
 export function cancelSession(sessionId: string): number {
+  killBackgroundProcesses(sessionId)
   const set = bySession.get(sessionId)
   if (!set) return 0
   let n = 0
@@ -38,6 +41,7 @@ export function cancelSession(sessionId: string): number {
 
 /** Aborta todas as execuções de todas as sessões (ex.: ao fechar o app). */
 export function cancelAll(): number {
+  killAllBackgroundProcesses()
   let n = 0
   for (const id of [...bySession.keys()]) n += cancelSession(id)
   return n
@@ -50,3 +54,4 @@ export function activeRunCount(sessionId?: string): number {
   for (const set of bySession.values()) n += set.size
   return n
 }
+

@@ -30,6 +30,7 @@ export interface CoderStep {
   run: string[]
   done: boolean
   summary: string
+  parseError?: string
 }
 
 export interface CoderRun {
@@ -91,15 +92,29 @@ export function parseCoderStep(raw: string): CoderStep {
   if (fenced) candidates.push(fenced[1].trim())
   const balanced = extractJsonObject(text)
   if (balanced) candidates.push(balanced)
+  
+  let parseError: string | undefined
+  let parsedAny = false
   for (const c of candidates) {
     try {
       const parsed = JSON.parse(c)
       if (parsed && typeof parsed === 'object') {
         obj = parsed as Record<string, unknown>
+        parsedAny = true
         break
       }
-    } catch {
-      /* tenta o próximo */
+    } catch (e) {
+      parseError = e instanceof Error ? e.message : String(e)
+    }
+  }
+
+  if (!parsedAny) {
+    return {
+      files: [],
+      run: [],
+      done: false,
+      summary: '',
+      parseError: parseError || 'Formato JSON inválido'
     }
   }
 
@@ -225,6 +240,18 @@ export async function runCoderTask(
       break
     }
     const step = parseCoderStep(raw)
+    if (step.parseError) {
+      const errorMsg = `Erro de formatação no passo ${i + 1}: a resposta não pôde ser analisada como JSON válido. Detalhe: ${step.parseError}. Certifique-se de responder APENAS o JSON no formato exigido, sem markdown extra ou explicações.`
+      transcript.push({
+        written: [],
+        skipped: [errorMsg],
+        ran: [],
+        summary: `Erro de formato JSON na resposta do modelo`,
+        done: false
+      })
+      lastResult = errorMsg
+      continue
+    }
     const applied = await applyCoderStep(cfg, root, step, opts.signal)
     transcript.push({ ...applied, summary: step.summary || step.thought || '(sem resumo)', done: step.done })
     lastResult = JSON.stringify(applied)

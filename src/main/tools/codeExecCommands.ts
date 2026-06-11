@@ -45,7 +45,7 @@ export const codeExecCommands: ToolCommand[] = [
       announceLongTask(onDelta, isLongRunningCommand, command, approved || classifyCommand(cfg, command).tier === 'allowed', phase)
       reportProgress(`Executando terminal "${command.slice(0, 60)}"...`)
       const result = await beating(
-        runCodeTerminal(cfg, { root, command, approved, signal, onProgress: pipeProgress })
+        runCodeTerminal(cfg, { root, command, approved, sessionId, signal, onProgress: pipeProgress })
       )
       if (result.requiresApproval) {
         setPendingCode(sessionId, { kind: 'terminal', command: result.command, root, reason: result.reason })
@@ -73,7 +73,7 @@ export const codeExecCommands: ToolCommand[] = [
       announceLongTask(onDelta, isLongRunningCommand, pend.command, true, phase)
       reportProgress(`Executando "${pend.command.slice(0, 60)}"...`)
       const result = await beating(
-        runCodeTerminal(cfg, { root: pend.root, command: pend.command, approved: true, signal, onProgress: pipeProgress })
+        runCodeTerminal(cfg, { root: pend.root, command: pend.command, approved: true, sessionId, signal, onProgress: pipeProgress })
       )
       if (result.ran) {
         clearPendingCode(sessionId)

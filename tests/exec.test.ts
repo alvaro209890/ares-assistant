@@ -46,4 +46,24 @@ describe('spawnAsync — execução não-bloqueante', () => {
     expect(r.code).toBeNull()
     expect(r.stderr.length).toBeGreaterThan(0)
   })
+
+  it('roda em segundo plano (background) e finaliza com killBackgroundProcesses', async () => {
+    const sessionId = 'test-session-123'
+    const r = await spawnAsync(NODE, ['-e', 'setInterval(() => {}, 1000)'], {
+      timeoutMs: 10000,
+      background: true,
+      sessionId,
+      startupTimeoutMs: 500
+    })
+    expect(r.background).toBe(true)
+    expect(r.code).toBeNull()
+    
+    const { backgroundProcesses, killBackgroundProcesses } = await import('../src/main/exec')
+    const set = backgroundProcesses.get(sessionId)
+    expect(set).toBeDefined()
+    expect(set?.size).toBe(1)
+    
+    killBackgroundProcesses(sessionId)
+    expect(backgroundProcesses.has(sessionId)).toBe(false)
+  })
 })

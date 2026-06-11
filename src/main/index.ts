@@ -6,6 +6,7 @@ import { transcribe } from './grog'
 import { runTurn, extractFacts } from './agent'
 import { chatJSON } from './ninerouter'
 import { cancelSession } from './running'
+import { killAllBackgroundProcesses } from './exec'
 import { buildBriefing } from './briefing'
 import { getDiagnostics } from './diagnostics'
 import { initOverlay, toggleOverlay, setOverlayState, focusMain, requestListen } from './overlay'
@@ -152,6 +153,7 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {
   destroyTray()
   shutdownPiperPool()
+  killAllBackgroundProcesses()
 })
 
 function registerIpc(): void {

@@ -1,4 +1,4 @@
-import { spawn } from 'child_process'
+import { spawn, spawnSync } from 'child_process'
 import type { ChildProcess } from 'child_process'
 
 // Execução de processos ASSÍNCRONA e não-bloqueante. Substitui o spawnSync nas rotas de
@@ -13,6 +13,7 @@ export interface SpawnResult {
   stderr: string
   timedOut: boolean
   aborted: boolean
+  background?: boolean
 }
 
 export interface SpawnOptions {
@@ -24,9 +25,55 @@ export interface SpawnOptions {
   signal?: AbortSignal
   /** Recebe a saída em tempo real (para futura UI de terminal ao vivo). */
   onChunk?: (stream: 'stdout' | 'stderr', chunk: string) => void
+  background?: boolean
+  sessionId?: string
+  startupTimeoutMs?: number
 }
 
 const DEFAULT_MAX_BYTES = 256 * 1024
+
+export const backgroundProcesses = new Map<string, Set<ChildProcess>>()
+
+export function registerBackgroundProcess(sessionId: string, child: ChildProcess): void {
+  let set = backgroundProcesses.get(sessionId)
+  if (!set) {
+    set = new Set()
+    backgroundProcesses.set(sessionId, set)
+  }
+  set.add(child)
+}
+
+export function unregisterBackgroundProcess(sessionId: string, child: ChildProcess): void {
+  const set = backgroundProcesses.get(sessionId)
+  if (set) {
+    set.delete(child)
+    if (set.size === 0) backgroundProcesses.delete(sessionId)
+  }
+}
+
+export function killBackgroundProcesses(sessionId: string): void {
+  const set = backgroundProcesses.get(sessionId)
+  if (set) {
+    for (const child of set) {
+      try {
+        if (process.platform === 'win32' && child.pid) {
+          spawnSync('taskkill', ['/pid', String(child.pid), '/f', '/t'], { timeout: 2000 })
+        } else {
+          child.kill('SIGKILL')
+        }
+      } catch {
+        // ignore
+      }
+    }
+    backgroundProcesses.delete(sessionId)
+  }
+}
+
+export function killAllBackgroundProcesses(): void {
+  for (const sessionId of [...backgroundProcesses.keys()]) {
+    killBackgroundProcesses(sessionId)
+  }
+}
 
 /**
  * Roda um processo sem bloquear a thread principal. SEMPRE resolve (nunca rejeita):
@@ -54,20 +101,32 @@ export function spawnAsync(file: string, args: string[], opts: SpawnOptions): Pr
       if (settled) return
       settled = true
       clearTimeout(timer)
+      clearTimeout(startupTimer)
       opts.signal?.removeEventListener('abort', onAbort)
       resolve({ code, stdout: out.join(''), stderr: err.join(''), timedOut, aborted })
     }
 
     const kill = (): void => {
+      if (opts.sessionId) {
+        unregisterBackgroundProcess(opts.sessionId, child)
+      }
       try {
-        child.kill('SIGTERM')
+        if (process.platform === 'win32' && child.pid) {
+          spawnSync('taskkill', ['/pid', String(child.pid), '/f', '/t'], { timeout: 2000 })
+        } else {
+          child.kill('SIGTERM')
+        }
       } catch {
         /* já morreu */
       }
       // Garante o encerramento caso o processo ignore o SIGTERM.
       const g = setTimeout(() => {
         try {
-          child.kill('SIGKILL')
+          if (process.platform === 'win32' && child.pid) {
+            spawnSync('taskkill', ['/pid', String(child.pid), '/f', '/t'], { timeout: 2000 })
+          } else {
+            child.kill('SIGKILL')
+          }
         } catch {
           /* ok */
         }
@@ -94,6 +153,28 @@ export function spawnAsync(file: string, args: string[], opts: SpawnOptions): Pr
       }
     }
 
+    let startupTimer: NodeJS.Timeout | undefined
+    if (opts.background) {
+      startupTimer = setTimeout(() => {
+        if (!settled) {
+          if (opts.sessionId) {
+            registerBackgroundProcess(opts.sessionId, child)
+          }
+          settled = true
+          clearTimeout(timer)
+          opts.signal?.removeEventListener('abort', onAbort)
+          resolve({
+            code: null,
+            stdout: out.join('') + '\n[Servidor iniciado em segundo plano]',
+            stderr: err.join(''),
+            timedOut: false,
+            aborted: false,
+            background: true
+          })
+        }
+      }, opts.startupTimeoutMs ?? 3000)
+    }
+
     child.stdout?.on('data', (d: Buffer) => {
       const s = d.toString()
       opts.onChunk?.('stdout', s)
@@ -111,9 +192,17 @@ export function spawnAsync(file: string, args: string[], opts: SpawnOptions): Pr
       }
     })
     child.on('error', (e: Error) => {
+      if (opts.sessionId) {
+        unregisterBackgroundProcess(opts.sessionId, child)
+      }
       if (errLen < maxBytes) err.push(String(e.message || e))
       finish(null)
     })
-    child.on('close', (code) => finish(code))
+    child.on('close', (code) => {
+      if (opts.sessionId) {
+        unregisterBackgroundProcess(opts.sessionId, child)
+      }
+      finish(code)
+    })
   })
 }

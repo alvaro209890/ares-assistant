@@ -30,6 +30,12 @@ describe('coder — parseCoderStep', () => {
     expect(step.run).toHaveLength(0)
     expect(step.done).toBe(false)
   })
+
+  it('detecta erros de parse e preenche parseError', () => {
+    const step = parseCoderStep('isso não é json')
+    expect(step.parseError).toBeDefined()
+    expect(step.parseError).toMatch(/Unexpected token|is not valid JSON|Formato JSON inválido/i)
+  })
 })
 
 let root = ''
