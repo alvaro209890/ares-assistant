@@ -38,7 +38,7 @@ export default function Conversation({ messages }: { messages: ConvMsg[] }): JSX
               >
                 <div className="mb-0.5 text-[10px] title-track opacity-50">{mine ? 'VOCÊ' : 'ARES'}</div>
                 {m.activities?.length ? <ActivityTimeline activities={m.activities} /> : null}
-                {m.content ? <div className={m.activities?.length ? 'mt-2' : ''}>{m.content}</div> : m.pending ? <ThinkingDots /> : ''}
+                {m.content ? <div className={`whitespace-pre-wrap break-words ${m.activities?.length ? 'mt-2' : ''}`}>{m.content}</div> : m.pending ? <ThinkingDots /> : ''}
               </div>
             </motion.div>
           )

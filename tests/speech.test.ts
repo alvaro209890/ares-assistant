@@ -337,6 +337,16 @@ describe('simplificação de caminhos de arquivo (para a voz não soletrar paths
     expect(out).not.toContain('Users')
     expect(out).not.toContain('\\')
   })
+
+  it('prepareText simplifica o caminho EXATO observado no teste real (sem aspas)', () => {
+    // String real capturada do app: "Perfeito, o jogo da cobrinha foi criado em
+    // C:\Users\Usuario\Documents\arestestevoz\index.html." (underscores já removidos).
+    const out = prepareText('Perfeito, o jogo da cobrinha foi criado em C:\\Users\\Usuario\\Documents\\arestestevoz\\index.html.')
+    expect(out).toContain('index.html')
+    expect(out).not.toContain('Users')
+    expect(out).not.toContain('arestestevoz')
+    expect(out).not.toContain('\\')
+  })
 })
 
 describe('prepareText integra todas as normalizações', () => {
