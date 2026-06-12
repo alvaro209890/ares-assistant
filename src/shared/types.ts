@@ -563,6 +563,8 @@ export interface CodeScaffoldResult {
   created: string[]
   skipped: string[]
   hints: string[]
+  folder?: string
+  pathMode?: 'parent' | 'target'
 }
 
 export interface CodeWriteResult {

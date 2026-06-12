@@ -19,10 +19,12 @@ export const codeWriteCommands: ToolCommand[] = [
     tipo: 'codigo.scaffold',
     category: 'code-write',
     run(a, { cfg }) {
+      const explicitTarget = String(a.destino || a.alvo || a.targetPath || a.path_final || a.pasta_final || '')
       const resultado = scaffoldProject(cfg, {
         tipo: String(a.tipo_projeto || a.template || a.modelo || a.kind || 'site'),
         nome: String(a.nome || a.name || a.projeto || ''),
-        path: String(a.path || a.raiz || a.destino || a.onde || ''),
+        path: explicitTarget || String(a.path || a.raiz || a.onde || ''),
+        pathMode: explicitTarget ? 'target' : (a.pathMode === 'target' || a.modo_path === 'target' ? 'target' : undefined),
         force: a.force === true || a.forcar === true
       })
       return toolOk(a.tipo, resultado)

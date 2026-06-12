@@ -2070,20 +2070,40 @@ function dirIsEmpty(dir: string): boolean {
 /** Cria um projeto a partir de um template, dentro das raízes permitidas. */
 export function scaffoldProject(
   cfg: AppConfig,
-  opts: { tipo?: string; nome: string; path?: string; force?: boolean }
+  opts: { tipo?: string; nome: string; path?: string; force?: boolean; pathMode?: 'parent' | 'target' }
 ): CodeScaffoldResult {
   ensureCanWrite(cfg)
-  const base = resolveCodeWorkspace(cfg, opts.path)
-  const folder = slug(opts.nome)
-  const root = join(base, folder)
+  const requested = normalizeCodePath(opts.path || '').trim()
+  const fallbackName = requested ? basename(resolve(requested)) : ''
+  const folder = slug(opts.nome || fallbackName)
+  let mode: 'parent' | 'target' = 'parent'
+  let root: string
+
+  if (!requested) {
+    const base = resolveCodeWorkspace(cfg)
+    root = join(base, folder)
+  } else {
+    const target = resolveCodeWorkspace(cfg, requested)
+    if (opts.pathMode === 'parent') {
+      root = join(target, folder)
+    } else if (opts.pathMode === 'target') {
+      root = target
+      mode = 'target'
+    } else if (!existsSync(target) || slug(basename(target)) === folder) {
+      root = target
+      mode = 'target'
+    } else {
+      root = join(target, folder)
+    }
+  }
   assertAllowed(cfg, root)
   if (existsSync(root) && !dirIsEmpty(root) && !opts.force) {
-    throw new Error(`A pasta "${folder}" já existe e não está vazia. Escolha outro nome ou use force.`)
+    throw new Error(`A pasta "${root}" já existe e não está vazia. Escolha outro nome ou use force.`)
   }
   mkdirSync(root, { recursive: true })
 
   const template = normalizeTemplate(opts.tipo || 'site')
-  const files = templateFiles(template, opts.nome)
+  const files = templateFiles(template, opts.nome || basename(root))
   const created: string[] = []
   const skipped: string[] = []
   for (const [file, content] of Object.entries(files)) {
@@ -2099,9 +2119,9 @@ export function scaffoldProject(
 
   const hints =
     template === 'node'
-      ? [`cd ${folder}`, 'rode: node index.js', 'teste: npm test']
-      : [`abra ${folder}/index.html no navegador`, `ou: cd ${folder} && python3 -m http.server 8000`]
-  return { root, template, created, skipped, hints }
+      ? [`cd "${root}"`, 'rode: node index.js', 'teste: npm test']
+      : [`abra "${join(root, 'index.html')}" no navegador`, `ou: cd "${root}" && python3 -m http.server 8000`]
+  return { root, template, created, skipped, hints, folder: basename(root) || folder, pathMode: mode }
 }
 
 /** Escreve (cria/sobrescreve) um arquivo no workspace, dentro das raízes permitidas. */

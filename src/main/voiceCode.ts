@@ -349,7 +349,10 @@ function summarizeCodeResult(tipo: string, resultado: Record<string, unknown>, e
     }
     case 'codigo.scaffold': {
       const created = arr(resultado.created).length
-      return `Projeto criado com ${oneOrMany(created, 'arquivo', 'arquivos')}`
+      const root = str(resultado.root)
+      return root
+        ? `Projeto criado em ${root} com ${oneOrMany(created, 'arquivo', 'arquivos')}`
+        : `Projeto criado com ${oneOrMany(created, 'arquivo', 'arquivos')}`
     }
     case 'codigo.substituir': {
       const total = num(resultado.totalMatches)
