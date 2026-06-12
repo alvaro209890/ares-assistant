@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.36.1 - 2026-06-12
+
+- **Groq restrita ao audio**: a chave Groq continua servindo exclusivamente para STT (fala -> texto). O cerebro permanece independente, sempre controlado pelo provedor/modelo escolhido no onboarding ou na aba Modelos.
+- **Configuracao de transcricao simplificada**: a tela de Configuracoes mostra apenas a chave Groq. URL e modelo Whisper ficam internos para evitar quebra acidental por edicao manual.
+- **STT mais resiliente**: `src/main/grog.ts` agora usa defaults internos quando config antiga vier vazia e tenta modelos Whisper de reserva da Groq quando o modelo configurado for recusado.
+
 ## 0.36.0 - 2026-06-11
 
 Foco: refatoração arquitetural do núcleo do agente. `src/main/agent.ts` foi de monolito de ~1900 LOC para fachada de ~450 LOC, com responsabilidades extraídas em módulos focados sob `src/main/agent/`. Contratos tipados, observabilidade leve por turno e política de retry explícita no provedor.

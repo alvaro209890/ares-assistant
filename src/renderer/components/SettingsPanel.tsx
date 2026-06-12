@@ -556,20 +556,6 @@ export default function SettingsPanel(): JSX.Element {
             </Section>
 
             <Section title="TRANSCRIÇÃO - GROQ">
-              <Field label="URL base">
-                <input
-                  className="input"
-                  value={config.grog.baseUrl}
-                  onChange={(e) => saveConfig({ grog: { ...config.grog, baseUrl: e.target.value } })}
-                />
-              </Field>
-              <Field label="Modelo Whisper">
-                <input
-                  className="input"
-                  value={config.grog.sttModel}
-                  onChange={(e) => saveConfig({ grog: { ...config.grog, sttModel: e.target.value } })}
-                />
-              </Field>
               <Field label="Chave Groq">
                 <input
                   className="input"
@@ -578,6 +564,9 @@ export default function SettingsPanel(): JSX.Element {
                   onChange={(e) => saveConfig({ grog: { ...config.grog, apiKey: e.target.value } })}
                 />
               </Field>
+              <p className="text-[11px] text-cyan-200/45">
+                Usada apenas para transformar fala em texto. URL e modelo ficam internos para reduzir configuração manual.
+              </p>
             </Section>
 
             <Section title="LOCALIZAÇÃO">

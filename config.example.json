@@ -9,7 +9,7 @@
   },
 
   "grog": {
-    "_doc": "Voz->texto (STT) via Groq, modelo Whisper. A apiKey é obrigatória no primeiro uso; quando possível, é preenchida automaticamente a partir da chave Groq já existente no PC.",
+    "_doc": "Voz->texto (STT) via Groq. Na interface, apenas apiKey aparece; baseUrl e sttModel são internos e têm fallback no código.",
     "baseUrl": "https://api.groq.com/openai/v1",
     "apiKey": "COLE_AQUI_SUA_CHAVE_GROQ_gsk_...",
     "sttModel": "whisper-large-v3-turbo"

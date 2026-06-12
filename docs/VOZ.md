@@ -16,6 +16,12 @@ Mapa do pipeline de voz do Ares: como ele OUVE o usuário, como FALA (Piper neur
 
 ## Escuta (renderer)
 
+### STT Groq (`src/main/grog.ts`)
+
+- A Groq e usada apenas para transcricao de audio (`fala -> texto`). Ela nao define o cerebro do Ares; o LLM continua vindo de `config.nineRouter`, escolhido no onboarding/Modelos.
+- A tela de Configuracoes mostra somente `grog.apiKey`. `baseUrl` e `sttModel` ficam como parametros internos para evitar configuracao acidental.
+- Se uma config antiga vier sem URL/modelo, o processo usa defaults internos. Se o modelo configurado for recusado pela API, tenta automaticamente os modelos Whisper internos de reserva antes de reportar erro.
+
 ### `src/renderer/lib/audio.ts`
 
 - `ensureMic()` — abre o microfone com `echoCancellation` (a própria voz do Ares some do mic, viabilizando o barge-in). **Revalida o estado real do stream** (`stream.active`, `track.readyState === 'live'`, contexto não fechado): após suspend/resume do Windows ou troca de fone/headset o stream morre em silêncio e, sem essa revalidação, todas as leituras de nível viram zero — o Ares ficava "surdo" sem nenhum erro. Stream morto é derrubado e readquirido.

@@ -6,6 +6,7 @@ Ares e um assistente desktop em Electron, React e TypeScript, feito para uso loc
 
 - **Primeira execucao obrigatoria**: o onboarding pede chave Groq, estado, cidade e provedor/modelo antes de liberar o uso normal.
 - **Troca de modelo de IA na hora**: uma barra na tela principal (sobre a orbe) e uma aba dedicada **"Modelos de IA"** deixam escolher provedor (OpenRouter por login, DeepSeek, ChatGPT, Groq, Local), modelo (DeepSeek V4 Flash/Pro, GPT-5.5) e o **nivel de raciocinio** (baixo/medio/alto). A conexao padrao e o **login OAuth do OpenRouter** (o mesmo dos instaladores) — nao usa mais o 9 Router por padrao. DeepSeek e ChatGPT continuam com chave propria; ChatGPT oferece somente o GPT-5.5.
+- **Groq apenas para audio**: a chave Groq e usada somente no STT (fala -> texto). O cerebro continua sendo o provedor/modelo escolhido no onboarding ou na aba Modelos. Em Configuracoes, a transcricao mostra apenas a chave; URL e modelo Whisper ficam internos.
 - **Nivel de raciocinio que funciona e por voz**: baixo/medio/alto viram `reasoning_effort` low/medium/high na chamada (com fallback se o provedor recusar). Ajustavel por voz: "diminua o seu nivel de raciocinio para baixo", "raciocinio no maximo", e tambem "use o DeepSeek Pro" / "troca pro ChatGPT". A aba Modelos tem **"Testar todos os niveis"**, que mede a latencia de cada nivel no modelo conectado.
 - **Voz neural (Linux e Windows)**: usa o Piper local — voz masculina pt-BR grave e humana, estilo JARVIS. O binario e baixado em background no primeiro uso; ate ficar pronto (e no macOS) usa a Web Speech do Chromium como fallback, priorizando vozes Natural/Neural/Online.
 - **Responde por voz tambem ao texto**: mensagens digitadas no chat sao faladas quando o TTS esta ligado, nao so os comandos de microfone.
@@ -91,7 +92,8 @@ Campos importantes:
 
 | Campo | Uso |
 | --- | --- |
-| `grog.apiKey` | chave Groq obrigatoria para transcricao de voz |
+| `grog.apiKey` | chave Groq obrigatoria para transcricao de voz; a UI mostra apenas este campo |
+| `grog.baseUrl` / `grog.sttModel` | parametros internos do STT Groq; defaults sao usados se ficarem vazios |
 | `nineRouter.baseUrl` | endpoint OpenAI-compatible do cerebro (padrao: OpenRouter) |
 | `nineRouter.model` | modelo de texto selecionado |
 | `nineRouter.reasoning` | nivel de raciocinio `baixo`/`medio`/`alto` (vira `reasoning_effort` low/medium/high) |
