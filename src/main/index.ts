@@ -18,8 +18,6 @@ import { getProvider } from '../shared/providers'
 import { startReminders } from './notify'
 import { synthesize, listPiperVoices, isPiperReady, ensurePiper } from './piper'
 import { shutdownPiperPool } from './piperEngine'
-import { demoExporter } from './demoExporter'
-import { demoManager } from './demoManager'
 import { initLogger, logger, getRecentLogs, errToMessage } from './logger'
 import { getWeather, getWeatherAt, getNews, reverseGeocode } from './tools'
 import { chatDeltaPayload } from './ipcPayloads'
@@ -152,13 +150,7 @@ app.whenReady().then(() => {
     .then((ok) => logger.info('piper', ok ? 'voz neural pronta' : 'Piper indisponível (usando Web Speech)'))
     .catch((e) => logger.warn('piper', 'falha ao preparar o Piper', e))
 
-  // Integração Modo Apresentação (Demo)
-  demoManager.on('state-changed', (state: any) => {
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('demo:state', state)
-  })
-  demoManager.on('slide', (slide: any) => {
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('demo:slide', slide)
-  })
+
 
   // Ciclo de consolidação automática ("sono")
   let lastConsolidationTime = Date.now()
@@ -220,19 +212,7 @@ function registerIpc(): void {
   ipcMain.handle('memory:consolidate', () => runConsolidation())
   ipcMain.handle('memory:log', () => loadMemoryLog())
 
-  // Demo Mode
-  ipcMain.handle('demo:start', () => {
-    demoManager.start()
-  })
-  ipcMain.handle('demo:stop', () => {
-    demoManager.stop()
-  })
-  ipcMain.handle('demo:pause', () => {
-    demoManager.pause()
-  })
-  ipcMain.handle('demo:resume', () => {
-    demoManager.resume()
-  })
+
 
   // Calendário
   ipcMain.handle('calendar:load', () => loadEvents())
@@ -345,10 +325,7 @@ function registerIpc(): void {
   ipcMain.handle('tts:synthesize', async (_e, text: string, opts: { voice?: string; rate?: number }) => {
     try {
       const buf = await synthesize(text, opts)
-      // Grava o áudio para o DemoExporter se estiver ativo
-      demoExporter.recordPhrase(text, buf).catch(err => {
-        logger.error('demo', 'Falha ao registrar áudio no demoExporter', err)
-      })
+
 
       return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer
     } catch (e) {
@@ -476,8 +453,5 @@ function registerIpc(): void {
     }
   )
 
-  // Demo Export
-  ipcMain.handle('demo:startRecording', () => { demoExporter.startRecording(); return true })
-  ipcMain.handle('demo:stopRecording', () => { demoExporter.stopRecording(); return true })
-  ipcMain.handle('demo:export', async () => await demoExporter.exportZip())
+
 }

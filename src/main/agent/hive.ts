@@ -565,7 +565,7 @@ export function inferPromisedHiveAction(fala: string, userText: string, acoes: A
   if (has(/\bt[eê]mis\b/iu) && has(/(audit|revis|valid|qualid|verificar|diagn[oó]stic|parecer|veredito|inspe[cç])/iu)) {
     return { tipo: 'subagente.auditar', objetivo: goal, contexto }
   }
-  if (has(/\bprometeu\b/iu) && has(/(depur|debug|erro|falha|exce[cç][aã]o|stack|trace|quebr|crash|bug)/iu)) {
+  if (has(/\bprometeu\b/iu) && has(/(depur|debug|erro|falha|exce[cç][aã]o|stack|trace|quebr|crash|bug|analis)/iu)) {
     return { tipo: 'subagente.depurar', objetivo: goal, contexto }
   }
   return null

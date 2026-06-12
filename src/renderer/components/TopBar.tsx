@@ -28,7 +28,7 @@ function SentinelLogPre({ buffer }: { buffer: string }): JSX.Element {
   )
 }
 
-type Screen = 'assistant' | 'office' | 'tasks' | 'calendar' | 'reminders' | 'lists' | 'memory' | 'models' | 'system' | 'demo'
+type Screen = 'assistant' | 'office' | 'tasks' | 'calendar' | 'reminders' | 'lists' | 'memory' | 'models' | 'system'
 
 const tabs: { id: Screen; label: string; hint: string; icon: JSX.Element }[] = [
   { id: 'assistant', label: 'Assistente', hint: 'Alt+1', icon: <AssistantIcon /> },
@@ -39,8 +39,7 @@ const tabs: { id: Screen; label: string; hint: string; icon: JSX.Element }[] = [
   { id: 'memory', label: 'Memória', hint: 'Alt+6', icon: <MemoryIcon /> },
   { id: 'models', label: 'Modelos de IA', hint: 'Alt+7', icon: <ChipIcon /> },
   { id: 'system', label: 'Sistema', hint: 'Alt+8', icon: <SystemIcon /> },
-  { id: 'office', label: 'Escritório', hint: 'Alt+9', icon: <HiveIcon /> },
-  { id: 'demo', label: 'Apresentação', hint: 'Alt+0', icon: <PlayIcon /> }
+  { id: 'office', label: 'Escritório', hint: 'Alt+9', icon: <HiveIcon /> }
 ]
 
 export default function TopBar(): JSX.Element {
@@ -401,3 +400,4 @@ function GearIcon(): JSX.Element {
     </svg>
   )
 }
+
