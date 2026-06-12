@@ -82,6 +82,15 @@ Durante execuções longas (como builds, testes ou escrita contínua pelo coder 
 
 Em respostas faladas normais, o Ares nao deve ler codigo, diffs, JSON, `stdout` ou `stderr`. Para ferramentas `codigo.*`, a resposta final e gerada primeiro, sanitizada e enviada ao TTS so depois. O formato ideal da fala e: arquivo principal, acao feita, validacao e proximo passo em uma ou duas frases.
 
+## Sessões Retomáveis (Worklogs)
+
+O Ares arquiva automaticamente o histórico de comandos e ferramentas do projeto ativo em um Diário de Trabalho (`worklog.json`). Quando você retorna a um projeto, o Ares injeta o contexto resumido de forma invisível. 
+
+- O comando `codigo.retomar` lê esse diário mais o status atual do Git e gera um resumo falável de qual era o último passo, escopo, arquivos alterados e pendências de Git, oferecendo continuação ("Continuo do passo 3?").
+- O diário arquiva um limite de 10 sessões recentes e não quebra a memória de tokens do modelo (limite de tamanho autogerenciado).
+- Durante a inicialização ou "Briefing do Dia", o Ares alertará discretamente se houver trabalho incompleto recente no projeto atual.
+- Para gravar, fechar ou dar logout em uma sessão de trabalho, o modelo recomendará comitar de forma interativa.
+
 ## Diagnostico
 
 `codigo.diagnostico` examina `package.json` e tenta rodar scripts comuns quando eles estao permitidos:

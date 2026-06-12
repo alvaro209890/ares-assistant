@@ -62,7 +62,8 @@ export const QUERY_TOOLS = new Set([
   'subagente.auditar',
   'subagente.depurar',
   'codigo.observar',
-  'codigo.observar.parar'
+  'codigo.observar.parar',
+  'codigo.retomar'
 ])
 
 // Ações de mutação conhecidas e os campos obrigatórios de cada uma. Usado para

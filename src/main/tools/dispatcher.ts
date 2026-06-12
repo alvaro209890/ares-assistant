@@ -24,6 +24,7 @@ import { toolErr } from '../agent/types'
 import type { TurnTrace } from '../agent/trace'
 import type { AppConfig } from '../../shared/types'
 import type { CommandRegistry, ToolContext } from './types'
+import { worklogPatchFromResult } from '../worklog'
 
 export interface DispatchContext {
   cfg: AppConfig
@@ -156,5 +157,9 @@ export async function dispatchCommand(
     detail: activityDetail(result)
   })
   endProgress(result.erro === undefined)
+  
+  // Captura automática de diário por workspace
+  worklogPatchFromResult(a.tipo, a, result, ctx.cfg)
+  
   return result
 }

@@ -55,9 +55,9 @@ import {
   loadReminders,
   userDataDir,
   codingPreferencesSummary,
-  sessionContextSummary,
   getAntiFactsForExtractor
 } from './data'
+import { worklogSummary } from './worklog'
 import { controlPromptContext } from './control'
 import { codePromptContext } from './code'
 import { pushUndo } from './history'
@@ -310,7 +310,7 @@ export async function runTurn(
       codeContext: codePromptContext(cfg),
       controlContext: controlPromptContext(cfg),
       codingPrefs: codingPreferencesSummary(),
-      sessionContext: sessionContextSummary(),
+      worklogSummary: worklogSummary(cfg.integrations.code.workspaceRoot),
       brain: brainSummary(cfg),
       summary: session?.summary,
       voice,
@@ -503,8 +503,8 @@ async function summarizeIfNeeded(sessionId: string): Promise<void> {
 
 /**
  * Auto-extração de fatos úteis da conversa recente. Roda separada do turno (chamada
- * pelo renderer após responder) para não atrasar a fala. Classifica por categoria e
- * relevância; com autoApprove desligado, os fatos ficam pendentes para revisão.
+ * pelo renderer após responder) para não atrasar a fala. A extração é 100% autônoma
+ * e os fatos são auto-classificados (ativo/probatório/descartado) via score de confiança.
  */
 export async function extractFacts(sessionId: string): Promise<MemoryFact[]> {
   const cfg = readConfig()

@@ -692,3 +692,19 @@ export interface SentinelStatus {
   lastVoiceAlertAt?: number
 }
 
+// --- Sessões Retomáveis (Worklog) ---
+export interface WorklogEntry {
+  id: string
+  timestamp: number
+  tool: string
+  description: string // Descrição curta da ação
+  resultSummary: string // Resumo do que aconteceu (sucesso, erro, [ESCOPO], [PASSOS])
+  filesTouched?: string[]
+}
+
+export interface WorkspaceWorklog {
+  workspaceRoot: string
+  updatedAt: number
+  entries: WorklogEntry[]
+}
+

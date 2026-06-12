@@ -10,7 +10,6 @@ import {
   scaffoldProject,
   writeCodeFile
 } from '../code'
-import { setLastEditedFile } from '../data'
 import { toolOk } from '../agent/types'
 import { argFile, argRoot } from './util'
 import type { ToolCommand } from './types'
@@ -26,7 +25,6 @@ export const codeWriteCommands: ToolCommand[] = [
         path: String(a.path || a.raiz || a.destino || a.onde || ''),
         force: a.force === true || a.forcar === true
       })
-      if (resultado.created[0]) setLastEditedFile(resultado.created[0], resultado.root)
       return toolOk(a.tipo, resultado)
     }
   },
@@ -40,7 +38,6 @@ export const codeWriteCommands: ToolCommand[] = [
         content: String(a.conteudo ?? a.content ?? a.texto ?? ''),
         overwrite: a.sobrescrever === true || a.overwrite === true
       })
-      setLastEditedFile(resultado.file, argRoot(a) || undefined)
       return toolOk(a.tipo, resultado)
     }
   },
@@ -63,7 +60,6 @@ export const codeWriteCommands: ToolCommand[] = [
           ? Number(a.esperado ?? a.expectedMatches)
           : undefined
       })
-      setLastEditedFile(resultado.file, argRoot(a) || undefined)
       return toolOk(a.tipo, resultado)
     }
   },
@@ -79,7 +75,6 @@ export const codeWriteCommands: ToolCommand[] = [
         filter: a.filtro || a.filter ? String(a.filtro || a.filter) : undefined,
         apply
       })
-      if (resultado.applied && resultado.files[0]) setLastEditedFile(resultado.files[0].file, resultado.root)
       return toolOk(a.tipo, resultado)
     }
   },
@@ -94,7 +89,6 @@ export const codeWriteCommands: ToolCommand[] = [
     category: 'code-write',
     run(a, { cfg }) {
       const resultado = applyCodePatch(cfg, { root: argRoot(a), diff: a.diff, patches: a.patches })
-      if (resultado.applied && resultado.files[0]) setLastEditedFile(resultado.files[0], resultado.root)
       return toolOk(a.tipo, resultado)
     }
   }

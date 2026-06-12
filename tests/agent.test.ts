@@ -112,7 +112,7 @@ describe('agent — runTurn (orquestração do cérebro)', () => {
     nextEnvelope('Segunda resposta.', [])
     await runTurn(sid, 'A Atena deve priorizar notícias recentes.')
 
-    const ctx = compactSubagentContext(sid, 'Contexto direto da ação', 500)
+    const ctx = compactSubagentContext(sid, 'Contexto direto da ação', undefined, 500)
 
     expect(ctx).toContain('Contexto direto da ação')
     expect(ctx).toContain('Atena deve priorizar notícias recentes')

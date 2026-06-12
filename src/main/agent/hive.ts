@@ -18,7 +18,8 @@ import {
   runCodeGit,
   summarizeCodeWorkspace
 } from '../code'
-import { codingPreferencesSummary, getSession, getSessionContext } from '../data'
+import { codingPreferencesSummary, getSession } from '../data'
+import { worklogSummary } from '../worklog'
 import {
   evidenceOf,
   parseGitStatusFiles,
@@ -504,6 +505,7 @@ export async function gatherSubagentEvidence(
 export function buildTaskContext(
   sessionId: string,
   actionContext?: string,
+  workspaceRoot?: string,
   maxChars = 2800
 ): string | undefined {
   const session = getSession(sessionId)
@@ -514,11 +516,10 @@ export function buildTaskContext(
   const prefs = codingPreferencesSummary().trim()
   if (prefs) parts.push(`Preferências de código do usuário:\n${prefs.slice(0, 500)}`)
 
-  const op = getSessionContext()
-  const opLines: string[] = []
-  if (op.lastEditedFile) opLines.push(`último arquivo editado: ${op.lastEditedFile}${op.lastEditedRoot ? ` (em ${op.lastEditedRoot})` : ''}`)
-  if (op.lastTerminalCommand) opLines.push(`último comando OK: ${op.lastTerminalCommand}`)
-  if (opLines.length) parts.push(`Estado operacional recente:\n- ${opLines.join('\n- ')}`)
+  if (workspaceRoot) {
+    const wlog = worklogSummary(workspaceRoot, 600)
+    if (wlog) parts.push(`Trabalho em andamento no projeto:\n${wlog}`)
+  }
 
   if (session?.summary?.trim()) parts.push(`Resumo da conversa:\n${session.summary.trim().slice(0, 600)}`)
 

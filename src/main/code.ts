@@ -183,7 +183,7 @@ export function readCodeContext(
     .join('\n')
 }
 
-function git(root: string, args: string[]): string | null {
+export function git(root: string, args: string[]): string | null {
   try {
     const res = spawnSync('git', ['-C', root, ...args], { encoding: 'utf8', timeout: 1500 })
     if (res.status === 0) return String(res.stdout || '').trim()

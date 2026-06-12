@@ -103,6 +103,7 @@ ENCADEAMENTO: após receber os resultados, você PODE chamar novas ferramentas d
 - codigo.terminal {path?, comando, confirmado?}   (TERMINAL completo via shell, com pipes/&&/redirecionamento. Comando seguro/allowlist roda direto; qualquer outro EXIGE autorização: chame SEM "confirmado" para propor — vem requiresApproval — explique e peça o "sim"; comandos catastróficos/sudo são bloqueados)
 - codigo.observar {path?, comando, confirmado?}   (SENTINELA DE EXECUÇÃO: roda dev server, watch de testes ou build contínuo em segundo plano vigiando a saída em tempo real. Comando seguro/allowlist roda direto; confirm exige o "sim" do usuário. Retorna imediatamente com status "observando" e libera o turno. Use quando o usuário pedir para "observar", "rodar e ficar de olho", "iniciar dev", "rodar em background")
 - codigo.observar.parar {qual?}   (para uma sentinela pelo ID ou comando, ou todas se "qual" for omitido)
+- codigo.retomar {path?}   (RETOMA O TRABALHO: lê o Diário de Trabalho do workspace e devolve um resumo falável do que estava sendo feito e o próximo passo natural. Use quando o usuário disser "retoma o projeto", "continua de onde paramos", "o que eu estava fazendo?")
 - codigo.confirmar {}   (executa a ação que ficou pendente de autorização, DEPOIS que o usuário disser sim/autorizo/pode)
 - codigo.cancelar {}   (descarta a ação pendente quando o usuário recusar)
 - codigo.git {path?, operacao(status|diff|diffStat|diffStruct|log), arquivo?}   (consulta Git local sem alterar repo. diffStruct devolve o diff ESTRUTURADO: arquivos com adições/remoções, totais e uma sugestão de COMMIT SEMÂNTICO "suggestedCommit" — use para "o que mudou?", "gera uma mensagem de commit". Para commitar, execute "git add -A && git commit -m 'mensagem'" via codigo.terminal diretamente — operação local, não precisa de autorização prévia. Só git push pede confirmação por ser externo)
@@ -150,6 +151,7 @@ MODO PROGRAMADOR (ENGENHARIA E CONSTRUÇÃO DE CÓDIGO):
 - ESCRITA REAL: Escrita real (codigo.scaffold/codigo.criar) exige "Permitir aplicar patches" ligado; se vier erro de desativado, explique como ligar.
 - LOCALIZAÇÃO DO WORKSPACE: Sem path explícito, use o workspace padrão de programação. Se o pedido depender de um repo específico e o contexto não deixar claro, peça o path.
 - REFERÊNCIAS: Explique respostas de código com referências de arquivo/linha quando a ferramenta devolver linhas.
+- FECHAMENTO DE SESSÃO: Quando o usuário encerrar ("por hoje chega", "vou parar") e houver trabalho no projeto ativo (ver "Diário do Workspace"), você deve fazer um checkpoint. Verifique se há mudanças sem commit (com codigo.git status); se houver, OFEREÇA gerar a mensagem de commit a partir do diário e comitá-las para salvar o trabalho, mas nunca execute o commit sem o sim explícito.
 
 CONFIANÇA NA CONVERSA:
 - CONFIRMAÇÃO: para REMOVER/APAGAR/LIMPAR dados (tarefa.remover, coluna.remover, evento.remover, lembrete.remover, memoria.remover, lista.limpar), inclua a ação no JSON E pergunte na fala de forma curta ("Confirma que apago a tarefa X?"). O sistema SEGURA a ação até o usuário confirmar; quando ele disser "sim/pode/confirmo", apenas confirme na fala ("Pronto, removida.") — não precisa repetir a ação. Se disser "não", diga que manteve. Nunca diga que apagou antes da confirmação.
@@ -310,7 +312,7 @@ export function buildSystemPrompt(ctx: {
   codeContext: string
   controlContext: string
   codingPrefs: string
-  sessionContext: string
+  worklogSummary: string
   brain: string
   summary?: string
   voice: boolean
@@ -339,7 +341,7 @@ export function buildSystemPrompt(ctx: {
     `## Localização aproximada do usuário\n${loc}`,
     `## Programação\n${ctx.codeContext}`,
     ctx.codingPrefs ? `## Preferências de código do usuário (respeite-as ao escrever/editar)\n${ctx.codingPrefs}` : '',
-    ctx.sessionContext ? `## Memória de sessão (contexto recente de trabalho)\n${ctx.sessionContext}` : '',
+    ctx.worklogSummary ? `## Diário do Workspace (trabalho em andamento)\n${ctx.worklogSummary}` : '',
     `## Controle do computador\n${ctx.controlContext}`,
     `## Seu cérebro (modelo de IA)\n${ctx.brain}`,
     `## Sobre o usuário (memória de longo prazo)\n${memoryPromptBlock()}`,

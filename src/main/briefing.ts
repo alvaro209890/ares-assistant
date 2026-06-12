@@ -2,6 +2,8 @@ import type { AppConfig, BriefingData, BriefingTask } from '../shared/types'
 import { loadBoard } from './tasks'
 import { loadEvents } from './data'
 import { getWeather, getWeatherAt, getNews } from './tools'
+import { getWorklog } from './worklog'
+import { basename } from 'path'
 
 // Monta o "briefing do dia": clima, eventos de hoje, tarefas vencidas/próximas,
 // lembretes, notícias e sugestões proativas (discretas). Usado pelo painel de
@@ -106,6 +108,17 @@ export async function buildBriefing(cfg: AppConfig): Promise<BriefingData> {
     }
     const rain = Math.max(weather?.today.precipProb ?? 0, ...(weather?.periods.map((p) => p.precipProb) ?? [0]))
     if (rain >= 60) suggestions.push('Boa chance de chuva hoje — vale levar guarda-chuva.')
+
+    if (cfg.integrations.code.workspaceRoot) {
+      const wlog = getWorklog(cfg.integrations.code.workspaceRoot)
+      if (wlog.entries.length > 0) {
+        const last = wlog.entries[0]
+        if (now.getTime() - last.timestamp < 48 * 3600_000) {
+          const projName = basename(cfg.integrations.code.workspaceRoot)
+          suggestions.push(`Você tem trabalho recente no projeto ${projName}. Diga "continuar de onde paramos" para retomar.`)
+        }
+      }
+    }
   }
 
   return {

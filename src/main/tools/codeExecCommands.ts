@@ -1,9 +1,10 @@
 // Código: execução de comandos. comando livre, terminal (com fluxo de aprovação),
 // confirmar/cancelar pendente. Todos longos → reportsProgress.
 
-import { classifyCommand, isLongRunningCommand, runCodeCommand, runCodeTerminal } from '../code'
-import { setLastTerminalCommand } from '../data'
+import { classifyCommand, isLongRunningCommand, runCodeCommand, runCodeTerminal, git } from '../code'
 import { clearPendingCode, getPendingCode, setPendingCode } from '../pending'
+import { getWorklog, buildResumeSummary } from '../worklog'
+import { loadBoard } from '../tasks'
 import { announceLongTask } from '../agent/activity'
 import { toolErr, toolOk } from '../agent/types'
 import { argRoot } from './util'
@@ -52,7 +53,6 @@ export const codeExecCommands: ToolCommand[] = [
         setPendingCode(sessionId, { kind: 'terminal', command: result.command, root, reason: result.reason })
       } else if (result.ran) {
         clearPendingCode(sessionId)
-        if (result.ok) setLastTerminalCommand(result.command, result.root)
       }
       // O dispatcher emite waiting/done conforme requiresApproval — só passamos o
       // resultado adiante. `activity` é só para auxiliar caso o command queira injetar
@@ -86,7 +86,6 @@ export const codeExecCommands: ToolCommand[] = [
       )
       if (result.ran) {
         clearPendingCode(sessionId)
-        if (result.ok) setLastTerminalCommand(result.command, result.root)
       }
       return toolOk(a.tipo, result)
     }
@@ -134,6 +133,26 @@ export const codeExecCommands: ToolCommand[] = [
       const target = a.qual ? String(a.qual) : undefined
       const stoppedCount = stopSentinels(sessionId, target)
       return toolOk(a.tipo, { ok: true, stoppedCount })
+    }
+  },
+  {
+    tipo: 'codigo.retomar',
+    category: 'code-exec',
+    reportsProgress: true,
+    progressLabel: () => 'Coletando estado do projeto...',
+    run(a, { cfg }) {
+      const root = argRoot(a) || cfg.integrations.code.workspaceRoot
+      const log = getWorklog(root)
+      const gitStatus = git(root, ['status', '--short']) || ''
+      
+      const board = loadBoard()
+      const rootName = require('path').basename(root).toLowerCase()
+      const relatedTasks = Object.values(board.cards).filter(c => 
+        !c.done && (c.title.toLowerCase().includes(rootName) || c.description?.toLowerCase().includes(rootName))
+      ).map(c => c.title)
+      
+      const resumo = buildResumeSummary(log, gitStatus, relatedTasks)
+      return toolOk(a.tipo, { resumo, acionavel: true })
     }
   }
 ]

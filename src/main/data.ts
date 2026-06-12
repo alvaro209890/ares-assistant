@@ -58,7 +58,7 @@ function dataPath(file: string): string {
 export function userDataDir(): string {
   return app.getPath('userData')
 }
-function readJSON<T>(file: string, fallback: T): T {
+export function readJSON<T>(file: string, fallback: T): T {
   try {
     const p = dataPath(file)
     if (existsSync(p)) return JSON.parse(readFileSync(p, 'utf8')) as T
@@ -67,12 +67,12 @@ function readJSON<T>(file: string, fallback: T): T {
   }
   return fallback
 }
-function writeJSON(file: string, data: unknown): void {
+export function writeJSON(file: string, data: unknown): void {
   const p = dataPath(file)
   mkdirSync(dirname(p), { recursive: true })
   writeFileSync(p, JSON.stringify(data, null, 2), 'utf8')
 }
-function uid(prefix: string): string {
+export function uid(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
 }
 
@@ -503,50 +503,6 @@ export function memoryPromptBlock(maxChars = MEMORY_BUDGET_CHARS): string {
  */
 export function codingPreferencesSummary(): string {
   return formatCodingPreferences(loadMemory())
-}
-
-// ---------------- Memória de Sessão Curta ----------------
-// Contexto operacional volátil porém persistido: o último arquivo editado e o último
-// comando de terminal bem-sucedido. Permite ao Ares retomar o fio ("rodo o teste
-// naquele arquivo?") sem o usuário repetir o caminho.
-export interface ShortSessionContext {
-  lastEditedFile?: string
-  lastEditedRoot?: string
-  lastTerminalCommand?: string
-  lastTerminalRoot?: string
-  updatedAt?: number
-}
-
-export function getSessionContext(): ShortSessionContext {
-  const ctx = readJSON<ShortSessionContext>('session-context.json', {})
-  if (ctx.updatedAt && Date.now() - ctx.updatedAt > SESSION_CONTEXT_TTL_MS) {
-    writeJSON('session-context.json', {})
-    return {}
-  }
-  return ctx
-}
-function writeSessionContext(patch: Partial<ShortSessionContext>): ShortSessionContext {
-  const next = { ...getSessionContext(), ...patch, updatedAt: Date.now() }
-  writeJSON('session-context.json', next)
-  return next
-}
-/** Registra o último arquivo criado/editado (com a raiz do workspace, se houver). */
-export function setLastEditedFile(file: string, root?: string): void {
-  const f = String(file || '').trim()
-  if (f) writeSessionContext({ lastEditedFile: f, lastEditedRoot: root })
-}
-/** Registra o último comando de terminal que rodou com sucesso. */
-export function setLastTerminalCommand(command: string, root?: string): void {
-  const c = String(command || '').trim()
-  if (c) writeSessionContext({ lastTerminalCommand: c, lastTerminalRoot: root })
-}
-/** Resumo curto da memória de sessão para o prompt (vazio se nada relevante). */
-export function sessionContextSummary(): string {
-  const ctx = getSessionContext()
-  const lines: string[] = []
-  if (ctx.lastEditedFile) lines.push(`Último arquivo editado: ${ctx.lastEditedFile}`)
-  if (ctx.lastTerminalCommand) lines.push(`Último comando de terminal OK: ${ctx.lastTerminalCommand}`)
-  return lines.join('\n')
 }
 
 // ---------------- Calendário ----------------
