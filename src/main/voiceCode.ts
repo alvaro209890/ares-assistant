@@ -232,7 +232,10 @@ function summarizeCodeResult(tipo: string, resultado: Record<string, unknown>, e
     case 'subagente.pesquisar': {
       const ok = resultado.ok === true
       if (!ok) return 'A pesquisa da Atena falhou.'
-      return 'Atena concluiu a pesquisa das fontes.'
+      const report = String(resultado.relatorio || '')
+      const tags = parseReportTags(report)
+      // Fala o achado real ([RESUMO]) em vez do genérico "concluiu a pesquisa".
+      return tags.summary ? `Atena concluiu: ${tags.summary}` : 'Atena concluiu a pesquisa das fontes.'
     }
     case 'subagente.construir': {
       const ok = resultado.ok === true
@@ -248,7 +251,12 @@ function summarizeCodeResult(tipo: string, resultado: Record<string, unknown>, e
       const report = String(resultado.relatorio || '')
       const tags = parseReportTags(report)
       const verdict = tags.verdict === 'APROVADO' ? 'aprovou as alterações' : 'reprovou as alterações'
-      return `Têmis concluiu a auditoria e ${verdict}`
+      // Em reprovação, adianta o primeiro problema de gravidade alta — é o que o
+      // usuário vai querer saber antes de qualquer outra coisa.
+      const worst = tags.verdict === 'REPROVADO' ? tags.problems?.find((p) => /alta/i.test(p.severity)) : undefined
+      return worst
+        ? `Têmis reprovou as alterações: ${worst.desc}`
+        : `Têmis concluiu a auditoria e ${verdict}`
     }
     case 'codigo.workspace': {
       if (resultado.exists === false) return `Nao encontrei o workspace ${str(resultado.root) || 'solicitado'}`

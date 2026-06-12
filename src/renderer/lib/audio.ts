@@ -16,18 +16,44 @@ function pickMime(): string {
   return ''
 }
 
+/**
+ * O stream do microfone pode MORRER silenciosamente (suspend/resume do Windows,
+ * troca de dispositivo de áudio, permissão revogada): os objetos continuam
+ * non-null, mas toda leitura de nível vira zero — o Ares fica "surdo" sem erro
+ * nenhum. Este check valida o estado REAL antes de reaproveitar o stream.
+ */
+function micAlive(): boolean {
+  if (!stream || !audioCtx || !analyser) return false
+  if (!stream.active || audioCtx.state === 'closed') return false
+  const track = stream.getAudioTracks()[0]
+  return !!track && track.readyState === 'live'
+}
+
 /** Garante acesso ao microfone e prepara o analisador. Pode lançar (permissão negada). */
 export async function ensureMic(): Promise<void> {
-  if (stream && audioCtx && analyser) {
-    if (audioCtx.state === 'suspended') await audioCtx.resume()
+  if (micAlive()) {
+    if (audioCtx!.state === 'suspended') await audioCtx!.resume()
     return
   }
+  // Stream inexistente OU morto: derruba o que sobrou e readquire do zero.
+  // (Era a principal causa de "o Ares não está me escutando" após suspend/resume
+  // ou troca de fone/headset — o estado antigo parecia válido para sempre.)
+  try {
+    stream?.getTracks().forEach((t) => t.stop())
+  } catch {
+    /* já parado */
+  }
+  stream = null
+  analyser = null
+  invalidateAmbientCache()
   // echoCancellation reduz o áudio da própria voz do Ares no microfone, o que
   // torna o barge-in (interromper falando) confiável e melhora a captação geral.
   stream = await navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
   })
-  audioCtx = new AudioContext()
+  // O AudioContext é compartilhado com o analisador de playback (orbe): só cria
+  // um novo se não existir ou se o atual foi fechado.
+  if (!audioCtx || audioCtx.state === 'closed') audioCtx = new AudioContext()
   if (audioCtx.state === 'suspended') await audioCtx.resume()
   const source = audioCtx.createMediaStreamSource(stream)
   analyser = audioCtx.createAnalyser()
@@ -56,10 +82,41 @@ export function getLevel(): number {
 
 const waitFrame = () => new Promise<number>((resolve) => setTimeout(resolve, 16))
 
+// Calibração de ambiente com CACHE: no modo contínuo, recalibrar a cada iteração
+// abria um "buraco surdo" de ~520ms entre escutas (fala que começava ali era
+// perdida ou inflava o limiar). Recalibra só quando o cache vence ou o mic é
+// readquirido.
+let ambientLevel = 0
+let ambientAt = 0
+const AMBIENT_TTL_MS = 45_000
+// Teto da inflação por ambiente: calibrar durante um pico de ruído (ou com o fim
+// da fala do Ares ainda no ar) elevava o limiar acima da voz NORMAL do usuário —
+// sintoma clássico de "ele não está me escutando".
+const AMBIENT_THRESHOLD_CAP = 0.16
+
+function invalidateAmbientCache(): void {
+  ambientAt = 0
+}
+
+/** Limiar efetivo de voz a partir do piso pedido e do ambiente calibrado. Pura e testável. */
+export function effectiveThreshold(baseThreshold: number, ambient: number): number {
+  const inflated = Math.max(baseThreshold, ambient * 2.6 + 0.018)
+  return Math.min(inflated, Math.max(baseThreshold, AMBIENT_THRESHOLD_CAP))
+}
+
 /** Começa a gravar (push-to-talk). Reaproveita o stream já aberto. */
 export async function startRecording(): Promise<void> {
   await ensureMic()
   if (!stream) throw new Error('Microfone indisponível.')
+  // Gravação anterior pendurada (erro no meio do fluxo): encerra antes de recomeçar,
+  // senão o construtor abaixo grava por cima e os chunks se misturam.
+  if (recorder && recorder.state !== 'inactive') {
+    try {
+      recorder.stop()
+    } catch {
+      /* já parado */
+    }
+  }
   mimeType = pickMime()
   chunks = []
   recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
@@ -69,17 +126,34 @@ export async function startRecording(): Promise<void> {
   recorder.start()
 }
 
-/** Para a gravação e devolve o áudio capturado + o mimeType usado. */
+/**
+ * Para a gravação e devolve o áudio capturado + o mimeType usado. NUNCA fica
+ * pendurado: erro do recorder ou onstop que não chega (visto no Windows após
+ * suspend) entregam os chunks já coletados via watchdog.
+ */
 export function stopRecording(): Promise<{ blob: Blob; mimeType: string }> {
   return new Promise((resolve, reject) => {
-    if (!recorder) return reject(new Error('Nenhuma gravação em andamento.'))
-    const used = recorder.mimeType || mimeType || 'audio/webm'
-    recorder.onstop = () => {
+    const r = recorder
+    if (!r) return reject(new Error('Nenhuma gravação em andamento.'))
+    const used = r.mimeType || mimeType || 'audio/webm'
+    let settled = false
+    const finish = (): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(watchdog)
       const blob = new Blob(chunks, { type: used })
       recorder = null
       resolve({ blob, mimeType: used })
     }
-    recorder.stop()
+    const watchdog = setTimeout(finish, 1500)
+    r.onstop = finish
+    r.onerror = finish
+    try {
+      if (r.state === 'inactive') finish()
+      else r.stop()
+    } catch {
+      finish()
+    }
   })
 }
 
@@ -96,15 +170,18 @@ export async function recordUntilSilence(
   const baseThreshold = opts.threshold ?? 0.045
 
   await startRecording()
-  const calibrationStart = performance.now()
-  const samples: number[] = []
-  while (performance.now() - calibrationStart < 520 && !opts.shouldStop?.()) {
-    samples.push(getLevel())
-    await waitFrame()
+  if (Date.now() - ambientAt > AMBIENT_TTL_MS) {
+    const calibrationStart = performance.now()
+    const samples: number[] = []
+    while (performance.now() - calibrationStart < 520 && !opts.shouldStop?.()) {
+      samples.push(getLevel())
+      await waitFrame()
+    }
+    samples.sort((a, b) => a - b)
+    ambientLevel = samples[Math.floor(samples.length * 0.8)] ?? 0
+    ambientAt = Date.now()
   }
-  samples.sort((a, b) => a - b)
-  const ambient = samples[Math.floor(samples.length * 0.8)] ?? 0
-  const threshold = Math.max(baseThreshold, ambient * 2.6 + 0.018)
+  const threshold = effectiveThreshold(baseThreshold, ambientLevel)
   const releaseThreshold = threshold * 0.72
 
   const start = performance.now()

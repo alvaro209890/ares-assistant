@@ -7,6 +7,7 @@ A Colmeia é a equipe especializada do Ares. O Ares continua sendo o gerente: el
 - **Atena (`subagente.pesquisar`)** — investigação web/documentação. Recebe buscas, notícias recentes e página indicada por URL. Devolve fatos verificáveis com fonte e data, em blocos `[RESUMO]`, `[LINHA DO TEMPO]`, `[FATOS]`, `[INCERTEZAS]`, `[FONTES]`.
 - **Hefesto (`subagente.construir`)** — **tech-lead**. NÃO escreve o projeto inteiro: ele entrega um BRIEFING técnico em blocos `[ESCOPO]`, `[ARQUIVOS]`, `[PASSOS]`, `[TRECHOS]` (opcional), `[RISCOS]`, `[VALIDAR]`. O Ares usa esse briefing para aplicar passo-a-passo OU para alimentar o coder autônomo.
 - **Têmis (`subagente.auditar`)** — auditoria. Recebe diff POR ARQUIVO + outline + checagens reais. Abre com `[VEREDITO]` (APROVADO/REPROVADO), seguido de `[RESUMO]` e `[PROBLEMAS]` (arquivo:linha + gravidade + correção sugerida).
+- **Prometeu (`subagente.depurar`)** — depuração. Recebe logs de erro/stack trace, contexto de código nos pontos exatos do erro (±30 linhas) e diagnóstico do projeto. Devolve `[CAUSA RAIZ]`, `[EVIDÊNCIA]`, `[CORRECAO]` (passos cirúrgicos ANTES/DEPOIS), `[HIPOTESES DESCARTADAS]` e `[VALIDAR]`. O Ares aplica a correção imediatamente e roda o comando de validação na mesma rodada.
 
 ## Hefesto vs Coder Autônomo (separação nítida)
 
@@ -52,7 +53,15 @@ Falhas na coleta (offline, timeout, sem diff) viram `notes` no pacote em vez de 
 
 ## Protocolo do relatório
 
-O sistema de prompts pede que o subagente abra blocos rotulados (`[ESCOPO]`, `[ARQUIVOS]`, `[VEREDITO]`...). O Ares pode usar `parseReportTags(report)` para extrair veredito, lista de arquivos e riscos de forma testável — sem depender de regex no LLM. Quando o template falta, a função devolve um objeto vazio (best-effort).
+O sistema de prompts pede que o subagente abra blocos rotulados (`[ESCOPO]`, `[ARQUIVOS]`, `[VEREDITO]`...). O Ares pode usar `parseReportTags(report)` para extrair veredito, lista de arquivos, riscos, `[RESUMO]`, `[CAUSA RAIZ]`, `[VALIDAR]` e `[PROBLEMAS]` de forma testável — sem depender de regex no LLM. Quando o template falta, a função devolve um objeto vazio (best-effort).
+
+### Validação de blocos obrigatórios (rodada corretiva)
+
+Cada perfil declara `requiredTags` — os blocos que o relatório PRECISA conter (Atena: `RESUMO`+`FONTES`; Hefesto: `ESCOPO`+`PASSOS`+`VALIDAR`; Têmis: `VEREDITO`; Prometeu: `CAUSA RAIZ`+`CORRECAO`+`VALIDAR`). Se o modelo esquecer algum, `executeSubagentTask` faz **uma** rodada corretiva pedindo a reescrita completa; a reescrita só substitui o original se reduzir os blocos faltantes (`missingReportTags`, tolerante a acento/caixa e a rótulos sem colchetes). Sem isso, um relatório fora do template quebrava o parse downstream em silêncio e degradava a síntese do Ares.
+
+### Relato falado (modo voz)
+
+Em voz+código, o resumo imediato falado usa o conteúdo REAL do relatório: Atena fala o `[RESUMO]` ("Atena concluiu: ..."), e Têmis reprovada adianta o primeiro problema de gravidade alta — em vez dos genéricos "concluiu a pesquisa"/"reprovou as alterações".
 
 ## Guarda determinística de delegação
 
@@ -66,9 +75,14 @@ Faltando qualquer um dos três, a inferência é descartada. Verbos de leitura g
 
 ## Dados coletados automaticamente
 
-- **Atena**: `webSearch`, busca focada em notícias recentes, Google News RSS e `readPage` quando há URL.
+- **Atena**: `webSearch`, busca focada em notícias recentes, Google News RSS, leitura proativa das top-2 páginas dos resultados e `readPage` quando há URL.
 - **Hefesto**: `summarizeCodeWorkspace`, `git status` + `diff --stat`, `outlineCodeFile` para os arquivos mais relevantes ao objetivo (ranking por tokens + arquivos do git status).
 - **Têmis**: `diagnoseProject` (typecheck/lint/test quando permitidos), `git status --short`, e para cada arquivo alterado um bloco `outline + diff`.
+- **Prometeu**: logs de erro da ação, `diagnoseProject`, `extractErrorLocations` (arquivo:linha do stack trace confirmado contra o workspace) com `readCodeContext` ±30 linhas em cada ponto, e outlines dos demais arquivos suspeitos.
+
+## Higiene de despacho
+
+Ações de consulta EXATAMENTE duplicadas na mesma rodada (o modelo às vezes emite o mesmo `subagente.*` duas vezes) são removidas por `dedupeActions` antes do despacho — uma chamada de Colmeia duplicada custa uma rodada inteira de LLM sem ganho.
 
 ## Regras de segurança
 
@@ -79,9 +93,10 @@ Faltando qualquer um dos três, a inferência é descartada. Verbos de leitura g
 
 ## Arquivos principais
 
-- `src/main/agent.ts` — roteamento da ferramenta `subagente.*`, coletores especializados (`gatherResearcherEvidence`, `gatherEngineerEvidence`, `gatherAuditorEvidence`), `buildTaskContext`, `inferPromisedHiveAction`, `hiveFollowupInstruction`.
-- `src/main/subagents/profiles.ts` — prompts e temperaturas dos especialistas.
-- `src/main/subagents/executor.ts` — `executeSubagentTask`, `buildTaskPrompt`, `parseReportTags`, `summarizeReport`.
+- `src/main/agent/hive.ts` — coletores especializados (`gatherResearcherEvidence`, `gatherEngineerEvidence`, `gatherAuditorEvidence`, `gatherDebuggerEvidence`), `buildTaskContext`, `inferPromisedHiveAction`, `hiveFollowupInstruction`, `proactiveCodeFollowup`.
+- `src/main/tools/hiveCommands.ts` — registro das ferramentas `subagente.*` (progresso, heartbeat e status da Colmeia via dispatcher).
+- `src/main/subagents/profiles.ts` — prompts, temperaturas e `requiredTags` dos especialistas.
+- `src/main/subagents/executor.ts` — `executeSubagentTask` (com rodada corretiva), `buildTaskPrompt`, `parseReportTags`, `missingReportTags`, `summarizeReport`.
 - `src/main/subagents/evidence.ts` — `renderEvidencePackage`, `truncateSmart`, `evidenceOf`, `pickRelevantFiles`, `parseGitStatusFiles`.
-- `src/main/subagents/types.ts` — `EvidencePackage`, `EvidenceSection`, `SubagentTask`, `SubagentReportTags`.
+- `src/main/subagents/types.ts` — `EvidencePackage`, `EvidenceSection`, `SubagentTask`, `SubagentReportTags`, `SubagentProfile`.
 - `src/renderer/components/HiveDashboard.tsx` — visualização da equipe no Escritório.

@@ -182,6 +182,28 @@ describe('voz no modo programador', () => {
     expect(auditar).toContain('Têmis concluiu a auditoria e aprovou as alterações')
   })
 
+  it('fala o RESUMO real da Atena e o problema de gravidade alta da Têmis reprovada', () => {
+    const pesquisa = codeVoiceProgressSummary([
+      {
+        tipo: 'subagente.pesquisar',
+        resultado: { ok: true, relatorio: '[RESUMO] O modelo X foi lançado em maio.\n[FONTES]\n- url' }
+      }
+    ])
+    expect(pesquisa).toContain('Atena concluiu: O modelo X foi lançado em maio.')
+
+    const reprovada = codeVoiceProgressSummary([
+      {
+        tipo: 'subagente.auditar',
+        resultado: {
+          ok: true,
+          relatorio: '[VEREDITO] REPROVADO\n[PROBLEMAS]\n- src/a.ts:10 — alta — foo retorna undefined\n- src/b.ts:2 — baixa — import morto'
+        }
+      }
+    ])
+    expect(reprovada).toContain('Têmis reprovou')
+    expect(reprovada).toContain('foo retorna undefined')
+  })
+
   it('detecta falas duplicadas para nao repetir resumo e conclusao', () => {
     expect(isDuplicateSpeech('Analisei o diretório X: 3 arquivos.', 'analisei o diretório x: 3 arquivos')).toBe(true)
     expect(isDuplicateSpeech('Analisei o diretório X: 3 arquivos. Estrutura em ordem.', 'Analisei o diretório X: 3 arquivos.')).toBe(true)

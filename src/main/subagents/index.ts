@@ -13,6 +13,7 @@ export { RESEARCHER, ENGINEER, AUDITOR, DEBUGGER, SUBAGENT_PROFILES, getSubagent
 export {
   executeSubagentTask,
   buildTaskPrompt,
+  missingReportTags,
   parseReportTags,
   relevantMemories,
   summarizeReport,

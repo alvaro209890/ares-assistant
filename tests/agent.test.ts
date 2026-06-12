@@ -285,7 +285,12 @@ describe('agent — runTurn (orquestração do cérebro)', () => {
     const sid = createSession().id
     brain
       .mockResolvedValueOnce(JSON.stringify({ fala: 'Vou pesquisar isso agora com a Atena.', acoes: [] }))
-      .mockResolvedValueOnce('Atena encontrou uma fonte de teste e confirmou o fato principal.')
+      // Relatório com os blocos obrigatórios do papel ([RESUMO]/[FONTES]) — sem
+      // eles o executor faria uma rodada corretiva extra (comportamento testado
+      // em subagents.test.ts).
+      .mockResolvedValueOnce(
+        '[RESUMO] Atena encontrou uma fonte de teste e confirmou o fato principal.\n[FONTES]\n- https://exemplo.com'
+      )
       .mockResolvedValueOnce(JSON.stringify({ fala: 'Atena confirmou o fato principal com fonte controlada.', acoes: [] }))
     const hive: string[] = []
 

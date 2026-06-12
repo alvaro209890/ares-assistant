@@ -35,7 +35,7 @@ import {
   dropPendingSentences,
   splitSentences
 } from './tts'
-import { interpretBusySpeech, stripWakeWord } from './voiceControl'
+import { bargeInThreshold, interpretBusySpeech, stripWakeWord } from './voiceControl'
 
 export interface ConvMsg {
   id: string
@@ -507,8 +507,8 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     const interrupted = await Promise.race([
       audio
         .watchForSpeech({
-          threshold: Math.max(0.1, (0.09 - sens * 0.075) * 2.4 + 0.05),
-          sustainMs: 400,
+          threshold: bargeInThreshold(sens),
+          sustainMs: 350,
           shouldStop: () => finished
         })
         .catch(() => false), // mic indisponível não pode derrubar o turno
@@ -696,6 +696,9 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   const beginPushToTalk = useCallback(async () => {
     if (busyRef.current || continuousRef.current) return
     try {
+      // Apertou para falar = quer ser ouvido AGORA: corta qualquer fala em curso,
+      // senão a gravação compete com a voz do Ares (e o usuário acha que não foi ouvido).
+      clearSpeechQueue()
       await audio.startRecording()
       recordingRef.current = true
       setRecording(true)
@@ -743,6 +746,8 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   const voiceCommandOnce = useCallback(async () => {
     if (busyRef.current || continuousRef.current) return
     try {
+      // Clique no microfone da orbe = quer falar agora: silencia o Ares primeiro.
+      clearSpeechQueue()
       await audio.ensureMic()
       setAresState('listening')
       setStatus('Ouvindo…')

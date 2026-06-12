@@ -87,7 +87,7 @@ import {
   proactiveCodeFollowup
 } from './agent/hive'
 import { runQuery } from './agent/router'
-import { streamTurn, validateActions, classifyProviderError } from './agent/stream'
+import { dedupeActions, streamTurn, validateActions, classifyProviderError } from './agent/stream'
 import { createTrace, nullTrace } from './agent/trace'
 import { uid } from './agent/activity'
 import type {
@@ -266,7 +266,7 @@ export async function runTurn(
       trace.emit('hive:inferred', { tipo: inferredHive.tipo })
     }
     let mutations = env.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo))
-    let queries = env.acoes.filter((a) => QUERY_TOOLS.has(a.tipo))
+    let queries = dedupeActions(env.acoes.filter((a) => QUERY_TOOLS.has(a.tipo)))
 
     // Loop agêntico: o LLM pode ENCADEAR rodadas de ferramentas (buscar -> ler ->
     // editar -> validar) num único turno. Cada rodada roda as consultas em PARALELO
@@ -327,13 +327,13 @@ export async function runTurn(
           onDelta?.(` ${fallback}`, phase, 'speak', true)
         }
         mutations = mutations.concat(envN.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo)))
-        queries = lastRound ? [] : envN.acoes.filter((a) => QUERY_TOOLS.has(a.tipo))
+        queries = lastRound ? [] : dedupeActions(envN.acoes.filter((a) => QUERY_TOOLS.has(a.tipo)))
       } else {
         const raw = await streamTurn(cfg, convo, phase, onDelta, 'both', deltaTransform, signal)
         const envN = parseEnvelope(raw)
         if (envN.fala) fala = _finalFala(envN.fala, suppressGreeting)
         mutations = mutations.concat(envN.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo)))
-        queries = lastRound ? [] : envN.acoes.filter((a) => QUERY_TOOLS.has(a.tipo))
+        queries = lastRound ? [] : dedupeActions(envN.acoes.filter((a) => QUERY_TOOLS.has(a.tipo)))
       }
     }
 

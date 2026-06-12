@@ -25,6 +25,21 @@ export function finalFala(text: string, suppressGreeting: boolean): string {
   return out.trim()
 }
 
+/**
+ * Remove ações EXATAMENTE duplicadas (mesmo JSON) na mesma rodada. O modelo às
+ * vezes emite a mesma consulta/subagente duas vezes; rodar em dobro custa uma
+ * chamada de LLM inteira (Colmeia) ou repete comandos sem ganho.
+ */
+export function dedupeActions(acoes: Acao[]): Acao[] {
+  const seen = new Set<string>()
+  return acoes.filter((a) => {
+    const key = JSON.stringify(a)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 /** Separa as ações válidas das inválidas, com notas para o usuário. */
 export function validateActions(acoes: Acao[]): { valid: Acao[]; notes: string[] } {
   const valid: Acao[] = []

@@ -1,7 +1,19 @@
-import { describe, expect, it } from 'vitest'
-import type { MemoryFact } from '../src/shared/types'
+import { describe, expect, it, vi } from 'vitest'
+import type { AppConfig, MemoryFact } from '../src/shared/types'
 import { AUDITOR, DEBUGGER, ENGINEER, RESEARCHER, SUBAGENT_PROFILES, getSubagentProfile } from '../src/main/subagents/profiles'
-import { buildTaskPrompt, parseReportTags, relevantMemories, summarizeReport } from '../src/main/subagents/executor'
+import {
+  buildTaskPrompt,
+  executeSubagentTask,
+  missingReportTags,
+  parseReportTags,
+  relevantMemories,
+  summarizeReport
+} from '../src/main/subagents/executor'
+import { chatJSON } from '../src/main/ninerouter'
+
+vi.mock('../src/main/ninerouter', () => ({
+  chatJSON: vi.fn()
+}))
 import {
   evidenceOf,
   parseGitStatusFiles,
@@ -320,5 +332,69 @@ describe('colmeia — parseReportTags', () => {
 
   it('devolve objeto vazio quando não há tags', () => {
     expect(parseReportTags('texto livre sem template')).toEqual({})
+  })
+
+  it('extrai [RESUMO] (Atena/Têmis) para o relato falado', () => {
+    const r = parseReportTags('[RESUMO] O lançamento foi confirmado para março de 2026.\n[FATOS]\n- fato — fonte — data')
+    expect(r.summary).toBe('O lançamento foi confirmado para março de 2026.')
+  })
+})
+
+describe('colmeia — missingReportTags (blocos obrigatórios)', () => {
+  it('aceita bloco com colchetes, rótulo com dois-pontos e variação de acento', () => {
+    expect(missingReportTags('[VEREDITO] APROVADO', ['VEREDITO'])).toEqual([])
+    expect(missingReportTags('VEREDITO: APROVADO', ['VEREDITO'])).toEqual([])
+    expect(missingReportTags('[CORREÇÃO]\n1. trocar x por y', ['CORRECAO'])).toEqual([])
+  })
+
+  it('aponta exatamente o que falta', () => {
+    expect(missingReportTags('[CAUSA RAIZ] import errado', ['CAUSA RAIZ', 'CORRECAO', 'VALIDAR'])).toEqual([
+      'CORRECAO',
+      'VALIDAR'
+    ])
+    expect(missingReportTags('', ['VEREDITO'])).toEqual(['VEREDITO'])
+    expect(missingReportTags('qualquer texto', undefined)).toEqual([])
+  })
+})
+
+describe('colmeia — executeSubagentTask (rodada corretiva)', () => {
+  const cfg = {} as AppConfig
+
+  it('pede correção UMA vez quando o relatório vem sem os blocos do papel', async () => {
+    const mock = vi.mocked(chatJSON)
+    mock.mockReset()
+    mock.mockResolvedValueOnce('análise solta, sem nenhum bloco rotulado')
+    mock.mockResolvedValueOnce('[VEREDITO] APROVADO\n[RESUMO] Mudanças em ordem.')
+
+    const r = await executeSubagentTask(AUDITOR, { goal: 'auditar o diff' }, cfg)
+
+    expect(mock).toHaveBeenCalledTimes(2)
+    expect(r.ok).toBe(true)
+    expect(r.report).toContain('[VEREDITO]')
+    // a mensagem corretiva cita o bloco que faltou
+    expect(JSON.stringify(mock.mock.calls[1][1])).toContain('[VEREDITO]')
+  })
+
+  it('não refaz quando o relatório já vem completo', async () => {
+    const mock = vi.mocked(chatJSON)
+    mock.mockReset()
+    mock.mockResolvedValueOnce('[VEREDITO] APROVADO\n[RESUMO] ok')
+
+    const r = await executeSubagentTask(AUDITOR, { goal: 'auditar' }, cfg)
+
+    expect(mock).toHaveBeenCalledTimes(1)
+    expect(r.ok).toBe(true)
+  })
+
+  it('mantém o relatório original se a reescrita não melhorar', async () => {
+    const mock = vi.mocked(chatJSON)
+    mock.mockReset()
+    mock.mockResolvedValueOnce('primeiro relatório sem blocos')
+    mock.mockResolvedValueOnce('segundo igualmente sem blocos')
+
+    const r = await executeSubagentTask(AUDITOR, { goal: 'auditar' }, cfg)
+
+    expect(r.ok).toBe(true)
+    expect(r.report).toBe('primeiro relatório sem blocos')
   })
 })

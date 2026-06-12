@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { classifyProviderError } from '../src/main/agent/stream'
+import { classifyProviderError, dedupeActions } from '../src/main/agent/stream'
+
+describe('dedupeActions', () => {
+  it('remove ações idênticas na mesma rodada preservando a ordem', () => {
+    const pesquisa = { tipo: 'subagente.pesquisar', objetivo: 'comparar libs' }
+    const testar = { tipo: 'codigo.testar' }
+    expect(dedupeActions([pesquisa, testar, { ...pesquisa }])).toEqual([pesquisa, testar])
+  })
+
+  it('mantém ações do mesmo tipo com parâmetros diferentes', () => {
+    const a = { tipo: 'codigo.ler', arquivo: 'a.ts' }
+    const b = { tipo: 'codigo.ler', arquivo: 'b.ts' }
+    expect(dedupeActions([a, b])).toEqual([a, b])
+  })
+})
 
 describe('classifyProviderError', () => {
   it('abort do usuário', () => {

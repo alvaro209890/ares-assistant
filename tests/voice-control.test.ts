@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { interpretBusySpeech, stripWakeWord } from '../src/renderer/lib/voiceControl'
+import { bargeInThreshold, interpretBusySpeech, stripWakeWord } from '../src/renderer/lib/voiceControl'
+import { effectiveThreshold } from '../src/renderer/lib/audio'
 import {
   HEARTBEAT_FIRST_MS,
   HEARTBEAT_PHRASES,
@@ -50,6 +51,24 @@ describe('voz durante o trabalho — interpretBusySpeech', () => {
   it('stripWakeWord segue exportado e tolerante a erros de transcrição', () => {
     expect(stripWakeWord('aris que horas são', 'ares')).toBe('que horas são')
     expect(stripWakeWord('bom dia', 'ares')).toBeNull()
+  })
+})
+
+describe('limiares de escuta (puros)', () => {
+  it('bargeInThreshold: mais sensível = limiar menor, com piso de segurança', () => {
+    expect(bargeInThreshold(0)).toBeCloseTo(0.22, 2)
+    expect(bargeInThreshold(0.5)).toBeCloseTo(0.145, 3)
+    expect(bargeInThreshold(1)).toBe(0.09) // piso: nunca dispara com ruído de fundo
+    expect(bargeInThreshold(Number.NaN)).toBeCloseTo(0.145, 3) // default = 0.5
+  })
+
+  it('effectiveThreshold infla pelo ambiente mas tem TETO (não fica surdo)', () => {
+    expect(effectiveThreshold(0.045, 0)).toBeCloseTo(0.045, 5) // ambiente silencioso: piso
+    expect(effectiveThreshold(0.045, 0.03)).toBeCloseTo(0.096, 3) // ambiente normal: infla
+    // Pico de ruído na calibração (ou rabo da fala do Ares): trava no teto em vez
+    // de subir acima da voz normal do usuário — era o "ele não está me escutando".
+    expect(effectiveThreshold(0.045, 0.3)).toBe(0.16)
+    expect(effectiveThreshold(0.2, 0.4)).toBe(0.2) // piso pedido acima do teto prevalece
   })
 })
 

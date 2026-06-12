@@ -10,6 +10,10 @@ export interface SubagentProfile {
   systemPrompt: string
   temperature: number
   reportMaxChars?: number // teto do relatório gerado (default 6000)
+  // Blocos rotulados que o relatório PRECISA ter (ex.: ['VEREDITO']). Se o
+  // modelo esquecer algum, o executor faz UMA rodada corretiva antes de aceitar
+  // — relatório sem os blocos quebra o parse e degrada a síntese do Ares.
+  requiredTags?: string[]
 }
 
 // Uma seção rotulada de um EvidencePackage. Cada agente recebe seu material em
@@ -69,5 +73,6 @@ export interface SubagentReportTags {
   rootCause?: string           // [CAUSA RAIZ] primeira linha/parágrafo (Prometeu)
   validateCmd?: string         // [VALIDAR] primeiro comando extraído (todos)
   scope?: string               // [ESCOPO] primeira linha (Hefesto)
+  summary?: string             // [RESUMO] primeira(s) frase(s) (Atena/Têmis)
   problems?: SubagentProblem[] // [PROBLEMAS] estruturado (Têmis)
 }

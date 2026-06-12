@@ -68,10 +68,29 @@ export function buildTaskPrompt(task: SubagentTask): string {
   return parts.join('\n\n')
 }
 
+const stripAccents = (s: string): string => s.normalize('NFD').replace(/[̀-ͯ]/g, '')
+
+/**
+ * Blocos obrigatórios que faltam no relatório. Tolerante a acento e caixa
+ * ([CORREÇÃO] satisfaz 'CORRECAO') e a rótulo sem colchetes ("VEREDITO:").
+ * Pura e testável.
+ */
+export function missingReportTags(report: string, required: string[] | undefined): string[] {
+  if (!required?.length) return []
+  const text = stripAccents(String(report || '')).toUpperCase()
+  return required.filter((tag) => {
+    const t = stripAccents(tag).toUpperCase()
+    return !text.includes(`[${t}]`) && !new RegExp(`(^|\\n)\\s*${t}\\s*[:\\-]`).test(text)
+  })
+}
+
 /**
  * Executa uma tarefa em um subagente: mesma conexão/modelo do Ares (ninerouter),
- * mudando apenas systemPrompt e temperature do perfil. Emite status para a UI da
- * Colmeia antes/depois. Nunca lança: erro vira relatório com ok:false.
+ * mudando apenas systemPrompt e temperature do perfil. Se o relatório vier sem os
+ * blocos obrigatórios do papel (requiredTags), faz UMA rodada corretiva — sem os
+ * blocos, o parse downstream (veredito, causa raiz, validar) degrada em silêncio.
+ * Emite status para a UI da Colmeia antes/depois. Nunca lança: erro vira
+ * relatório com ok:false.
  */
 export async function executeSubagentTask(
   profile: SubagentProfile,
@@ -91,8 +110,30 @@ export async function executeSubagentTask(
   ]
   const maxChars = profile.reportMaxChars ?? REPORT_MAX_CHARS
   try {
-    const raw = await chatJSON(cfg, messages, false, { temperature: profile.temperature, signal })
-    const report = raw.trim().slice(0, maxChars)
+    let raw = await chatJSON(cfg, messages, false, { temperature: profile.temperature, signal })
+    let report = raw.trim().slice(0, maxChars)
+    const missing = missingReportTags(report, profile.requiredTags)
+    if (report && missing.length) {
+      emit('thinking', `Relatório sem ${missing.map((t) => `[${t}]`).join(' ')}; pedindo correção`)
+      raw = await chatJSON(
+        cfg,
+        [
+          ...messages,
+          { role: 'assistant', content: report },
+          {
+            role: 'user',
+            content:
+              `Seu relatório veio sem os blocos obrigatórios: ${missing.map((t) => `[${t}]`).join(', ')}. ` +
+              'Reescreva o relatório COMPLETO incluindo todos os blocos rotulados do seu papel, mantendo o conteúdo já correto.'
+          }
+        ],
+        false,
+        { temperature: profile.temperature, signal }
+      )
+      const retry = raw.trim().slice(0, maxChars)
+      // Usa a reescrita só se ela de fato melhorou (menos blocos faltando).
+      if (retry && missingReportTags(retry, profile.requiredTags).length < missing.length) report = retry
+    }
     if (!report) {
       emit('error', 'relatório vazio')
       return { agentId: profile.id, label: profile.label, ok: false, report: 'O subagente devolveu um relatório vazio.', durationMs: Date.now() - started }
@@ -167,6 +208,13 @@ export function parseReportTags(report: string): SubagentReportTags {
   if (scopeBlock) {
     const scope = scopeBlock[1].trim().split(/\r?\n/)[0].trim()
     if (scope) tags.scope = scope.slice(0, 300)
+  }
+
+  // [RESUMO] — primeiro parágrafo (Atena/Têmis). Vira o relato falado do achado.
+  const summaryBlock = text.match(/\[\s*RESUMO\s*\]\s*[:\-]?\s*([\s\S]*?)(?=\n\s*\[|$)/i)
+  if (summaryBlock) {
+    const summary = summaryBlock[1].trim().split(/\n\n/)[0].replace(/\s+/g, ' ').trim()
+    if (summary) tags.summary = summary.slice(0, 400)
   }
 
   // [PROBLEMAS] — parseia "- arquivo:linha — gravidade — descrição" (Têmis)

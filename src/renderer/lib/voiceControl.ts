@@ -47,6 +47,17 @@ export function stripWakeWord(text: string, wakeWord: string): string | null {
     .trim()
 }
 
+/**
+ * Limiar de áudio do barge-in (interromper o Ares falando) a partir da
+ * sensibilidade do microfone (0..1, maior = mais sensível). Mais baixo que a
+ * fórmula antiga: com echoCancellation a própria voz do Ares já some do mic,
+ * então o usuário não precisa GRITAR para interromper. Pura e testável.
+ */
+export function bargeInThreshold(sensitivity: number): number {
+  const s = Math.min(1, Math.max(0, Number.isFinite(sensitivity) ? sensitivity : 0.5))
+  return Math.max(0.09, (0.09 - s * 0.075) * 2.0 + 0.04)
+}
+
 export type BusyVoiceIntent = { kind: 'cancel' } | { kind: 'command'; text: string } | { kind: 'ignore' }
 
 // Verbos de interrupção no INÍCIO da fala ("para", "cancela isso", "pode parar").

@@ -20,6 +20,7 @@ export const RESEARCHER: SubagentProfile = {
   label: 'Atena',
   role: 'Investigadora — pesquisa web e documentação',
   temperature: 0.3,
+  requiredTags: ['RESUMO', 'FONTES'],
   systemPrompt:
     COMMON +
     '\nVocê é ATENA, a investigadora. Especialidade: PESQUISA EXTERNA. Material: resultados de busca, ' +
@@ -40,6 +41,7 @@ export const ENGINEER: SubagentProfile = {
   role: 'Tech-lead — desenha a mudança e prepara o executor',
   temperature: 0.2,
   reportMaxChars: 10000,
+  requiredTags: ['ESCOPO', 'PASSOS', 'VALIDAR'],
   systemPrompt:
     COMMON +
     '\nVocê é HEFESTO, o TECH-LEAD da equipe. Especialidade: PREPARAR A MUDANÇA. Você NÃO escreve o ' +
@@ -68,6 +70,7 @@ export const AUDITOR: SubagentProfile = {
   label: 'Têmis',
   role: 'Auditora — revisa diff e julga risco real',
   temperature: 0.1,
+  requiredTags: ['VEREDITO'],
   systemPrompt:
     COMMON +
     '\nVocê é TÊMIS, a AUDITORA. Especialidade: REVISÃO TÉCNICA. Material: diff por arquivo, outlines e ' +
@@ -88,6 +91,7 @@ export const DEBUGGER: SubagentProfile = {
   role: 'Depurador — analisa erros e propõe correções cirúrgicas',
   temperature: 0.1,
   reportMaxChars: 10000,
+  requiredTags: ['CAUSA RAIZ', 'CORRECAO', 'VALIDAR'],
   systemPrompt:
     COMMON +
     '\nVocê é PROMETEU, o DEPURADOR. Especialidade: DIAGNÓSTICO DE ERROS. Material: saídas de erro do ' +
