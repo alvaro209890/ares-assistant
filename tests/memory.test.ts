@@ -34,7 +34,7 @@ describe('memória estilo Hermes', () => {
     addFact('Prefere respostas curtas e formais.', {
       category: 'preferencias',
       source: 'auto',
-      status: 'pending',
+      status: 'probationary',
       confidence: 0.8,
       evidence: ['prefiro que seja curto']
     })
@@ -72,7 +72,7 @@ describe('memória estilo Hermes', () => {
 
     const facts = loadMemory()
     expect(facts).toHaveLength(2)
-    expect(facts.some((f) => f.status === 'pending' && f.review === 'possible_conflict')).toBe(true)
+    expect(facts.some((f) => f.status === 'probationary' && f.review === 'possible_conflict')).toBe(true)
   })
 
   it('cria pergunta resolvivel quando novo fato contradiz perfil existente', () => {
@@ -80,7 +80,7 @@ describe('memória estilo Hermes', () => {
     addFact('eu moro no Rio', { category: 'perfil', source: 'manual', status: 'active' })
 
     const facts = loadMemory()
-    const pending = facts.find((f) => f.status === 'pending' && f.review === 'possible_conflict')
+    const pending = facts.find((f) => f.status === 'probationary' && f.review === 'possible_conflict')
     expect(pending?.conflictWith).toBeTruthy()
     expect(pending?.conflictQuestion).toContain('Qual informacao devo manter')
   })
@@ -88,16 +88,16 @@ describe('memória estilo Hermes', () => {
   it('resolve contradicao atualizando ou mantendo fatos', () => {
     addFact('eu moro em SP', { category: 'perfil', source: 'manual', status: 'active' })
     addFact('eu moro no Rio', { category: 'perfil', source: 'manual', status: 'active' })
-    let pending = loadMemory().find((f) => f.status === 'pending')!
+    let pending = loadMemory().find((f) => f.status === 'probationary')!
 
     resolveContradiction(pending.id, 'update_to_new')
     expect(loadMemory().filter((f) => f.status === 'active')).toHaveLength(1)
     expect(loadMemory()[0].text).toContain('Rio')
 
     addFact('eu moro em SP', { category: 'perfil', source: 'manual', status: 'active' })
-    pending = loadMemory().find((f) => f.status === 'pending')!
+    pending = loadMemory().find((f) => f.status === 'probationary')!
     resolveContradiction(pending.id, 'keep_old')
-    expect(loadMemory().some((f) => f.status === 'pending')).toBe(false)
+    expect(loadMemory().some((f) => f.status === 'probationary')).toBe(false)
   })
 
   it('agrupa quase duplicatas em uma entrada mais completa', () => {

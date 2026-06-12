@@ -15,6 +15,7 @@ import type {
   MemoryCategory,
   MemoryContradictionAction,
   MemoryFact,
+  ConsolidationEvent,
   NewsItem,
   Note,
   ReasoningLevel,
@@ -46,13 +47,17 @@ const api = {
       ipcRenderer.invoke('memory:add', text, category),
     update: (
       id: string,
-      patch: { text?: string; category?: MemoryCategory; status?: 'active' | 'pending' }
+      patch: { text?: string; category?: MemoryCategory; status?: 'active' | 'probationary' | 'archived' }
     ): Promise<MemoryFact[]> => ipcRenderer.invoke('memory:update', id, patch),
     approve: (id: string): Promise<MemoryFact[]> => ipcRenderer.invoke('memory:approve', id),
     resolve: (id: string, action: MemoryContradictionAction): Promise<MemoryFact[]> =>
       ipcRenderer.invoke('memory:resolve', id, action),
-    remove: (id: string): Promise<MemoryFact[]> => ipcRenderer.invoke('memory:remove', id),
-    autoExtract: (sessionId: string): Promise<MemoryFact[]> => ipcRenderer.invoke('memory:autoExtract', sessionId)
+    remove: (id: string, createAntiFact?: boolean): Promise<MemoryFact[]> =>
+      ipcRenderer.invoke('memory:remove', id, createAntiFact),
+    autoExtract: (sessionId: string): Promise<MemoryFact[]> => ipcRenderer.invoke('memory:autoExtract', sessionId),
+    consolidate: (): Promise<{ promoted: string[]; archived: string[]; merged: any[]; events: ConsolidationEvent[] }> =>
+      ipcRenderer.invoke('memory:consolidate'),
+    log: (): Promise<ConsolidationEvent[]> => ipcRenderer.invoke('memory:log')
   },
   calendar: {
     load: (): Promise<CalendarEvent[]> => ipcRenderer.invoke('calendar:load'),

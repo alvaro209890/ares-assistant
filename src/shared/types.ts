@@ -68,7 +68,7 @@ export interface AppConfig {
   }
   memory: {
     autoExtract: boolean // extrair fatos úteis da conversa automaticamente
-    autoApprove: boolean // true = salva direto; false = fica pendente para revisão
+    autoApprove: boolean // descontinuado — mantido por compatibilidade de JSON salvo; ignorado pela lógica nova
   }
 }
 
@@ -167,15 +167,37 @@ export const MEMORY_CATEGORY_LABEL: Record<MemoryCategory, string> = {
   outros: 'Outros'
 }
 
+/** Orçamento rígido (em caracteres) do bloco de memória injetado no system prompt. */
+export const MEMORY_BUDGET_CHARS = 2000
+
+/** Categorias consideradas de baixo risco para promoção direta (confiança ≥ 0.8). */
+export const LOW_RISK_CATEGORIES: MemoryCategory[] = [
+  'interesses',
+  'projetos',
+  'rotina',
+  'preferencias'
+]
+
 export type MemoryTarget = 'user' | 'memory'
 export type MemoryContradictionAction = 'keep_old' | 'update_to_new' | 'merge'
+
+// 'pending' mantido por compatibilidade de migração (normalizado para 'probationary').
+export type MemoryStatus = 'active' | 'probationary' | 'archived' | 'pending'
+
+/** Evento registrado durante consolidação ou evolução de memória (timeline). */
+export interface ConsolidationEvent {
+  kind: 'learned' | 'promoted' | 'merged' | 'forgotten' | 'expired' | 'corroborated'
+  factId: string
+  text: string
+  ts: number
+}
 
 export interface MemoryFact {
   id: string
   text: string
   category: MemoryCategory // default 'outros'
   source: 'manual' | 'auto' // origem do fato
-  status: 'active' | 'pending' // pending = aguardando revisão do usuário
+  status: MemoryStatus // active = confirmado; probationary = usável mas provisório; archived = fora do prompt
   createdAt: number
   updatedAt?: number
   target?: MemoryTarget // user = perfil/preferências; memory = notas operacionais do agente
@@ -187,6 +209,12 @@ export interface MemoryFact {
   expiresAt?: number // memórias temporárias/contexto de sessão expiram após este horário
   conflictWith?: string // id do fato ativo que conflita com esta pendência
   conflictQuestion?: string // pergunta pronta para o Ares esclarecer com o usuário
+  // --- Campos do sistema autônomo ---
+  corroborations?: number // vezes que o fato foi re-extraído/confirmado
+  lastCorroboratedAt?: number // epoch ms da última corroboração
+  score?: number // score calculado (decaimento + reforço), usado na seleção por orçamento
+  antiFact?: boolean // true = anti-fato ("NÃO assumir que X"), bloqueia reaprendizado
+  mergedFrom?: string[] // IDs dos fatos originais fundidos neste
 }
 
 export interface StoredMessage {

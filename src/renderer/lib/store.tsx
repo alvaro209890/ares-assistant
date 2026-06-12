@@ -170,7 +170,7 @@ interface AresStore {
   briefingOpen: boolean
   error: string | null
   status: string
-  actionToast: string | null
+  actionToast: React.ReactNode | null
   hiveWorkers: HiveWorkerStatus[]
   taskProgress: TaskProgressEvent | null
 
@@ -197,10 +197,11 @@ interface AresStore {
   renameSession: (id: string, title: string) => Promise<void>
   deleteSession: (id: string) => Promise<void>
   addMemory: (text: string, category?: MemoryCategory) => Promise<void>
-  updateMemory: (id: string, patch: { text?: string; category?: MemoryCategory; status?: 'active' | 'pending' }) => Promise<void>
+  updateMemory: (id: string, patch: { text?: string; category?: MemoryCategory; status?: 'active' | 'probationary' | 'archived' }) => Promise<void>
   approveMemory: (id: string) => Promise<void>
   resolveMemory: (id: string, action: MemoryContradictionAction) => Promise<void>
-  removeMemory: (id: string) => Promise<void>
+  removeMemory: (id: string, createAntiFact?: boolean) => Promise<void>
+  consolidateMemory: () => Promise<any>
   addEvent: (event: {
     title: string
     whenISO: string
@@ -264,7 +265,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   const [briefingOpen, setBriefingOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState('')
-  const [actionToast, setActionToast] = useState<string | null>(null)
+  const [actionToast, setActionToast] = useState<React.ReactNode | null>(null)
   const [hiveWorkers, setHiveWorkers] = useState<HiveWorkerStatus[]>(HIVE_IDLE)
   const [taskProgress, setTaskProgress] = useState<TaskProgressEvent | null>(null)
 
@@ -280,8 +281,9 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   // Comando dito ENQUANTO o Ares trabalhava: roda assim que a tarefa atual terminar.
   const pendingVoiceCmdRef = useRef<string | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const memoryRef = useRef<MemoryFact[]>([])
 
-  const showToast = useCallback((msg: string) => {
+  const showToast = useCallback((msg: React.ReactNode) => {
     setActionToast(msg)
     if (toastTimer.current) clearTimeout(toastTimer.current)
     toastTimer.current = setTimeout(() => setActionToast(null), 4200)
@@ -337,6 +339,10 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     },
     [voiceOpts]
   )
+
+  useEffect(() => {
+    memoryRef.current = memory
+  }, [memory])
 
   useEffect(() => {
     let cancelled = false
@@ -647,9 +653,34 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
         void refreshWidgets()
         // Auto-extração de fatos: roda em segundo plano para não atrasar a fala.
         if (configRef.current?.memory.autoExtract) {
+          const oldMem = memoryRef.current || []
           void window.ares.memory
             .autoExtract(sid)
-            .then((mem) => setMemory(mem))
+            .then((newMem) => {
+              setMemory(newMem)
+              const added = newMem.filter((nf) => !oldMem.some((of) => of.id === nf.id))
+              if (added.length > 0) {
+                const first = added[0]
+                const textSnippet = first.text.length > 30 ? first.text.slice(0, 30) + '...' : first.text
+                const msg = (
+                  <span className="flex items-center gap-2">
+                    🧠 Memorizado: "{textSnippet}"
+                    <button
+                      className="ml-2 font-semibold text-cyan-300 hover:text-cyan-100 underline focus:outline-none"
+                      onClick={async (e) => {
+                        e.stopPropagation()
+                        const updated = await window.ares.memory.remove(first.id)
+                        setMemory(updated)
+                        showToast('Memória desfeita')
+                      }}
+                    >
+                      Desfazer
+                    </button>
+                  </span>
+                )
+                showToast(msg)
+              }
+            })
             .catch(() => {})
         }
         busyRef.current = false
@@ -1071,24 +1102,29 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   }, [showToast])
 
   const updateMemory = useCallback(
-    async (id: string, patch: { text?: string; category?: MemoryCategory; status?: 'active' | 'pending' }) => {
+    async (id: string, patch: { text?: string; category?: MemoryCategory; status?: 'active' | 'probationary' | 'archived' }) => {
       setMemory(await window.ares.memory.update(id, patch))
     },
     []
   )
 
   const approveMemory = useCallback(async (id: string) => {
-    setMemory(await window.ares.memory.approve(id))
-    showToast('fato confirmado')
-  }, [showToast])
+    // Mantido como no-op para retrocompatibilidade
+  }, [])
 
   const resolveMemory = useCallback(async (id: string, action: MemoryContradictionAction) => {
     setMemory(await window.ares.memory.resolve(id, action))
     showToast('conflito de memoria resolvido')
   }, [showToast])
 
-  const removeMemory = useCallback(async (id: string) => {
-    setMemory(await window.ares.memory.remove(id))
+  const removeMemory = useCallback(async (id: string, createAntiFact?: boolean) => {
+    setMemory(await window.ares.memory.remove(id, createAntiFact))
+  }, [])
+
+  const consolidateMemory = useCallback(async () => {
+    const res = await window.ares.memory.consolidate()
+    setMemory(await window.ares.memory.load())
+    return res
   }, [])
 
   const addEvent = useCallback(
@@ -1328,6 +1364,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     approveMemory,
     resolveMemory,
     removeMemory,
+    consolidateMemory,
     addEvent,
     removeEvent,
     saveLists,

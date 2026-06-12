@@ -55,7 +55,8 @@ import {
   loadReminders,
   userDataDir,
   codingPreferencesSummary,
-  sessionContextSummary
+  sessionContextSummary,
+  getAntiFactsForExtractor
 } from './data'
 import { controlPromptContext } from './control'
 import { codePromptContext } from './code'
@@ -137,7 +138,7 @@ function applyMutations(acoes: Acao[]): { board: Board; notes: string[]; changed
       notes.push('memória atualizada')
     } else if (a.tipo === 'memoria.remover' && a.fato) {
       const f = loadMemory().find((x) => norm(x.text).includes(norm(a.fato)))
-      if (f) removeFact(f.id)
+      if (f) removeFact(f.id, true)
     } else if (a.tipo === 'evento.criar' && a.titulo && a.quando) {
       addEvent({
         title: String(a.titulo),
@@ -445,11 +446,14 @@ export async function extractFacts(sessionId: string): Promise<MemoryFact[]> {
   if (!s || s.messages.length < 2) return loadMemory()
   const recent = s.messages.slice(-10).map((m) => `${m.role === 'user' ? 'Usuário' : 'ARES'}: ${m.content}`).join('\n')
   const known = memorySummary(800)
+  const antiFacts = getAntiFactsForExtractor()
+  const antiFactsPrompt = antiFacts ? `\n\nAnti-fatos (NÃO reaprender):\n${antiFacts}` : ''
   const sys =
     'Você extrai memória curada estilo Hermes: fatos DURADOUROS e úteis sobre o usuário, preferências, correções, perfil, rotina, trabalho, projetos, restrições e interesses. ' +
     'Ignore pedidos pontuais, progresso temporário, logs, saídas brutas, chaves, tokens, prompts, small talk e qualquer coisa efêmera. Não repita fatos já conhecidos. ' +
     'Responda APENAS JSON: {"fatos":[{"texto":"...","categoria":"perfil|preferencias|rotina|trabalho|projetos|restricoes|interesses|outros","confianca":0.0-1.0,"evidencia":"trecho curto"}]}. ' +
-    'Se nada relevante, responda {"fatos":[]}. Máximo 3 fatos; cada texto deve ser curto, denso e útil em sessões futuras.'
+    'Se nada relevante, responda {"fatos":[]}. Máximo 3 fatos; cada texto deve ser curto, denso e útil em sessões futuras.' +
+    antiFactsPrompt
   let raw = ''
   try {
     raw = await chatJSON(
@@ -466,14 +470,12 @@ export async function extractFacts(sessionId: string): Promise<MemoryFact[]> {
   try {
     const obj = JSON.parse(raw.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim())
     const fatos: { texto?: string; categoria?: string; confianca?: number; evidencia?: string }[] = Array.isArray(obj?.fatos) ? obj.fatos : []
-    const status = cfg.memory.autoApprove ? 'active' : 'pending'
     for (const f of fatos.slice(0, 3)) {
       const texto = String(f?.texto || '').trim()
       if (texto.length > 3) {
         addFact(texto, {
           category: asCategory(f?.categoria),
           source: 'auto',
-          status,
           confidence: typeof f.confianca === 'number' ? f.confianca : undefined,
           evidence: f.evidencia ? [String(f.evidencia)] : undefined
         })

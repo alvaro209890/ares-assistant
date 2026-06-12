@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, session, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, session, shell, powerMonitor } from 'electron'
 import { join } from 'path'
 import { ensureConfig, readConfig, updateConfig } from './config'
 import { loadBoard, saveBoard } from './tasks'
@@ -27,6 +27,8 @@ import {
   approveFact,
   resolveContradiction,
   removeFact,
+  runConsolidation,
+  loadMemoryLog,
   loadEvents,
   addEvent,
   removeEvent,
@@ -141,6 +143,23 @@ app.whenReady().then(() => {
     .then((ok) => logger.info('piper', ok ? 'voz neural pronta' : 'Piper indisponível (usando Web Speech)'))
     .catch((e) => logger.warn('piper', 'falha ao preparar o Piper', e))
 
+  // Ciclo de consolidação automática ("sono")
+  let lastConsolidationTime = Date.now()
+  setInterval(() => {
+    try {
+      const now = Date.now()
+      const isSevenDays = now - lastConsolidationTime > 7 * 24 * 60 * 60 * 1000
+      const isIdle = powerMonitor.getSystemIdleState(1800) === 'idle'
+      if (isSevenDays || (isIdle && now - lastConsolidationTime > 24 * 60 * 60 * 1000)) {
+        logger.info('memory', 'Iniciando ciclo de consolidação automática de memória (sono)')
+        runConsolidation()
+        lastConsolidationTime = now
+      }
+    } catch (err) {
+      logger.error('memory', `Falha na consolidação automática: ${errToMessage(err)}`)
+    }
+  }, 15 * 60 * 1000)
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -173,13 +192,15 @@ function registerIpc(): void {
   ipcMain.handle('memory:add', (_e, text: string, category?: MemoryCategory) =>
     addFact(text, { category, source: 'manual', status: 'active' })
   )
-  ipcMain.handle('memory:update', (_e, id: string, patch: { text?: string; category?: MemoryCategory; status?: 'active' | 'pending' }) =>
+  ipcMain.handle('memory:update', (_e, id: string, patch: { text?: string; category?: MemoryCategory; status?: 'active' | 'probationary' | 'archived' }) =>
     updateFact(id, patch)
   )
   ipcMain.handle('memory:approve', (_e, id: string) => approveFact(id))
   ipcMain.handle('memory:resolve', (_e, id: string, action: MemoryContradictionAction) => resolveContradiction(id, action))
-  ipcMain.handle('memory:remove', (_e, id: string) => removeFact(id))
+  ipcMain.handle('memory:remove', (_e, id: string, createAntiFact?: boolean) => removeFact(id, createAntiFact))
   ipcMain.handle('memory:autoExtract', (_e, sessionId: string) => extractFacts(sessionId))
+  ipcMain.handle('memory:consolidate', () => runConsolidation())
+  ipcMain.handle('memory:log', () => loadMemoryLog())
 
   // Calendário
   ipcMain.handle('calendar:load', () => loadEvents())

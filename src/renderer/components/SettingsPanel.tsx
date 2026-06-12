@@ -212,14 +212,8 @@ export default function SettingsPanel(): JSX.Element {
                 checked={config.memory.autoExtract}
                 onChange={(v) => saveConfig({ memory: { autoExtract: v } })}
               />
-              <Toggle
-                label="Aprovar fatos automaticamente"
-                checked={config.memory.autoApprove}
-                onChange={(v) => saveConfig({ memory: { autoApprove: v } })}
-              />
               <p className="text-[11px] text-cyan-200/45">
-                Com aprovação automática desligada, os fatos extraídos ficam em “Para revisar” na tela Memória antes de serem
-                salvos.
+                O ARES extrai e gerencia memórias de forma totalmente autônoma. Fatos novos entram em período de teste (probatório) e são consolidados nas conversações seguintes ou expiram sozinhos.
               </p>
             </Section>
 
