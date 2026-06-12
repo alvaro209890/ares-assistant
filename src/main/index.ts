@@ -19,6 +19,7 @@ import { startReminders } from './notify'
 import { synthesize, listPiperVoices, isPiperReady, ensurePiper } from './piper'
 import { shutdownPiperPool } from './piperEngine'
 import { demoExporter } from './demoExporter'
+import { demoManager } from './demoManager'
 import { initLogger, logger, getRecentLogs, errToMessage } from './logger'
 import { getWeather, getWeatherAt, getNews, reverseGeocode } from './tools'
 import {
@@ -151,7 +152,6 @@ app.whenReady().then(() => {
     .catch((e) => logger.warn('piper', 'falha ao preparar o Piper', e))
 
   // Integração Modo Apresentação (Demo)
-  const { demoManager } = require('./demoManager')
   demoManager.on('state-changed', (state: any) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('demo:state', state)
   })
@@ -221,19 +221,15 @@ function registerIpc(): void {
 
   // Demo Mode
   ipcMain.handle('demo:start', () => {
-    const { demoManager } = require('./demoManager')
     demoManager.start()
   })
   ipcMain.handle('demo:stop', () => {
-    const { demoManager } = require('./demoManager')
     demoManager.stop()
   })
   ipcMain.handle('demo:pause', () => {
-    const { demoManager } = require('./demoManager')
     demoManager.pause()
   })
   ipcMain.handle('demo:resume', () => {
-    const { demoManager } = require('./demoManager')
     demoManager.resume()
   })
 
@@ -478,9 +474,6 @@ function registerIpc(): void {
       }
     }
   )
-
-  ipcMain.handle('sentinel:stop', (_e, sid: string, id: string) => stopSentinels(sid, id))
-  ipcMain.handle('sentinel:list', (_e, sid: string) => listSentinels(sid))
 
   // Demo Export
   ipcMain.handle('demo:startRecording', () => { demoExporter.startRecording(); return true })
