@@ -708,3 +708,20 @@ export interface WorkspaceWorklog {
   entries: WorklogEntry[]
 }
 
+// --- Modo Apresentação (Demo Mode) ---
+export interface DemoSlide {
+  id: string
+  title: string
+  points: string[]
+  codeSnippet?: string
+  filePath?: string
+  lineRange?: [number, number]
+  speechPhraseId?: string // Usado para sincronizar o slide com o início da fala
+}
+
+export interface DemoState {
+  isActive: boolean
+  isPaused: boolean
+  currentSlide?: DemoSlide
+}
+

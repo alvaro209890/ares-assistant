@@ -92,7 +92,8 @@ export const MUTATION_REQUIRED: Record<string, string[]> = {
   'lista.limpar': ['lista'],
   'nota.salvar': ['texto'],
   'lembrete.criar': ['texto'],
-  'lembrete.remover': ['texto']
+  'lembrete.remover': ['texto'],
+  'demo.slide': ['titulo']
 }
 
 /** Valida uma ação: tipo conhecido (consulta ou mutação) e campos obrigatórios presentes. */

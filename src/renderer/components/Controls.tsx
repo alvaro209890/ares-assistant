@@ -86,6 +86,16 @@ export default function Controls(): JSX.Element {
         >
           {wakeOn ? `● EXIGIR “${wake.toUpperCase()}”` : `○ EXIGIR “${wake.toUpperCase()}”`}
         </button>
+        {/* Exportar Demo Mode */}
+        {aresState !== 'thinking' && (
+          <button
+            onClick={() => window.ares.demo.export().then(ok => { if (ok) alert('Apresentação exportada com sucesso!') })}
+            className="rounded-full border border-cyan-300/20 px-3 py-1 text-xs title-track text-cyan-200/60 transition hover:border-cyan-300/60 hover:text-cyan-100"
+            title="Exportar apresentação do Demo Mode (ZIP)"
+          >
+            ⬇ EXPORTAR DEMO
+          </button>
+        )}
       </div>
     </div>
   )

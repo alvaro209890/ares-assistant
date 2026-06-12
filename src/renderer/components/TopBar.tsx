@@ -30,7 +30,7 @@ function SentinelLogPre({ buffer }: { buffer: string }): JSX.Element {
   )
 }
 
-type Screen = 'assistant' | 'office' | 'tasks' | 'calendar' | 'reminders' | 'lists' | 'memory' | 'models' | 'system'
+type Screen = 'assistant' | 'office' | 'tasks' | 'calendar' | 'reminders' | 'lists' | 'memory' | 'models' | 'system' | 'demo'
 
 const tabs: { id: Screen; label: string; hint: string; icon: JSX.Element }[] = [
   { id: 'assistant', label: 'Assistente', hint: 'Alt+1', icon: <AssistantIcon /> },
@@ -41,7 +41,8 @@ const tabs: { id: Screen; label: string; hint: string; icon: JSX.Element }[] = [
   { id: 'memory', label: 'Memória', hint: 'Alt+6', icon: <MemoryIcon /> },
   { id: 'models', label: 'Modelos de IA', hint: 'Alt+7', icon: <ChipIcon /> },
   { id: 'system', label: 'Sistema', hint: 'Alt+8', icon: <SystemIcon /> },
-  { id: 'office', label: 'Escritório', hint: 'Alt+9', icon: <HiveIcon /> }
+  { id: 'office', label: 'Escritório', hint: 'Alt+9', icon: <HiveIcon /> },
+  { id: 'demo', label: 'Apresentação', hint: 'Alt+0', icon: <PlayIcon /> }
 ]
 
 function latestOfficeActivity(conversation: ConvMsg[]): AgentActivityEvent | null {
@@ -395,6 +396,14 @@ function SpeakerOffIcon(): JSX.Element {
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
       <path d="M4 9v6h4l5 4V5L9 8" strokeLinejoin="round" />
       <path d="M3 3l18 18M17 9l4 4M21 9l-4 4" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function PlayIcon(): JSX.Element {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+      <polygon points="5 3 19 12 5 21 5 3" strokeLinejoin="round" />
     </svg>
   )
 }

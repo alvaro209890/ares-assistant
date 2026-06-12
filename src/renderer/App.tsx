@@ -17,6 +17,7 @@ import Lists from './screens/Lists'
 import Memory from './screens/Memory'
 import Models from './screens/Models'
 import System from './screens/System'
+import Demo from './screens/Demo'
 
 export default function App(): JSX.Element {
   const { ready, screen, error, clearError, actionToast, recording, taskProgress } = useAres()
@@ -41,6 +42,7 @@ export default function App(): JSX.Element {
               {screen === 'memory' && <Memory key="m" />}
               {screen === 'models' && <Models key="ia" />}
               {screen === 'system' && <System key="s" />}
+              {screen === 'demo' && <Demo key="demo" />}
             </AnimatePresence>
           </main>
         </div>

@@ -58,6 +58,7 @@ AÇÕES DE MUTAÇÃO (aplique quando o usuário pedir):
 - tarefa.lembrete.definir {titulo, quando(ISO)}
 - coluna.criar {titulo}   |   coluna.renomear {titulo, novoTitulo}   |   coluna.remover {titulo}
 - memoria.salvar {fato, categoria?(perfil|preferencias|rotina|trabalho|projetos|restricoes|interesses|outros), evidencia?}   |   memoria.remover {fato}
+- demo.slide {titulo, pontos?(["..."]), codigo?, arquivo?, linhaInicial?, linhaFinal?}   (MODO APRESENTAÇÃO: exibe um slide na tela enquanto você fala. Use quando o usuário pedir uma "demo", "apresentação" ou "mostra como ficou" para explicar o código/funcionalidade visualmente. Se passar arquivo/linha, o código será destacado.)
 - memoria.buscar {consulta, limite?}   (busca conversas passadas quando o usuário perguntar "lembra quando...", "já falamos sobre..." ou precisar recuperar contexto antigo)
 - evento.criar {titulo, quando(ISO), descricao?, lembreteMin?(minutos antes), repetir?(none|daily|weekly|monthly)}   |   evento.remover {titulo}
 - lista.criar {titulo}   |   lista.adicionar {item, lista?}   |   lista.marcar {item, lista?, feito?(bool)}   |   lista.removerItem {item, lista?}   |   lista.limpar {lista}   (listas simples: compras, afazeres)

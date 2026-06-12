@@ -28,7 +28,9 @@ import type {
   TtsStatus,
   UserLocation,
   WeatherResult,
-  SentinelEvent
+  SentinelEvent,
+  DemoSlide,
+  DemoState
 } from '../shared/types'
 
 // API segura exposta ao renderer como window.ares.
@@ -59,6 +61,25 @@ const api = {
     consolidate: (): Promise<{ promoted: string[]; archived: string[]; merged: any[]; events: ConsolidationEvent[] }> =>
       ipcRenderer.invoke('memory:consolidate'),
     log: (): Promise<ConsolidationEvent[]> => ipcRenderer.invoke('memory:log')
+  },
+  demo: {
+    start: (): Promise<void> => ipcRenderer.invoke('demo:start'),
+    stop: (): Promise<void> => ipcRenderer.invoke('demo:stop'),
+    pause: (): Promise<void> => ipcRenderer.invoke('demo:pause'),
+    resume: (): Promise<void> => ipcRenderer.invoke('demo:resume'),
+    startRecording: (): Promise<void> => ipcRenderer.invoke('demo:startRecording'),
+    stopRecording: (): Promise<void> => ipcRenderer.invoke('demo:stopRecording'),
+    export: (): Promise<boolean> => ipcRenderer.invoke('demo:export'),
+    onSlide: (callback: (slide: DemoSlide) => void) => {
+      const listener = (_event: any, slide: DemoSlide) => callback(slide)
+      ipcRenderer.on('demo:slide', listener)
+      return () => ipcRenderer.off('demo:slide', listener)
+    },
+    onStateChange: (callback: (state: DemoState) => void) => {
+      const listener = (_event: any, state: DemoState) => callback(state)
+      ipcRenderer.on('demo:state', listener)
+      return () => ipcRenderer.off('demo:state', listener)
+    }
   },
   calendar: {
     load: (): Promise<CalendarEvent[]> => ipcRenderer.invoke('calendar:load'),

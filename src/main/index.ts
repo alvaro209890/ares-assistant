@@ -18,6 +18,7 @@ import { getProvider } from '../shared/providers'
 import { startReminders } from './notify'
 import { synthesize, listPiperVoices, isPiperReady, ensurePiper } from './piper'
 import { shutdownPiperPool } from './piperEngine'
+import { demoExporter } from './demoExporter'
 import { initLogger, logger, getRecentLogs, errToMessage } from './logger'
 import { getWeather, getWeatherAt, getNews, reverseGeocode } from './tools'
 import {
@@ -80,6 +81,10 @@ if (process.platform === 'linux') {
 }
 
 let mainWindow: BrowserWindow | null = null
+
+export function getMainWindow(): BrowserWindow | null {
+  return mainWindow
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -145,6 +150,15 @@ app.whenReady().then(() => {
     .then((ok) => logger.info('piper', ok ? 'voz neural pronta' : 'Piper indisponível (usando Web Speech)'))
     .catch((e) => logger.warn('piper', 'falha ao preparar o Piper', e))
 
+  // Integração Modo Apresentação (Demo)
+  const { demoManager } = require('./demoManager')
+  demoManager.on('state-changed', (state: any) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('demo:state', state)
+  })
+  demoManager.on('slide', (slide: any) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('demo:slide', slide)
+  })
+
   // Ciclo de consolidação automática ("sono")
   let lastConsolidationTime = Date.now()
   setInterval(() => {
@@ -204,6 +218,24 @@ function registerIpc(): void {
   ipcMain.handle('memory:autoExtract', (_e, sessionId: string) => extractFacts(sessionId))
   ipcMain.handle('memory:consolidate', () => runConsolidation())
   ipcMain.handle('memory:log', () => loadMemoryLog())
+
+  // Demo Mode
+  ipcMain.handle('demo:start', () => {
+    const { demoManager } = require('./demoManager')
+    demoManager.start()
+  })
+  ipcMain.handle('demo:stop', () => {
+    const { demoManager } = require('./demoManager')
+    demoManager.stop()
+  })
+  ipcMain.handle('demo:pause', () => {
+    const { demoManager } = require('./demoManager')
+    demoManager.pause()
+  })
+  ipcMain.handle('demo:resume', () => {
+    const { demoManager } = require('./demoManager')
+    demoManager.resume()
+  })
 
   // Calendário
   ipcMain.handle('calendar:load', () => loadEvents())
@@ -316,6 +348,11 @@ function registerIpc(): void {
   ipcMain.handle('tts:synthesize', async (_e, text: string, opts: { voice?: string; rate?: number }) => {
     try {
       const buf = await synthesize(text, opts)
+      // Grava o áudio para o DemoExporter se estiver ativo
+      demoExporter.recordPhrase(text, buf).catch(err => {
+        logger.error('demo', 'Falha ao registrar áudio no demoExporter', err)
+      })
+
       return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer
     } catch (e) {
       logger.warn('tts', 'síntese Piper falhou (renderer cai para Web Speech)', e)
@@ -441,4 +478,12 @@ function registerIpc(): void {
       }
     }
   )
+
+  ipcMain.handle('sentinel:stop', (_e, sid: string, id: string) => stopSentinels(sid, id))
+  ipcMain.handle('sentinel:list', (_e, sid: string) => listSentinels(sid))
+
+  // Demo Export
+  ipcMain.handle('demo:startRecording', () => { demoExporter.startRecording(); return true })
+  ipcMain.handle('demo:stopRecording', () => { demoExporter.stopRecording(); return true })
+  ipcMain.handle('demo:export', async () => await demoExporter.exportZip())
 }

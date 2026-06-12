@@ -22,7 +22,8 @@ import type {
   TaskProgressEvent,
   TtsStatus,
   UserLocation,
-  WeatherResult
+  WeatherResult,
+  DemoState
 } from '../../shared/types'
 import * as audio from './audio'
 import type { SpeakOptions } from './tts'
@@ -110,7 +111,7 @@ export function finalSpeechFallback(
   return ''
 }
 
-type Screen = 'assistant' | 'office' | 'tasks' | 'calendar' | 'reminders' | 'lists' | 'memory' | 'models' | 'system'
+type Screen = 'assistant' | 'office' | 'tasks' | 'calendar' | 'reminders' | 'lists' | 'memory' | 'models' | 'system' | 'demo'
 
 // Estado inicial da Colmeia: os quatro especialistas ociosos.
 export const HIVE_IDLE: HiveWorkerStatus[] = [
@@ -173,6 +174,7 @@ interface AresStore {
   actionToast: React.ReactNode | null
   hiveWorkers: HiveWorkerStatus[]
   taskProgress: TaskProgressEvent | null
+  demoState: DemoState | null
 
   navigate: (s: Screen) => void
   openSettings: (b: boolean) => void
@@ -248,6 +250,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   const [sessions, setSessions] = useState<SessionMeta[]>([])
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
   const [board, setBoardState] = useState<Board>(emptyBoard)
+  const [demoState, setDemoState] = useState<DemoState | null>(null)
   const [memory, setMemory] = useState<MemoryFact[]>([])
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [lists, setLists] = useState<Checklist[]>([])
@@ -524,6 +527,16 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
       setTaskProgress((current) => mergeTaskProgress(current, event))
     })
     return off
+  }, [])
+
+  // Demo Mode
+  useEffect(() => {
+    if (!window.ares.demo) return
+    const off = window.ares.demo.onStateChange((state) => {
+      setDemoState(state)
+      if (state.isActive) setScreen('demo')
+    })
+    return () => { off() }
   }, [])
 
   // Espelha o estado do Ares na mini-orbe flutuante.
@@ -1423,6 +1436,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     actionToast,
     hiveWorkers,
     taskProgress,
+    demoState,
     navigate,
     openSettings,
     openHelp,

@@ -12,6 +12,7 @@ import { codeWriteCommands } from './codeWriteCommands'
 import { conversationCommands } from './conversationCommands'
 import { hiveCommands } from './hiveCommands'
 import { systemCommands } from './systemCommands'
+import { demoCommands } from './demoCommands'
 
 export { CommandRegistry } from './types'
 export type { ToolCommand, ToolContext, ToolCategory } from './types'
@@ -29,6 +30,7 @@ export function createDefaultRegistry(): CommandRegistry {
     .registerAll(codeQualityCommands)
     .registerAll(hiveCommands)
     .registerAll(briefingCommands)
+    .registerAll(demoCommands)
 }
 
 // Instância padrão usada pelo router. Tests podem criar um registry separado e
