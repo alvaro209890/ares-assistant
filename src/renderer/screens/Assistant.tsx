@@ -41,11 +41,11 @@ export default function Assistant(): JSX.Element {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="flex h-full min-h-[760px] flex-col gap-3 p-5"
+      className="flex h-full min-h-0 flex-col gap-3 p-5"
     >
       <ModelBar />
       <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_400px]">
-      <section className="ares-orb-stage glass relative min-h-[620px] min-w-0 overflow-hidden rounded-2xl">
+      <section className="ares-orb-stage glass relative min-h-0 min-w-0 overflow-hidden rounded-2xl">
         <div className="ares-stage-grid" />
         <div className="ares-stage-vignette" />
         <div className="ares-stage-scan" />
@@ -123,7 +123,7 @@ export default function Assistant(): JSX.Element {
         </div>
       </section>
 
-      <ChatPanel className="glass flex min-h-[420px] min-w-0 flex-col rounded-2xl p-4 lg:min-h-0" />
+      <ChatPanel className="glass flex min-h-0 min-w-0 flex-col rounded-2xl p-4" />
       </div>
     </motion.div>
   )

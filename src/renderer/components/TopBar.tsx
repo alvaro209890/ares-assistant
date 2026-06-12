@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
 import { motion } from 'framer-motion'
-import { useAres, type ConvMsg } from '../lib/store'
-import type { AgentActivityEvent } from '../../shared/types'
-import AresOffice from './AresOffice'
+import { useAres } from '../lib/store'
 
 function CloseIcon(): JSX.Element {
   return (
@@ -45,20 +43,6 @@ const tabs: { id: Screen; label: string; hint: string; icon: JSX.Element }[] = [
   { id: 'demo', label: 'Apresentação', hint: 'Alt+0', icon: <PlayIcon /> }
 ]
 
-function latestOfficeActivity(conversation: ConvMsg[]): AgentActivityEvent | null {
-  let outputFallback: AgentActivityEvent | null = null
-  for (let i = conversation.length - 1; i >= 0; i--) {
-    const activities = conversation[i].activities
-    if (!activities?.length) continue
-    for (let j = activities.length - 1; j >= 0; j--) {
-      const activity = activities[j]
-      if (activity.status !== 'output') return activity
-      if (!outputFallback) outputFallback = activity
-    }
-  }
-  return outputFallback
-}
-
 export default function TopBar(): JSX.Element {
   const {
     screen,
@@ -68,15 +52,10 @@ export default function TopBar(): JSX.Element {
     openPalette,
     config,
     saveConfig,
-    aresState,
-    metrics,
-    conversation,
-    status,
     sentinels,
     stopSentinel
   } = useAres()
   const muted = !config?.tts.enabled
-  const officeActivity = useMemo(() => latestOfficeActivity(conversation), [conversation])
   const [activeModalSentinelId, setActiveModalSentinelId] = useState<string | null>(null)
   const modalSentinel = useMemo(() => sentinels?.find((s) => s.id === activeModalSentinelId), [sentinels, activeModalSentinelId])
 
@@ -178,18 +157,6 @@ export default function TopBar(): JSX.Element {
           })}
         </div>
       )}
-
-      {/* Escritório do Ares — cenário interativo */}
-      <div className="my-2 flex min-h-0 flex-1 items-end justify-center overflow-hidden px-1">
-        <AresOffice
-          state={aresState}
-          userName={config?.ui.userName}
-          metrics={metrics ?? undefined}
-          activity={officeActivity ?? undefined}
-          statusText={status}
-          muted={muted}
-        />
-      </div>
 
       <div className="mt-auto grid gap-2">
         {config && (
