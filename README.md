@@ -151,6 +151,10 @@ Toda execucao de comando do modo programador (`codigo.comando`, `codigo.terminal
 
 O `spawnAsync` aplica timeout (mata o processo com SIGTERM e, se preciso, SIGKILL), limita a captura por fluxo, suporta `onChunk` (saida em tempo real, base para uma futura UI de terminal ao vivo) e aceita um `AbortSignal`. Cada turno cria um `AbortController` registrado por sessao em `src/main/running.ts`; **pressionar `Esc` interrompe** nao so a fala como qualquer comando/build/coder em andamento (IPC `code:cancel` -> `cancelSession`). Comandos interrompidos voltam com `ok: false` e a mensagem "Comando interrompido pelo usuario.".
 
+### Sentinela de Execucao (Execucao Vigiada)
+
+A **Sentinela de Execucao** (`codigo.observar`) roda processos de longa duracao em segundo plano (como servidores de desenvolvimento, executores de testes ou compilacoes continuas), vigia a saida em tempo real e reage a erros proativamente. Quando um erro acontece, o ARES extrai a causa raiz, a anuncia por voz e oferece despachar o depurador **Prometeu** com o log ja coletado. Se o usuario disser "sim" ou "depura", o subagente `subagente.depurar` e acionado diretamente. O ARES tambem detecta quando o erro e corrigido e o processo se recupera. O controle e visualizacao sao feitos via chips na barra lateral e um modal com terminal ao vivo cyberpunk. Veja `docs/SENTINELA.md`.
+
 ### Seguranca do terminal: analise por trecho
 
 O `classifyCommand` foi endurecido contra evasao. Antes, a classificacao casava o **comando inteiro** contra os prefixos seguros — entao `git status && rm -rf algo` casava o prefixo `git status` e era tratado como `allowed` (auto-executado, sem confirmacao). Agora:

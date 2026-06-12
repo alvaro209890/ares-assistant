@@ -48,6 +48,8 @@ import {
   removeReminder,
   setReminders
 } from './data'
+import { resolveCodeWorkspace } from './code'
+import { startSentinel, stopSentinels, stopAllSentinels, listSentinels } from './sentinelManager'
 import type {
   AppConfig,
   AresState,
@@ -172,6 +174,7 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {
   destroyTray()
   shutdownPiperPool()
+  stopAllSentinels()
   killAllBackgroundProcesses()
 })
 
@@ -263,6 +266,18 @@ function registerIpc(): void {
   })
   // Cancela comandos/coder em execução na sessão (ex.: parar um build travado pelo Esc).
   ipcMain.handle('code:cancel', (_e, sessionId: string): number => cancelSession(sessionId))
+
+  // Sentinelas de processos em segundo plano
+  ipcMain.handle('sentinel:start', async (_e, sessionId: string, command: string, path?: string) => {
+    const root = resolveCodeWorkspace(readConfig(), path)
+    return startSentinel(sessionId, command, root)
+  })
+  ipcMain.handle('sentinel:stop', (_e, sessionId: string, target?: string): number => {
+    return stopSentinels(sessionId, target)
+  })
+  ipcMain.handle('sentinel:list', (_e, sessionId: string): any[] => {
+    return listSentinels(sessionId)
+  })
 
   // Briefing do dia + diagnóstico do sistema
   ipcMain.handle('briefing:get', async () => buildBriefing(readConfig()))

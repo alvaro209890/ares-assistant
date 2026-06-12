@@ -1,8 +1,34 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { useAres, type ConvMsg } from '../lib/store'
 import type { AgentActivityEvent } from '../../shared/types'
 import AresOffice from './AresOffice'
+
+function CloseIcon(): JSX.Element {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+    </svg>
+  )
+}
+
+function SentinelLogPre({ buffer }: { buffer: string }): JSX.Element {
+  const ref = useRef<HTMLPreElement>(null)
+  useEffect(() => {
+    if (ref.current) {
+      ref.current.scrollTop = ref.current.scrollHeight
+    }
+  }, [buffer])
+
+  return (
+    <pre
+      ref={ref}
+      className="flex-1 font-mono text-xs text-left bg-black/40 p-4 rounded-xl border border-cyan-300/10 overflow-y-auto select-text text-cyan-300 scrollbar-thin whitespace-pre-wrap break-all"
+    >
+      {buffer || 'Aguardando saída do processo...'}
+    </pre>
+  )
+}
 
 type Screen = 'assistant' | 'office' | 'tasks' | 'calendar' | 'reminders' | 'lists' | 'memory' | 'models' | 'system'
 
@@ -44,10 +70,14 @@ export default function TopBar(): JSX.Element {
     aresState,
     metrics,
     conversation,
-    status
+    status,
+    sentinels,
+    stopSentinel
   } = useAres()
   const muted = !config?.tts.enabled
   const officeActivity = useMemo(() => latestOfficeActivity(conversation), [conversation])
+  const [activeModalSentinelId, setActiveModalSentinelId] = useState<string | null>(null)
+  const modalSentinel = useMemo(() => sentinels?.find((s) => s.id === activeModalSentinelId), [sentinels, activeModalSentinelId])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -110,6 +140,44 @@ export default function TopBar(): JSX.Element {
         })}
       </nav>
 
+      {/* Sentinelas de Execução vigiando */}
+      {sentinels && sentinels.length > 0 && (
+        <div className="mt-4 px-1 flex flex-col gap-1.5 border-t border-cyan-300/10 pt-4">
+          <div className="text-[10px] text-cyan-200/40 uppercase tracking-widest font-mono mb-1">Sentinelas</div>
+          {sentinels.map((s) => {
+            const hasError = s.status === 'error'
+            const isRec = s.status === 'recovered'
+            return (
+              <button
+                key={s.id}
+                onClick={() => setActiveModalSentinelId(s.id)}
+                className={`relative flex items-center gap-2 overflow-hidden rounded-lg border px-2.5 py-1.5 text-left transition ${
+                  hasError
+                    ? 'border-rose-500/40 bg-rose-500/10 text-rose-200 hover:bg-rose-500/15'
+                    : isRec
+                      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/15'
+                      : 'border-cyan-300/15 bg-white/[0.02] text-cyan-200/80 hover:border-cyan-300/30 hover:text-cyan-50'
+                }`}
+              >
+                <span className="relative flex h-2 w-2">
+                  <span
+                    className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                      hasError ? 'bg-rose-400' : isRec ? 'bg-emerald-400' : 'bg-cyan-400'
+                    }`}
+                  />
+                  <span
+                    className={`relative inline-flex rounded-full h-2 w-2 ${
+                      hasError ? 'bg-rose-500' : isRec ? 'bg-emerald-500' : 'bg-cyan-500'
+                    }`}
+                  />
+                </span>
+                <span className="font-mono text-xs truncate flex-1">{s.command}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+
       {/* Escritório do Ares — cenário interativo */}
       <div className="my-2 flex min-h-0 flex-1 items-end justify-center overflow-hidden px-1">
         <AresOffice
@@ -171,6 +239,67 @@ export default function TopBar(): JSX.Element {
           <span>Configurações</span>
         </button>
       </div>
+
+      {/* Cyberpunk Terminal Modal */}
+      {modalSentinel && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+          <div className="glass-strong flex flex-col w-full max-w-3xl h-[80vh] rounded-2xl border border-cyan-500/20 overflow-hidden shadow-2xl relative">
+            <div className="flex items-center justify-between border-b border-cyan-300/10 bg-[#071124]/80 px-6 py-4">
+              <div>
+                <div className="text-[10px] text-cyan-400/60 uppercase tracking-widest font-mono">Sentinela de Execução</div>
+                <div className="text-md font-display font-semibold text-cyan-100">{modalSentinel.command}</div>
+              </div>
+              <button
+                onClick={() => setActiveModalSentinelId(null)}
+                className="text-cyan-200/60 hover:text-cyan-100 transition"
+              >
+                <CloseIcon />
+              </button>
+            </div>
+
+            <div className="flex-1 bg-[#020712] p-5 overflow-hidden flex flex-col">
+              <div className="flex items-center gap-4 text-xs font-mono mb-3 text-cyan-200/50">
+                <div>
+                  Status:{' '}
+                  <span
+                    className={
+                      modalSentinel.status === 'error'
+                        ? 'text-rose-400 animate-pulse font-bold'
+                        : modalSentinel.status === 'recovered'
+                          ? 'text-emerald-400'
+                          : 'text-cyan-400'
+                    }
+                  >
+                    {modalSentinel.status.toUpperCase()}
+                  </span>
+                </div>
+                <div>•</div>
+                <div className="truncate">Caminho: {modalSentinel.path}</div>
+              </div>
+
+              <SentinelLogPre buffer={modalSentinel.buffer} />
+            </div>
+
+            <div className="flex justify-end gap-3 border-t border-cyan-300/10 bg-[#071124]/50 px-6 py-4">
+              <button
+                onClick={() => {
+                  stopSentinel(modalSentinel.id)
+                  setActiveModalSentinelId(null)
+                }}
+                className="px-4 py-2 text-xs font-mono font-medium rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 transition duration-150"
+              >
+                PARAR SENTINELA
+              </button>
+              <button
+                onClick={() => setActiveModalSentinelId(null)}
+                className="px-4 py-2 text-xs font-mono font-medium rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-200 border border-cyan-500/30 transition duration-150"
+              >
+                FECHAR
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   )
 }

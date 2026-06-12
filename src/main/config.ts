@@ -199,7 +199,8 @@ const DEFAULT_CONFIG: AppConfig = {
     simpleMode: false,
     autostart: false,
     globalShortcut: false,
-    morningBriefing: false
+    morningBriefing: false,
+    sentinelVoice: 'voz'
   },
   memory: {
     autoExtract: true,

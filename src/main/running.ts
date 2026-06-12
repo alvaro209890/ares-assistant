@@ -4,6 +4,7 @@
 // sem derrubar nem travar o app. Puro (sem Electron), portanto testável.
 
 import { killAllBackgroundProcesses, killBackgroundProcesses } from './exec'
+import { stopSentinels, stopAllSentinels } from './sentinelManager'
 
 const bySession = new Map<string, Set<AbortController>>()
 
@@ -26,6 +27,7 @@ export function registerRun(sessionId: string, controller: AbortController): () 
 /** Aborta tudo que estiver rodando na sessão. Retorna quantos foram abortados. */
 export function cancelSession(sessionId: string): number {
   killBackgroundProcesses(sessionId)
+  stopSentinels(sessionId)
   const set = bySession.get(sessionId)
   if (!set) return 0
   let n = 0
@@ -42,6 +44,7 @@ export function cancelSession(sessionId: string): number {
 /** Aborta todas as execuções de todas as sessões (ex.: ao fechar o app). */
 export function cancelAll(): number {
   killAllBackgroundProcesses()
+  stopAllSentinels()
   let n = 0
   for (const id of [...bySession.keys()]) n += cancelSession(id)
   return n

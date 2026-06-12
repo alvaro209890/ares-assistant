@@ -235,6 +235,21 @@ export default function SettingsPanel(): JSX.Element {
                 O Ares fala primeiro no momento certo: bateria fraca, evento chegando em minutos e tarefas vencidas — com
                 cooldown e silêncio das 22h às 7h.
               </p>
+              <Field label="Sentinela de Execução (Voz)">
+                <Select
+                  ariaLabel="Sentinela de Execução"
+                  value={config.ui.sentinelVoice || 'voz'}
+                  onChange={(v) => saveConfig({ ui: { sentinelVoice: v as 'voz' | 'toast' | 'off' } })}
+                  options={[
+                    { value: 'voz', label: 'Voz e Toast' },
+                    { value: 'toast', label: 'Apenas Toast' },
+                    { value: 'off', label: 'Desativado' }
+                  ]}
+                />
+                <p className="mt-1 text-[11px] text-cyan-200/45">
+                  Vigia saídas em tempo real e reage a erros anunciando a causa raiz por voz ou apenas por toasts.
+                </p>
+              </Field>
               <Toggle
                 label="Confirmar antes de apagar"
                 checked={config.ui.confirmDestructive}

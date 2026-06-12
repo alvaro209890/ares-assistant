@@ -222,6 +222,8 @@ interface AresStore {
   testBrain: () => Promise<{ ok: boolean; detail: string }>
   connectOpenRouter: () => Promise<{ ok: boolean; error?: string }>
   finishOnboarding: (name: string) => Promise<void>
+  sentinels: any[]
+  stopSentinel: (id: string) => Promise<void>
 }
 
 const Ctx = createContext<AresStore | null>(null)
@@ -268,6 +270,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
   const [actionToast, setActionToast] = useState<React.ReactNode | null>(null)
   const [hiveWorkers, setHiveWorkers] = useState<HiveWorkerStatus[]>(HIVE_IDLE)
   const [taskProgress, setTaskProgress] = useState<TaskProgressEvent | null>(null)
+  const [sentinels, setSentinels] = useState<any[]>([])
 
   const configRef = useRef<AppConfig | null>(null)
   const aresStateRef = useRef<AresState>('idle')
@@ -431,6 +434,89 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     })
     return off
   }, [showToast, speakText])
+
+  const stopSentinel = useCallback(async (id: string) => {
+    const sid = currentSessionRef.current
+    if (!sid) return
+    await window.ares.sentinel.stop(sid, id)
+    setSentinels((prev) => prev.filter((s) => s.id !== id))
+  }, [])
+
+  useEffect(() => {
+    const sid = currentSessionId
+    if (!sid) return
+
+    window.ares.sentinel.list(sid).then((list) => {
+      setSentinels(list)
+    })
+
+    const off = window.ares.sentinel.onEvent((event) => {
+      if (event.sessionId !== sid) return
+
+      if (event.type === 'started') {
+        setSentinels((prev) => {
+          if (prev.some((s) => s.id === event.sentinelId)) return prev
+          return [
+            ...prev,
+            {
+              id: event.sentinelId,
+              command: event.command,
+              path: event.path,
+              sessionId: event.sessionId,
+              status: 'running',
+              buffer: ''
+            }
+          ]
+        })
+      } else if (event.type === 'stopped') {
+        setSentinels((prev) => prev.filter((s) => s.id !== event.sentinelId))
+      } else if (event.type === 'error') {
+        setSentinels((prev) =>
+          prev.map((s) =>
+            s.id === event.sentinelId ? { ...s, status: 'error' } : s
+          )
+        )
+
+        showToast(`Sentinela "${event.command}": ${event.rootCause}`)
+
+        const cfg = configRef.current
+        const sentinelVoice = cfg?.ui.sentinelVoice ?? 'voz'
+        if (event.speak && sentinelVoice === 'voz' && cfg?.tts.enabled) {
+          enqueueSentence(
+            `Atenção: erro no processo ${event.command.slice(0, 15)}. Causa raiz: ${event.rootCause}. Deseja que eu acione o depurador Prometeu?`,
+            voiceOpts()
+          )
+        }
+      } else if (event.type === 'recovered') {
+        setSentinels((prev) =>
+          prev.map((s) =>
+            s.id === event.sentinelId ? { ...s, status: 'recovered' } : s
+          )
+        )
+
+        showToast(`Sentinela "${event.command}" recuperada.`)
+
+        const cfg = configRef.current
+        const sentinelVoice = cfg?.ui.sentinelVoice ?? 'voz'
+        if (sentinelVoice === 'voz' && cfg?.tts.enabled) {
+          enqueueSentence('O processo voltou ao normal, senhor.', voiceOpts())
+        }
+      } else if (event.type === 'chunk') {
+        setSentinels((prev) =>
+          prev.map((s) => {
+            if (s.id !== event.sentinelId) return s
+            let newBuf = s.buffer + event.chunk
+            if (newBuf.length > 50000) {
+              newBuf = newBuf.slice(-50000)
+            }
+            return { ...s, buffer: newBuf }
+          })
+        )
+      }
+    })
+
+    return off
+  }, [currentSessionId, showToast, voiceOpts])
 
   // HUD de progresso de tarefas longas vindas do processo main.
   useEffect(() => {
@@ -1378,7 +1464,9 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
     setAutostart,
     testBrain,
     connectOpenRouter,
-    finishOnboarding
+    finishOnboarding,
+    sentinels,
+    stopSentinel
   }
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

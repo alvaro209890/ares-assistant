@@ -9,7 +9,7 @@
 // conversa atual). Se o app reiniciar, o usuário simplesmente repete o pedido.
 
 export interface PendingCodeOp {
-  kind: 'terminal'
+  kind: 'terminal' | 'observar'
   command: string
   root?: string
   reason: string

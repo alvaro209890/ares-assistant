@@ -27,7 +27,8 @@ import type {
   TaskProgressEvent,
   TtsStatus,
   UserLocation,
-  WeatherResult
+  WeatherResult,
+  SentinelEvent
 } from '../shared/types'
 
 // API segura exposta ao renderer como window.ares.
@@ -117,6 +118,19 @@ const api = {
   code: {
     // Cancela comandos/coder em execução na sessão. Retorna quantos foram abortados.
     cancel: (sessionId: string): Promise<number> => ipcRenderer.invoke('code:cancel', sessionId)
+  },
+  sentinel: {
+    start: (sessionId: string, command: string, path?: string): Promise<any> =>
+      ipcRenderer.invoke('sentinel:start', sessionId, command, path),
+    stop: (sessionId: string, target?: string): Promise<number> =>
+      ipcRenderer.invoke('sentinel:stop', sessionId, target),
+    list: (sessionId: string): Promise<any[]> =>
+      ipcRenderer.invoke('sentinel:list', sessionId),
+    onEvent: (cb: (event: SentinelEvent) => void): (() => void) => {
+      const listener = (_e: unknown, event: SentinelEvent) => cb(event)
+      ipcRenderer.on('sentinel:event', listener)
+      return () => ipcRenderer.removeListener('sentinel:event', listener)
+    }
   },
   briefing: {
     get: (): Promise<BriefingData> => ipcRenderer.invoke('briefing:get')

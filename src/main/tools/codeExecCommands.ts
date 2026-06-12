@@ -8,6 +8,7 @@ import { announceLongTask } from '../agent/activity'
 import { toolErr, toolOk } from '../agent/types'
 import { argRoot } from './util'
 import type { ToolCommand } from './types'
+import { startSentinel, stopSentinels } from '../sentinelManager'
 
 export const codeExecCommands: ToolCommand[] = [
   {
@@ -69,6 +70,14 @@ export const codeExecCommands: ToolCommand[] = [
       const { cfg, sessionId, signal, beating, pipeProgress, onDelta, phase, activity, reportProgress } = ctx
       const pend = getPendingCode(sessionId)
       if (!pend) return toolErr(a.tipo, 'Não há nenhum comando pendente de autorização.')
+
+      if (pend.kind === 'observar') {
+        clearPendingCode(sessionId)
+        reportProgress(`Iniciando sentinela para "${pend.command.slice(0, 60)}"...`)
+        const result = await startSentinel(sessionId, pend.command, pend.root || argRoot(a))
+        return toolOk(a.tipo, result)
+      }
+
       if (activity && !activity.command) activity.command = pend.command
       announceLongTask(onDelta, isLongRunningCommand, pend.command, true, phase)
       reportProgress(`Executando "${pend.command.slice(0, 60)}"...`)
@@ -89,6 +98,42 @@ export const codeExecCommands: ToolCommand[] = [
       const had = !!getPendingCode(sessionId)
       clearPendingCode(sessionId)
       return toolOk(a.tipo, { cancelado: had, mensagem: had ? 'comando pendente descartado' : 'nada pendente' })
+    }
+  },
+  {
+    tipo: 'codigo.observar',
+    category: 'code-exec',
+    reportsProgress: true,
+    progressLabel: (a) => `Observando: ${String(a.comando || a.command || '').slice(0, 60)}`,
+    async run(a, { cfg, sessionId, reportProgress }) {
+      const command = String(a.comando || a.command || '')
+      const root = argRoot(a)
+      const approved =
+        a.confirmado === true || a.autorizado === true || a.confirm === true || a.approved === true
+
+      const cls = classifyCommand(cfg, command)
+      if (cls.tier === 'blocked') {
+        throw new Error(`Comando bloqueado por segurança: ${cls.reason}`)
+      }
+
+      const autoApprove = cfg.integrations.code.terminalAutoApprove === true
+      if (cls.tier === 'confirm' && !approved && !autoApprove) {
+        setPendingCode(sessionId, { kind: 'observar', command, root, reason: cls.reason })
+        return toolOk(a.tipo, { requiresApproval: true, command, reason: cls.reason })
+      }
+
+      reportProgress(`Iniciando observação de "${command.slice(0, 60)}"...`)
+      const result = await startSentinel(sessionId, command, root)
+      return toolOk(a.tipo, result)
+    }
+  },
+  {
+    tipo: 'codigo.observar.parar',
+    category: 'code-exec',
+    run(a, { sessionId }) {
+      const target = a.qual ? String(a.qual) : undefined
+      const stoppedCount = stopSentinels(sessionId, target)
+      return toolOk(a.tipo, { ok: true, stoppedCount })
     }
   }
 ]

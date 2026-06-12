@@ -61,9 +61,10 @@ import {
 import { controlPromptContext } from './control'
 import { codePromptContext } from './code'
 import { pushUndo } from './history'
-import { clearPendingConfirm, decideConfirmation, getPendingConfirm, setPendingConfirm } from './confirm'
+import { clearPendingConfirm, decideConfirmation, getPendingConfirm, setPendingConfirm, isAffirmative } from './confirm'
 import { buildBriefing, briefingToSpeech } from './briefing'
 import { registerRun } from './running'
+import { getPendingSentinelDebug, clearPendingSentinelDebug } from './sentinel'
 import {
   codeVoiceProgressSummary,
   hasCodeAction,
@@ -88,6 +89,7 @@ import {
   proactiveCodeFollowup
 } from './agent/hive'
 import { runQuery } from './agent/router'
+import { isToolErr } from './agent/types'
 import { dedupeActions, streamTurn, validateActions, classifyProviderError } from './agent/stream'
 import { createTrace, nullTrace } from './agent/trace'
 import { uid } from './agent/activity'
@@ -216,6 +218,71 @@ export async function runTurn(
   onProgress?: TaskProgressFn
 ): Promise<AgentTurnResult> {
   const cfg = readConfig()
+
+  // Intercepta confirmação para acionar depuração pelo Prometeu
+  const pendDebug = getPendingSentinelDebug(sessionId)
+  if (pendDebug) {
+    const isAff = isAffirmative(userText) || /^(depura(r)?|corrija|corrigir|conserta(r)?|resolve(r)?)/i.test(userText.trim().toLowerCase())
+    if (isAff) {
+      clearPendingSentinelDebug(sessionId)
+      onDelta?.(` Certo, acionando o depurador Prometeu para analisar o erro no comando "${pendDebug.command}".`, 1, 'speak', true)
+
+      const action: Acao = {
+        tipo: 'subagente.depurar',
+        objetivo: `Corrigir erro no processo: ${pendDebug.command}`,
+        logs_erro: pendDebug.logSnippet,
+        contexto: `Comando executado: ${pendDebug.command}\nLogs capturados:\n${pendDebug.logSnippet}`
+      }
+
+      const controller = new AbortController()
+      const unregisterRun = registerRun(sessionId, controller)
+      const signal = controller.signal
+      try {
+        const result = await runQuery(action, {
+          cfg,
+          sessionId,
+          phase: 1,
+          signal,
+          onDelta,
+          onActivity,
+          onHive,
+          onProgress
+        })
+
+        let fala = ""
+        if (isToolErr(result)) {
+          fala = `Desculpe, a depuração com o Prometeu falhou: ${result.erro}`
+        } else {
+          fala = `Prometeu concluiu a análise do erro do comando "${pendDebug.command}" e propôs a correção. Veja o relatório na tela.`
+        }
+
+        onDelta?.(` ${fala}`, 1, 'speak', true)
+
+        appendMessages(sessionId, [
+          { id: uid('m'), role: 'user', content: userText, ts: Date.now() },
+          { id: uid('m'), role: 'assistant', content: fala, ts: Date.now() }
+        ])
+
+        return {
+          fala,
+          board: loadBoard(),
+          memory: loadMemory(),
+          events: loadEvents(),
+          lists: loadLists(),
+          quickNotes: loadNotes(),
+          reminders: loadReminders(),
+          notes: [!isToolErr(result) && (result.resultado as any)?.summary ? (result.resultado as any).summary : 'depuração finalizada'],
+          changedBoard: false,
+          config: cfg
+        }
+      } finally {
+        unregisterRun()
+      }
+    } else {
+      clearPendingSentinelDebug(sessionId)
+    }
+  }
+
   // Telemetria leve por turno (no-op a menos que algum caller leia o trace).
   const trace = process.env?.ARES_TRACE ? createTrace(sessionId) : nullTrace()
   // Controlador de cancelamento do turno: permite ao usuário (Esc/IPC code:cancel) abortar

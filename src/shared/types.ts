@@ -65,6 +65,7 @@ export interface AppConfig {
     autostart: boolean // iniciar com o sistema (efetivo após empacotar)
     globalShortcut: boolean // atalho global para chamar o Ares
     morningBriefing: boolean // falar o briefing ao abrir (1x por dia)
+    sentinelVoice?: 'voz' | 'toast' | 'off'
   }
   memory: {
     autoExtract: boolean // extrair fatos úteis da conversa automaticamente
@@ -665,3 +666,29 @@ export interface SystemMetrics {
   hostname: string
   platform: string
 }
+
+export interface SentinelEvent {
+  type: 'started' | 'error' | 'recovered' | 'stopped' | 'chunk'
+  sentinelId: string
+  command: string
+  path: string
+  sessionId: string
+  chunk?: string
+  stream?: 'stdout' | 'stderr'
+  errorSignature?: string
+  rootCause?: string
+  logSnippet?: string
+  speak?: boolean
+}
+
+export interface SentinelStatus {
+  id: string
+  command: string
+  path: string
+  sessionId: string
+  status: 'running' | 'error' | 'recovered' | 'stopped'
+  buffer: string
+  lastErrorSignature?: string
+  lastVoiceAlertAt?: number
+}
+
