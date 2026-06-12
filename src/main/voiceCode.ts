@@ -106,7 +106,9 @@ export function rootCauseError(raw: string, maxLen = 200): string {
   const meaningful =
     /(error|erro|exception|cannot|not found|n[aã]o encontrad|undefined|is not (a |defined)|unexpected|fail|falh\w*|recus\w*|denied|enoent|module not found|missing|permission|timeout|syntaxerror|typeerror)/i
   const hit = lines.find((l) => meaningful.test(l)) || lines[0]
-  return hit.length > maxLen ? `${hit.slice(0, maxLen - 1).replace(/\s+\S*$/, '').trim()}…` : hit
+  if (hit.length <= maxLen) return hit
+  const truncated = hit.slice(0, maxLen - 1).replace(/\s+\S*$/, '').trim()
+  return truncated ? `${truncated}…` : `${hit.slice(0, maxLen - 1)}…`
 }
 
 export function sanitizeVoiceCodeFala(input: string): string {

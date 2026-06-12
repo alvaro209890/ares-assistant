@@ -49,6 +49,7 @@ class DemoManager extends EventEmitter {
     this.state.currentSlide = slide
     this.emit('slide', slide)
     this.emit('state-changed', this.getState())
+    demoExporter.captureSlide(slide)
   }
 }
 

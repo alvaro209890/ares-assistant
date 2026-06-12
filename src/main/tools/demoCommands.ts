@@ -19,14 +19,26 @@ export async function handleDemoSlide(acao: Acao): Promise<ToolResult> {
     throw new Error('Parâmetro "titulo" é obrigatório em demo.slide')
   }
 
+  const linhaInicial = params.linhaInicial !== undefined ? Number(params.linhaInicial) : undefined
+  const linhaFinal = params.linhaFinal !== undefined ? Number(params.linhaFinal) : undefined
+  if (linhaInicial !== undefined && !Number.isFinite(linhaInicial)) {
+    throw new Error('Parâmetro "linhaInicial" deve ser um número inteiro')
+  }
+  if (linhaFinal !== undefined && !Number.isFinite(linhaFinal)) {
+    throw new Error('Parâmetro "linhaFinal" deve ser um número inteiro')
+  }
+  if (linhaInicial !== undefined && linhaFinal !== undefined && linhaInicial > linhaFinal) {
+    throw new Error('linhaInicial não pode ser maior que linhaFinal')
+  }
+
   const slide = {
     id: uid('demo'),
     title: params.titulo,
     points: Array.isArray(params.pontos) ? params.pontos : [],
     codeSnippet: params.codigo,
     filePath: params.arquivo,
-    lineRange: (params.linhaInicial !== undefined && params.linhaFinal !== undefined)
-      ? [params.linhaInicial, params.linhaFinal] as [number, number]
+    lineRange: (linhaInicial !== undefined && linhaFinal !== undefined)
+      ? [linhaInicial, linhaFinal] as [number, number]
       : undefined
   }
 
