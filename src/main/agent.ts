@@ -63,6 +63,7 @@ import { codePromptContext } from './code'
 import { pushUndo } from './history'
 import { clearPendingConfirm, decideConfirmation, getPendingConfirm, setPendingConfirm, isAffirmative } from './confirm'
 import { buildBriefing, briefingToSpeech } from './briefing'
+import { demoManager } from './demoManager'
 import { registerRun } from './running'
 import { getPendingSentinelDebug, clearPendingSentinelDebug } from './sentinel'
 import {
@@ -125,8 +126,34 @@ function applyMutations(acoes: Acao[]): { board: Board; notes: string[]; changed
   const original = board
   const notes: string[] = []
   const memoryQuestions: string[] = []
+  // Slides do Modo Apresentação são coletados no loop e enfileirados de UMA vez
+  // (em lote) ao final, para o demoManager avançá-los com o timer correto.
+  const demoSlides: import('../shared/types').DemoSlide[] = []
   for (const a of acoes) {
-    if (a.tipo.startsWith('tarefa.') || a.tipo.startsWith('coluna.')) {
+    if (a.tipo === 'demo.slide' && a.titulo) {
+      const params = a as unknown as {
+        titulo: string
+        pontos?: unknown
+        codigo?: unknown
+        arquivo?: unknown
+        linhaInicial?: unknown
+        linhaFinal?: unknown
+      }
+      const ini = params.linhaInicial !== undefined ? Number(params.linhaInicial) : undefined
+      const fim = params.linhaFinal !== undefined ? Number(params.linhaFinal) : undefined
+      demoSlides.push({
+        id: uid('demo'),
+        title: String(params.titulo),
+        points: Array.isArray(params.pontos) ? params.pontos.map((p) => String(p)) : [],
+        codeSnippet: params.codigo !== undefined ? String(params.codigo) : undefined,
+        filePath: params.arquivo !== undefined ? String(params.arquivo) : undefined,
+        lineRange:
+          Number.isFinite(ini) && Number.isFinite(fim) && (ini as number) <= (fim as number)
+            ? [ini as number, fim as number]
+            : undefined
+      })
+      notes.push('slide preparado')
+    } else if (a.tipo.startsWith('tarefa.') || a.tipo.startsWith('coluna.')) {
       const r = applyBoardAction(board, a)
       board = r.board
       if (r.note) notes.push(r.note)
@@ -192,6 +219,10 @@ function applyMutations(acoes: Acao[]): { board: Board; notes: string[]; changed
   }
   const changedBoard = board !== original
   if (changedBoard) saveBoard(board)
+  // Dispara a apresentação depois de aplicar todo o resto. queueSlides exibe o
+  // primeiro slide na hora, troca a tela para o Modo Apresentação e avança os
+  // demais por timer — cada um é capturado para a exportação.
+  if (demoSlides.length) demoManager.queueSlides(demoSlides)
   return { board, notes, changedBoard, memoryQuestions }
 }
 
@@ -202,6 +233,49 @@ function memoryFallback(userText: string, acoes: Acao[]): Acao[] {
     userText.match(/(?:minha preferência é|eu prefiro|prefiro)\s+(.+)/i)
   const fact = match?.[1]?.replace(/[.!?]+$/, '').trim()
   return fact ? [...acoes, { tipo: 'memoria.salvar', fato: fact }] : acoes
+}
+
+// O usuário PEDIU uma apresentação/demo/slides.
+const PRESENTATION_INTENT_RE =
+  /(apresenta[çc][aã]o|\bdemo\b|\bslides?\b|mostr[ae]r?\s+(?:como|os?\s+slides?)|exib[ae]?\s+os?\s+slides?)/iu
+// O Ares PROMETEU mostrar slides na fala.
+const PRESENTATION_PROMISE_RE =
+  /(slides?|apresenta[çc][aã]o|vou\s+(?:mostrar|exibir|preparar|apresentar)|preparei|montei|criei\s+a\s+apresenta)/iu
+
+/**
+ * Rede de segurança da Apresentação (espelha inferPromisedHiveAction): se o
+ * usuário pediu uma demo e o Ares prometeu slides mas não emitiu nenhuma ação
+ * demo.slide, sintetiza slides a partir das frases da narração — garante que a
+ * tela do Modo Apresentação nunca fique vazia contradizendo a fala. Conservador:
+ * exige intenção explícita do usuário E promessa explícita na fala.
+ */
+export function inferPromisedDemoActions(fala: string, userText: string, acoes: Acao[]): Acao[] {
+  if (acoes.some((a) => a.tipo === 'demo.slide')) return []
+  if (!PRESENTATION_INTENT_RE.test(userText)) return []
+  if (!PRESENTATION_PROMISE_RE.test(fala)) return []
+
+  const sentences = String(fala || '')
+    .replace(/\s+/g, ' ')
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => /\p{L}/u.test(s) && s.length > 8)
+  // Remove frases puramente meta ("Vou mostrar os slides agora.") quando há outras.
+  const META_RE = /^(vou\s+(mostrar|exibir|apresentar)|aqui\s+(est[aã]o|vai)|veja\s+(os|a))/iu
+  const meaty = sentences.filter((s) => !META_RE.test(s))
+  const body = (meaty.length ? meaty : sentences).slice(0, 6)
+
+  if (!body.length) {
+    return [{ tipo: 'demo.slide', titulo: 'Apresentação', pontos: [userText.trim().slice(0, 120)] } as Acao]
+  }
+  const slides: Acao[] = []
+  for (let i = 0; i < body.length; i += 3) {
+    slides.push({
+      tipo: 'demo.slide',
+      titulo: i === 0 ? 'Visão Geral' : `Mais detalhes (${Math.floor(i / 3) + 1})`,
+      pontos: body.slice(i, i + 3)
+    } as Acao)
+  }
+  return slides
 }
 
 // Máximo de rodadas de ferramentas encadeadas por turno (buscar -> ler -> validar...).
@@ -406,6 +480,16 @@ export async function runTurn(
     }
 
     mutations = memoryFallback(userText, mutations)
+    // Rede de segurança da Apresentação: se o usuário pediu uma demo/apresentação e
+    // o Ares PROMETEU mostrar slides mas esqueceu de emitir as ações demo.slide,
+    // o runtime sintetiza slides a partir da narração — a tela do Modo Apresentação
+    // nunca fica vazia contradizendo a fala.
+    const inferredSlides = inferPromisedDemoActions(fala, userText, mutations)
+    if (inferredSlides.length) {
+      mutations = [...mutations, ...inferredSlides]
+      allNotes.push('apresentação inferida: slides gerados a partir da narração')
+      trace.emit('demo:inferred', { count: inferredSlides.length })
+    }
     const validated = validateActions(mutations)
     allNotes.push(...validated.notes)
 

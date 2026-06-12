@@ -12,7 +12,10 @@ const { TMP } = vi.hoisted(() => {
 
 vi.mock('electron', () => ({
   app: { getPath: () => TMP },
-  clipboard: { readText: () => '', writeText: () => undefined }
+  clipboard: { readText: () => '', writeText: () => undefined },
+  // demoManager → demoExporter usa estes; sem janelas no teste a captura é no-op.
+  BrowserWindow: { getAllWindows: () => [] },
+  dialog: { showSaveDialog: vi.fn(async () => ({ canceled: true, filePath: undefined })) }
 }))
 
 vi.mock('../src/main/ninerouter', () => ({
@@ -48,11 +51,13 @@ import {
   compactSubagentContext,
   hiveFollowupInstruction,
   inferPromisedHiveAction,
+  inferPromisedDemoActions,
   runTurn,
   stripRepeatedGreeting
 } from '../src/main/agent'
 import { createSession } from '../src/main/data'
 import { updateConfig } from '../src/main/config'
+import { demoManager } from '../src/main/demoManager'
 
 const brain = vi.mocked(chatJSON)
 const stream = vi.mocked(streamChat)
@@ -242,6 +247,67 @@ describe('agent — runTurn (orquestração do cérebro)', () => {
     expect(
       inferPromisedHiveAction('Vou pedir à Atena', 'pesquise X', [{ tipo: 'subagente.pesquisar', objetivo: 'X' }])
     ).toBeNull()
+  })
+
+  it('runTurn: ações demo.slide do modelo chegam ao demoManager e ATIVAM a apresentação (bug raiz)', async () => {
+    demoManager.stop()
+    const sid = createSession().id
+    // O modelo emite a narração + as ações demo.slide no MESMO envelope.
+    nextEnvelope('Vou apresentar como ficou o jogo da cobrinha.', [
+      { tipo: 'demo.slide', titulo: 'Estrutura', pontos: ['HTML5 Canvas', 'Setas'] },
+      { tipo: 'demo.slide', titulo: 'Loop principal', codigo: 'function gameLoop(){}', arquivo: 'index.html' }
+    ])
+
+    await runTurn(sid, 'faça uma apresentação de como você criou o jogo')
+
+    // Antes do fix, applyMutations IGNORAVA demo.slide -> tela vazia. Agora ativa.
+    expect(demoManager.getState().isActive).toBe(true)
+    expect(demoManager.getState().currentSlide?.title).toBe('Estrutura')
+    demoManager.stop()
+  })
+
+  it('runTurn: promessa de slides SEM ação demo.slide ainda ativa a apresentação (rede de segurança)', async () => {
+    demoManager.stop()
+    const sid = createSession().id
+    // O modelo esquece a ação e só promete na fala — o runtime sintetiza os slides.
+    nextEnvelope(
+      'Certo, preparei a apresentação. O jogo usa Canvas. A cobra se move com as setas. Vou mostrar os slides agora.',
+      []
+    )
+
+    await runTurn(sid, 'crie uma apresentação do projeto')
+
+    expect(demoManager.getState().isActive).toBe(true)
+    expect(demoManager.getState().currentSlide?.title).toBeTruthy()
+    demoManager.stop()
+  })
+
+  it('inferPromisedDemoActions: usuário pede apresentação + Ares promete slides mas não emite -> sintetiza', () => {
+    // Caso real: o Ares disse "vou mostrar os slides" e não emitiu nenhuma ação.
+    const slides = inferPromisedDemoActions(
+      'Certo, preparei uma apresentação sobre o jogo. A cobra se move com as setas e cresce ao comer. A colisão encerra a partida. Vou mostrar os slides agora.',
+      'crie uma apresentação de como você criou o jogo',
+      []
+    )
+    expect(slides.length).toBeGreaterThan(0)
+    expect(slides.every((s) => s.tipo === 'demo.slide')).toBe(true)
+    expect(slides[0].titulo).toBeTruthy()
+    expect(Array.isArray(slides[0].pontos)).toBe(true)
+  })
+
+  it('inferPromisedDemoActions: NÃO infere sem intenção do usuário OU sem promessa na fala', () => {
+    // Sem intenção de apresentação no pedido do usuário.
+    expect(inferPromisedDemoActions('Vou mostrar os slides.', 'edite o arquivo X', [])).toEqual([])
+    // Intenção presente, mas a fala não promete nada de slides.
+    expect(inferPromisedDemoActions('Arquivo criado.', 'faça uma apresentação', [])).toEqual([])
+  })
+
+  it('inferPromisedDemoActions: NÃO infere se o modelo já emitiu demo.slide', () => {
+    expect(
+      inferPromisedDemoActions('Vou mostrar os slides da apresentação.', 'faça uma apresentação', [
+        { tipo: 'demo.slide', titulo: 'X', pontos: [] }
+      ])
+    ).toEqual([])
   })
 
   it('extractFilesFromErrorLogs acha arquivos do projeto citados no stack trace', async () => {

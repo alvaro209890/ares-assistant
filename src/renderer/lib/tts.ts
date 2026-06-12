@@ -712,18 +712,20 @@ const STATUS_FAST_RE =
 
 function eagerSplitIndex(buffer: string): number {
   if (buffer.length < EAGER_MIN_CHARS) return -1
-  // Ideal window: 48-140 chars — best prosody
-  if (buffer.length >= EAGER_MAX_CHARS) {
-    const w = buffer.slice(EAGER_MIN_CHARS, EAGER_MAX_CHARS)
-    const c = Math.max(w.lastIndexOf(','), w.lastIndexOf(';'), w.lastIndexOf(':'))
-    if (c >= 0) return EAGER_MIN_CHARS + c + 1
+  const limit = Math.min(buffer.length, EAGER_MAX_CHARS)
+  const w = buffer.slice(0, limit)
+  // Corta na ÚLTIMA vírgula/ponto-e-vírgula seguida de ESPAÇO (fronteira real de
+  // oração). NÃO corta em ':' (aparece em 'C:', horários, proporções) nem em
+  // vírgula sem espaço ('1.250,90'), o que antes mutilava caminhos e números —
+  // o bug do "C:" lido em dois pedaços. A latência de pausas longas do modelo é
+  // tratada pelo timer de buffer estagnado no store, não por cortes agressivos.
+  const re = /[,;]\s/g
+  let idx = -1
+  let m: RegExpExecArray | null
+  while ((m = re.exec(w))) {
+    if (m.index >= 18) idx = m.index
   }
-  // Fallback: any comma/semicolon/colon producing at least 15 chars.
-  // Covers "Perfeito, ..." patterns where the comma is early and the model
-  // goes silent for 15+ seconds during tool execution.
-  const w2 = buffer.slice(0, Math.min(buffer.length, EAGER_MAX_CHARS))
-  const c2 = Math.max(w2.lastIndexOf(','), w2.lastIndexOf(';'), w2.lastIndexOf(':'))
-  return c2 >= 14 ? c2 + 1 : -1
+  return idx >= 0 ? idx + 1 : -1
 }
 
 function chunkSplitIndex(text: string): number {

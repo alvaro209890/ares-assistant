@@ -17,6 +17,7 @@ export type TraceEventKind =
   | 'hive:gather'
   | 'hive:report'
   | 'hive:inferred'
+  | 'demo:inferred'
   | 'fallback'
   | 'error'
   | 'mutation'

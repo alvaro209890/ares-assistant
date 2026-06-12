@@ -12,6 +12,7 @@ import {
   normalizePtNumbers,
   normalizeSymbols,
   prepareText,
+  simplifyPaths,
   simplifyUrls,
   tightenWavSilence
 } from '../src/main/speech'
@@ -308,6 +309,33 @@ describe('simplificação de URLs', () => {
 
   it('não mexe em texto sem URL', () => {
     expect(simplifyUrls('texto normal sem links')).toBe('texto normal sem links')
+  })
+})
+
+describe('simplificação de caminhos de arquivo (para a voz não soletrar paths)', () => {
+  it('caminho do Windows entre aspas vira só o nome do arquivo (mesmo com espaço)', () => {
+    const out = simplifyPaths("criei o jogo em 'C:\\Users\\Usuario\\Documents\\ares_site teste\\index.html'.")
+    expect(out).toContain('index.html')
+    expect(out).not.toContain('C:')
+    expect(out).not.toContain('Users')
+    expect(out).not.toMatch(/\\/)
+  })
+
+  it('caminho solto com letra de unidade vira só o arquivo', () => {
+    const out = simplifyPaths('o arquivo C:\\projeto\\src\\main.ts foi editado')
+    expect(out).toBe('o arquivo main.ts foi editado')
+  })
+
+  it('NÃO mexe em datas nem em "e/ou" (barra sem ser caminho)', () => {
+    expect(simplifyPaths('reunião em 12/06 às 14h')).toBe('reunião em 12/06 às 14h')
+    expect(simplifyPaths('escolha sim e/ou não')).toBe('escolha sim e/ou não')
+  })
+
+  it('prepareText lê o caminho do Windows como o nome do arquivo', () => {
+    const out = prepareText("Pronto, criei o jogo em 'C:\\Users\\Usuario\\Documents\\ares_site teste\\index.html'.")
+    expect(out).toContain('index.html')
+    expect(out).not.toContain('Users')
+    expect(out).not.toContain('\\')
   })
 })
 

@@ -284,6 +284,27 @@ describe('tts', () => {
     expect(splitSentences('Oi, tudo bem', false, { eager: true }).sentences).toEqual([])
   })
 
+  it('eager NUNCA corta dentro de um caminho do Windows (regressão do "C:")', () => {
+    installSpeechMock()
+    // Bug real: o eager cortava em "...em 'C:" e falava o resto do caminho como
+    // uma segunda frase ("\Users\...\index.html'."). Não pode cortar em ':' nem
+    // partir o caminho.
+    const buf = "Pronto, criei o jogo da cobrinha em 'C:\\Users\\Usuario\\Documents\\ares_site teste\\index.html'."
+    const eager = splitSentences(buf, false, { eager: true })
+    expect(eager.sentences).not.toContain("Pronto, criei o jogo da cobrinha em 'C:")
+    expect(eager.sentences.every((s) => !s.endsWith(':'))).toBe(true)
+    expect(eager.sentences.every((s) => !/[\\/]$/.test(s))).toBe(true)
+  })
+
+  it('eager só corta em vírgula/ponto-e-vírgula seguidos de espaço (não em número)', () => {
+    installSpeechMock()
+    // "1.250,90" tem vírgula sem espaço depois -> não é fronteira de oração.
+    const buf =
+      'O orçamento total ficou em torno de 1.250,90 reais este mês conforme combinamos na semana passada com a equipe'
+    const eager = splitSentences(buf, false, { eager: true })
+    expect(eager.sentences.every((s) => !/\d,$/.test(s))).toBe(true)
+  })
+
   it('fast-path: frase de status de código toca imediatamente sem esperar o próximo delta', () => {
     installSpeechMock()
     // Anúncio de progresso chega INTEIRO num único delta e termina o buffer com

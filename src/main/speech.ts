@@ -459,6 +459,34 @@ export function normalizeModelNames(text: string): string {
 // Simplificação de URLs e caminhos para fala.
 // ---------------------------------------------------------------------------
 
+/** Último segmento de um caminho (nome do arquivo/pasta), sem barras. */
+function pathBasename(p: string): string {
+  const seg = p.split(/[\\/]+/).filter(Boolean)
+  return seg.length ? seg[seg.length - 1] : p
+}
+
+/**
+ * Substitui caminhos de arquivo por apenas o nome final, para a voz não soletrar
+ * "C maiúsculo, dois pontos, barra, Users, barra...". Trata caminhos entre aspas
+ * (que podem conter espaços, ex.: "ares_site teste") e caminhos soltos com letra
+ * de unidade ou barra invertida. Caminhos com só "/" (datas "12/06", "e/ou") NÃO
+ * são tocados — exigem '\' ou 'C:' para contar como caminho.
+ */
+export function simplifyPaths(text: string): string {
+  return String(text || '')
+    // Entre aspas simples/duplas: aceita espaços no caminho.
+    .replace(/'([^']*[\\/][^']*)'/g, (m, p: string) =>
+      /[\\/]/.test(p) && (/\\/.test(p) || /^[A-Za-z]:/.test(p)) ? pathBasename(p) : m
+    )
+    .replace(/"([^"]*[\\/][^"]*)"/g, (m, p: string) =>
+      /[\\/]/.test(p) && (/\\/.test(p) || /^[A-Za-z]:/.test(p)) ? pathBasename(p) : m
+    )
+    // Soltos (sem espaço): drive letter (C:\... ou C:/...) ou caminho com '\'.
+    // O lookbehind evita casar o "s:/" de "https://" (a letra antes do ':' não
+    // pode ser outra letra) — URLs continuam intactas para o simplifyUrls.
+    .replace(/(?<![A-Za-z])[A-Za-z]:[\\/][^\s"']*|\\[^\s"']+(?:\\[^\s"']+)*/g, (m) => pathBasename(m))
+}
+
 /** Remove URLs completas e substitui por "link" ou só o domínio. */
 export function simplifyUrls(text: string): string {
   // URLs completas: https://github.com/user/repo → "link do guitrábe"
@@ -491,6 +519,7 @@ export function cleanSpeechMarkup(text: string): string {
 export function prepareText(text: string): string {
   let t = cleanSpeechMarkup(text)
   t = simplifyUrls(t)
+  t = simplifyPaths(t)
   t = normalizePtNumbers(t)
   t = normalizeSymbols(t)
   t = normalizeModelNames(t)
