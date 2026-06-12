@@ -449,10 +449,9 @@ describe('agent — runTurn (orquestração do cérebro)', () => {
     expect(activities.some((a) => a.kind === 'command' && a.status === 'done')).toBe(true)
   })
 
-  it('voz+código: streama a resposta COMPLETA na tela e fala um resumo NÃO-vazio (fase 2)', async () => {
-    // Regressão do bug: ao analisar um diretório por voz, ele falava "vou analisar" (fase 1)
-    // mas ficava MUDO na resposta (fase 2). Agora a tela recebe o texto completo (canal
-    // 'display') e a voz recebe um resumo conciso e não-vazio (canal 'speak').
+  it('voz+codigo: usa um transcript unico para tela e fala no modo programador', async () => {
+    // Tudo que seria falado no modo programador deve aparecer no chat pelo mesmo
+    // canal `both`; detalhes tecnicos seguem nas atividades/terminal, nao em `speak`.
     updateConfig({ integrations: { code: { workspaceRoot: TMP, allowedRoots: [TMP] } } })
     const sid = createSession().id
     const envelopes = [
@@ -474,14 +473,19 @@ describe('agent — runTurn (orquestração do cérebro)', () => {
       deltas.push({ chunk, phase, kind })
     )
 
-    const display2 = deltas.filter((d) => d.phase === 2 && d.kind === 'display').map((d) => d.chunk).join('')
-    const speak2 = deltas.filter((d) => d.phase === 2 && d.kind === 'speak').map((d) => d.chunk).join('').trim()
+    expect(deltas.some((d) => d.kind === 'display' || d.kind === 'speak')).toBe(false)
+    const visible = deltas
+      .filter((d) => d.kind === 'both')
+      .map((d) => d.chunk)
+      .join('')
+      .replace(/\s+/g, ' ')
+      .trim()
 
-    expect(display2).toContain('três pastas principais') // resposta completa foi pra tela
-    expect(speak2.length).toBeGreaterThan(0) // a voz CONTINUOU (não ficou muda) — o bug
-    expect(speak2).toContain('diretório') // e fala o conteúdo real, não um genérico
-    expect(r.fala).toContain('testes configurados') // chat guarda o texto COMPLETO (2 frases)
-    expect(r.falaVoz).toContain('diretório') // fallback robusto caso o último IPC de fala se perca
+    expect(visible).toContain('Vou analisar')
+    expect(visible).toContain('diretório')
+    expect(visible).toContain('três pastas principais')
+    expect(r.fala).toBe(visible)
+    expect(r.falaVoz).toBe(r.fala)
   })
 
   it('segura ação destrutiva até a confirmação e executa após o "sim"', async () => {

@@ -193,12 +193,12 @@ let announceIdx = 0
  * `phase` deve ser a fase de streaming ATUAL (com o loop de rodadas, não é sempre 1).
  */
 export function announceLongTask(
-  onDelta: ((chunk: string, phase: number, kind?: 'both' | 'display' | 'speak') => void) | undefined,
+  onDelta: ((chunk: string, phase: number, kind?: 'both' | 'display' | 'speak', done?: boolean) => void) | undefined,
   isLongRunning: (cmd: string) => boolean,
   command: string,
   willRun: boolean,
   phase: number
 ): void {
   if (!onDelta || !willRun || !isLongRunning(command)) return
-  onDelta(LONG_TASK_ANNOUNCES[announceIdx++ % LONG_TASK_ANNOUNCES.length], phase)
+  onDelta(LONG_TASK_ANNOUNCES[announceIdx++ % LONG_TASK_ANNOUNCES.length], phase, 'both', true)
 }

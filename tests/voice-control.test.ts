@@ -76,7 +76,7 @@ describe('voz durante o trabalho — heartbeat de tarefas longas', () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
 
-  it('fala atualização após ~15s e repete, sempre no canal só-de-fala', () => {
+  it('fala atualização após ~15s e repete, sempre no canal visivel/falado', () => {
     const deltas: { chunk: string; phase: number; kind?: string }[] = []
     const stop = startHeartbeat((chunk, phase, kind) => deltas.push({ chunk, phase, kind }), 2)
 
@@ -85,7 +85,7 @@ describe('voz durante o trabalho — heartbeat de tarefas longas', () => {
 
     vi.advanceTimersByTime(1)
     expect(deltas).toHaveLength(1)
-    expect(deltas[0]).toMatchObject({ chunk: HEARTBEAT_PHRASES[0], phase: 2, kind: 'speak' })
+    expect(deltas[0]).toMatchObject({ chunk: HEARTBEAT_PHRASES[0], phase: 2, kind: 'both' })
 
     vi.advanceTimersByTime(HEARTBEAT_REPEAT_MS)
     expect(deltas).toHaveLength(2)
@@ -118,13 +118,13 @@ describe('voz durante o trabalho — heartbeat de tarefas longas', () => {
     expect(gerundFragment('')).toBe('')
   })
 
-  it('startHeartbeat com rótulo fala a tarefa real no canal só-de-fala', () => {
+  it('startHeartbeat com rótulo fala a tarefa real no canal visivel/falado', () => {
     const deltas: { chunk: string; kind?: string }[] = []
     const stop = startHeartbeat((chunk, _phase, kind) => deltas.push({ chunk, kind }), 2, 'Rodando testes...')
     vi.advanceTimersByTime(HEARTBEAT_FIRST_MS)
     expect(deltas).toHaveLength(1)
     expect(deltas[0].chunk).toContain('rodando testes')
-    expect(deltas[0].kind).toBe('speak')
+    expect(deltas[0].kind).toBe('both')
     stop()
   })
 })

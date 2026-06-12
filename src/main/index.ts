@@ -22,6 +22,7 @@ import { demoExporter } from './demoExporter'
 import { demoManager } from './demoManager'
 import { initLogger, logger, getRecentLogs, errToMessage } from './logger'
 import { getWeather, getWeatherAt, getNews, reverseGeocode } from './tools'
+import { chatDeltaPayload } from './ipcPayloads'
 import {
   loadMemory,
   addFact,
@@ -278,8 +279,8 @@ function registerIpc(): void {
       payload.sessionId,
       payload.text,
       !!payload.voice,
-      (chunk, phase, kind = 'both') => {
-        sendToRenderer('chat:delta', { chunk, phase, kind })
+      (chunk, phase, kind = 'both', done) => {
+        sendToRenderer('chat:delta', chatDeltaPayload(chunk, phase, kind, done))
       },
       (activity) => {
         sendToRenderer('chat:activity', activity)

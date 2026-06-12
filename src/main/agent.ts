@@ -299,7 +299,16 @@ export async function runTurn(
     const isAff = isAffirmative(userText) || /^(depura(r)?|corrija|corrigir|conserta(r)?|resolve(r)?)/i.test(userText.trim().toLowerCase())
     if (isAff) {
       clearPendingSentinelDebug(sessionId)
-      onDelta?.(` Certo, acionando o depurador Prometeu para analisar o erro no comando "${pendDebug.command}".`, 1, 'speak', true)
+      let debugTranscript = ''
+      const emitDebugDelta: DeltaFn | undefined = onDelta
+        ? (chunk, phase, kind = 'both', done) => {
+            if (kind === 'both' && chunk) debugTranscript += chunk
+            onDelta(chunk, phase, kind, done)
+          }
+        : undefined
+      const intro = `Certo, acionando o depurador Prometeu para analisar o erro no comando "${pendDebug.command}".`
+      if (emitDebugDelta) emitDebugDelta(intro, 1, 'both', true)
+      else debugTranscript = intro
 
       const action: Acao = {
         tipo: 'subagente.depurar',
@@ -317,7 +326,7 @@ export async function runTurn(
           sessionId,
           phase: 1,
           signal,
-          onDelta,
+          onDelta: emitDebugDelta,
           onActivity,
           onHive,
           onProgress
@@ -330,7 +339,10 @@ export async function runTurn(
           fala = `Prometeu concluiu a análise do erro do comando "${pendDebug.command}" e propôs a correção. Veja o relatório na tela.`
         }
 
-        onDelta?.(` ${fala}`, 1, 'speak', true)
+        const finalChunk = `${debugTranscript.trim() ? ' ' : ''}${fala}`
+        if (emitDebugDelta) emitDebugDelta(finalChunk, 1, 'both', true)
+        else debugTranscript += finalChunk
+        fala = debugTranscript.replace(/\s+/g, ' ').trim()
 
         appendMessages(sessionId, [
           { id: uid('m'), role: 'user', content: userText, ts: Date.now() },
@@ -396,8 +408,34 @@ export async function runTurn(
       { role: 'user', content: voiceAwareUserContent(userText, voice) }
     ]
 
+    let visibleTranscript = ''
+    let voiceCodeSeen = false
+    const voiceCodeFallbackParts: string[] = []
+    const appendVoiceCodePart = (text: string): void => {
+      const clean = String(text || '').replace(/\s+/g, ' ').trim()
+      if (!clean) return
+      const last = voiceCodeFallbackParts[voiceCodeFallbackParts.length - 1]
+      if (!last || !isDuplicateSpeech(last, clean)) voiceCodeFallbackParts.push(clean)
+    }
+    const emitDelta: DeltaFn | undefined = onDelta
+      ? (chunk, ph, kind = 'both', done) => {
+          if (kind === 'both' && chunk) visibleTranscript += chunk
+          onDelta(chunk, ph, kind, done)
+        }
+      : undefined
+    const emitVisibleCodeNarration = (text: string, ph: number): void => {
+      const clean = String(text || '').replace(/\s+/g, ' ').trim()
+      if (!clean) return
+      appendVoiceCodePart(clean)
+      const chunk = `${visibleTranscript.trim() ? ' ' : ''}${clean}`
+      if (emitDelta) emitDelta(chunk, ph, 'both', true)
+      else visibleTranscript += chunk
+    }
+    const currentVisibleTranscript = (): string =>
+      (visibleTranscript.replace(/\s+/g, ' ').trim() || voiceCodeFallbackParts.join(' ').replace(/\s+/g, ' ').trim())
+
     trace.emit('phase', { n: 1, kind: 'initial' })
-    const env = parseEnvelope(await streamTurn(cfg, messages, 1, onDelta, 'both', deltaTransform, signal))
+    const env = parseEnvelope(await streamTurn(cfg, messages, 1, emitDelta, 'both', deltaTransform, signal))
     let fala = _finalFala(env.fala, suppressGreeting)
     let falaVoz: string | undefined
     const allNotes: string[] = []
@@ -409,6 +447,11 @@ export async function runTurn(
     }
     let mutations = env.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo))
     let queries = dedupeActions(env.acoes.filter((a) => QUERY_TOOLS.has(a.tipo)))
+    if (voice && hasCodeAction(queries)) {
+      voiceCodeSeen = true
+      appendVoiceCodePart(fala)
+      if (!emitDelta && fala) visibleTranscript = fala
+    }
 
     // Loop agêntico: o LLM pode ENCADEAR rodadas de ferramentas (buscar -> ler ->
     // editar -> validar) num único turno. Cada rodada roda as consultas em PARALELO
@@ -423,12 +466,13 @@ export async function runTurn(
       // trabalham). Na primeira rodada o próprio modelo já anunciou via streaming;
       // nas rodadas seguintes (e quando a fala veio vazia) este é o único som
       // antes do heartbeat dos 15 s.
+      if (voice && hasCodeAction(queries)) voiceCodeSeen = true
       if (voice && hasCodeAction(queries) && (round > 0 || !fala.trim())) {
         const announce = voiceToolAnnouncement(queries)
-        if (announce) onDelta?.(` ${announce}`, phase, 'speak', true)
+        if (announce) emitVisibleCodeNarration(announce, phase)
       }
       const results = await Promise.all(
-        queries.map((q) => runQuery(q, { cfg, sessionId, phase, signal, onDelta, onActivity, onHive, onProgress, trace }))
+        queries.map((q) => runQuery(q, { cfg, sessionId, phase, signal, onDelta: emitDelta, onActivity, onHive, onProgress, trace }))
       )
       const codeMode = hasCodeAction(queries)
       const proactive = proactiveCodeFollowup(cfg, results)
@@ -454,24 +498,39 @@ export async function runTurn(
         const immediateSpoken = codeVoiceProgressSummary(results)
         if (immediateSpoken) {
           falaVoz = immediateSpoken
-          onDelta?.(` ${immediateSpoken}`, phase, 'speak', true)
+          emitVisibleCodeNarration(immediateSpoken, phase)
         }
-        const raw = await streamTurn(cfg, convo, phase, onDelta, 'display', deltaTransform, signal)
+        const finalPrefix = visibleTranscript.trim() ? ' ' : ''
+        const voiceCodeTransform: DeltaTextTransform = (text, ph, kind) => {
+          const base = deltaTransform ? deltaTransform(text, ph, kind) : text
+          const spoken = sanitizeVoiceCodeFala(base)
+          if (!spoken || isDuplicateSpeech(spoken, immediateSpoken)) return ''
+          return `${finalPrefix}${spoken}`
+        }
+        const beforeFinal = visibleTranscript.length
+        const raw = await streamTurn(cfg, convo, phase, emitDelta, 'both', voiceCodeTransform, signal)
         const envN = parseEnvelope(raw)
         if (envN.fala) {
-          fala = _finalFala(envN.fala, suppressGreeting)
-          const spoken = sanitizeVoiceCodeFala(fala) || 'Análise concluída. Os detalhes principais estão na tela.'
+          const modelFala = _finalFala(envN.fala, suppressGreeting)
+          const spoken = sanitizeVoiceCodeFala(modelFala) || 'Analise concluida. Os detalhes principais estao nas atividades.'
           falaVoz = spoken
-          if (!isDuplicateSpeech(spoken, immediateSpoken)) onDelta?.(` ${spoken}`, phase, 'speak', true)
+          if (!isDuplicateSpeech(spoken, immediateSpoken)) {
+            appendVoiceCodePart(spoken)
+            if (visibleTranscript.length === beforeFinal) emitVisibleCodeNarration(spoken, phase)
+          }
+          fala = currentVisibleTranscript() || spoken
         } else if (!immediateSpoken) {
-          const fallback = 'Concluído. Os detalhes estão na tela.'
+          const fallback = 'Concluido. Os detalhes estao nas atividades.'
           falaVoz = fallback
-          onDelta?.(` ${fallback}`, phase, 'speak', true)
+          emitVisibleCodeNarration(fallback, phase)
+          fala = currentVisibleTranscript() || fallback
+        } else {
+          fala = currentVisibleTranscript() || immediateSpoken
         }
         mutations = mutations.concat(envN.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo)))
         queries = lastRound ? [] : dedupeActions(envN.acoes.filter((a) => QUERY_TOOLS.has(a.tipo)))
       } else {
-        const raw = await streamTurn(cfg, convo, phase, onDelta, 'both', deltaTransform, signal)
+        const raw = await streamTurn(cfg, convo, phase, emitDelta, 'both', deltaTransform, signal)
         const envN = parseEnvelope(raw)
         if (envN.fala) fala = _finalFala(envN.fala, suppressGreeting)
         mutations = mutations.concat(envN.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo)))
@@ -530,6 +589,13 @@ export async function runTurn(
     }
     if (memoryQuestions.length && !/\?/.test(fala)) {
       fala = `${fala}\n\n${memoryQuestions[0]}`
+    }
+    if (voiceCodeSeen) {
+      const transcript = currentVisibleTranscript()
+      if (transcript) {
+        fala = transcript
+        falaVoz = transcript
+      }
     }
 
     appendMessages(sessionId, [

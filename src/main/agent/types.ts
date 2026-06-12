@@ -4,9 +4,8 @@
 
 import type { AgentActivityEvent, Acao, HiveWorkerStatus, TaskProgressEvent } from '../../shared/types'
 
-// Canal do delta: 'both' (exibe no chat E fala — padrão), 'display' (só texto na tela,
-// não fala — usado para streamar a resposta COMPLETA de código) ou 'speak' (só fala,
-// não altera a tela — usado para o resumo falável conciso de tarefas de programação).
+// Canal do delta: 'both' exibe no chat E fala (padrão). 'display' e 'speak' ficam
+// para usos legados/excepcionais; no modo programador por voz, o contrato é texto único.
 export type DeltaKind = 'both' | 'display' | 'speak'
 
 export type DeltaFn = (chunk: string, phase: number, kind?: DeltaKind, done?: boolean) => void

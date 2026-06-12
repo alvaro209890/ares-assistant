@@ -600,8 +600,8 @@ function focusErrorsForVoice(value: unknown, depth = 0): unknown {
 
 // ---------------------------------------------------------------------------
 // "Batimento" de voz em tarefas longas: se um comando passa de ~15 s, o Ares fala
-// uma atualização curta (e repete a cada ~30 s) no canal só-de-fala — o usuário
-// nunca fica no silêncio sem saber se travou. Puro (sem electron) e testável.
+// uma atualizacao curta visivel/falada (e repete a cada ~30 s) — o usuario nunca
+// fica no silencio sem saber se travou. Puro (sem electron) e testavel.
 // ---------------------------------------------------------------------------
 
 export const HEARTBEAT_FIRST_MS = 15_000
@@ -662,7 +662,7 @@ export function startHeartbeat(onDelta: HeartbeatDelta | undefined, phase: numbe
   if (activeHeartbeats === 1) {
     heartbeatIndex = 0
     const tick = (): void => {
-      onDelta(heartbeatPhrase(heartbeatIndex++, label), phase, 'speak', true)
+      onDelta(heartbeatPhrase(heartbeatIndex++, label), phase, 'both', true)
       heartbeatTimer = setTimeout(tick, HEARTBEAT_REPEAT_MS)
     }
     heartbeatTimer = setTimeout(tick, HEARTBEAT_FIRST_MS)
@@ -682,7 +682,7 @@ export function startHeartbeat(onDelta: HeartbeatDelta | undefined, phase: numbe
 export function toolResultsPrompt(results: unknown[], voice: boolean, codeMode: boolean): string {
   const base = 'Resultados das ferramentas (responda ao usuario em pt-BR, curto e falavel, sem inventar nada alem disto):'
   const voiceCode =
-    'MODO VOZ PARA CODIGO: responda em ate 2 frases; nao leia codigo, diff, JSON, stdout ou stderr; diga apenas o que foi feito, arquivos principais, status de validacao, a saude do projeto e se precisa de autorizacao. Ao reportar erro, fale so a causa raiz. IMPORTANTE: o resultado bruto JA FOI anunciado em voz ao usuario; nao repita a mesma informacao com outras palavras — acrescente o que ela significa e qual o proximo passo.'
+    'MODO VOZ PARA CODIGO: responda em ate 2 frases; nao leia codigo, diff, JSON, stdout ou stderr; diga apenas o que foi feito, arquivos principais, status de validacao, a saude do projeto e se precisa de autorizacao. Ao reportar erro, fale so a causa raiz. IMPORTANTE: o resultado bruto JA apareceu no chat e foi falado ao usuario; nao repita a mesma informacao com outras palavras; acrescente o que ela significa e qual o proximo passo.'
   const instruction = voice && codeMode ? `${base}\n${voiceCode}` : base
   const focused = voice && codeMode ? results.map((r) => focusErrorsForVoice(r)) : results
   const payload = voice && codeMode ? truncateForVoice(focused) : focused

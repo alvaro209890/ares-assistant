@@ -33,7 +33,6 @@ import {
   enqueueSentence,
   whenSpeechQueueIdle,
   clearSpeechQueue,
-  dropPendingSentences,
   splitSentences
 } from './tts'
 import { bargeInThreshold, interpretBusySpeech, stripWakeWord } from './voiceControl'
@@ -693,25 +692,20 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
 
       const off = window.ares.chat.onDelta(({ chunk, phase: ph, kind = 'both', done }) => {
         if (ph !== phase) {
-          // Fase nova (resposta pós-ferramentas): o que sobrou da fase anterior —
-          // buffer não falado e frases pendentes na fila — fica obsoleto e é
-          // descartado, mas a frase EM REPRODUÇÃO termina naturalmente. O corte
-          // seco (clearSpeechQueue) interrompia a voz no meio da palavra a cada
-          // rodada de ferramentas e dava a impressão de fala embolada/travada.
+          // Fase nova: o texto exibido continua sendo o transcript canonico.
+          // Finaliza o buffer pendente, sem descartar fala que corresponde a texto visivel.
           clearStaleTimer()
-          dropPendingSentences()
+          flush(true)
           phase = ph
-          display = ''
           sentenceBuf = ''
-          speaking = false
         }
-        // 'speak' = canal só de fala (resumo conciso de código): não vai pra tela.
+        // 'speak' legado/excepcional: fala sem alterar a tela.
         if (kind !== 'speak') {
           display += chunk
           const current = display
           setConversation((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: current } : m)))
         }
-        // 'display' = canal só de tela (resposta completa de código): não é falado.
+        // 'display' legado/excepcional: tela sem entrar na fila de fala.
         if (speak && kind !== 'display') {
           sentenceBuf += chunk
           flush(false)
