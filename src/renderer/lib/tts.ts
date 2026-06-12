@@ -711,10 +711,19 @@ const STATUS_FAST_RE =
   /^\s*(executando|rodando|checando|verificando|analisando|aplicando|compilando|testando|buscando|lendo|editando|criando|formatando|indexando|acionando|consultando|passando|preparando|instalando|atualizando|gerando|mapeando|identifiquei|encontrei|conclu[ií]do|pronto)\b[\s\S]{0,140}\p{L}[.!?…]+\s*$/iu
 
 function eagerSplitIndex(buffer: string): number {
-  if (buffer.length < EAGER_MAX_CHARS) return -1
-  const windowText = buffer.slice(EAGER_MIN_CHARS, EAGER_MAX_CHARS)
-  const comma = Math.max(windowText.lastIndexOf(','), windowText.lastIndexOf(';'), windowText.lastIndexOf(':'))
-  return comma >= 0 ? EAGER_MIN_CHARS + comma + 1 : -1
+  if (buffer.length < EAGER_MIN_CHARS) return -1
+  // Ideal window: 48-140 chars — best prosody
+  if (buffer.length >= EAGER_MAX_CHARS) {
+    const w = buffer.slice(EAGER_MIN_CHARS, EAGER_MAX_CHARS)
+    const c = Math.max(w.lastIndexOf(','), w.lastIndexOf(';'), w.lastIndexOf(':'))
+    if (c >= 0) return EAGER_MIN_CHARS + c + 1
+  }
+  // Fallback: any comma/semicolon/colon producing at least 15 chars.
+  // Covers "Perfeito, ..." patterns where the comma is early and the model
+  // goes silent for 15+ seconds during tool execution.
+  const w2 = buffer.slice(0, Math.min(buffer.length, EAGER_MAX_CHARS))
+  const c2 = Math.max(w2.lastIndexOf(','), w2.lastIndexOf(';'), w2.lastIndexOf(':'))
+  return c2 >= 14 ? c2 + 1 : -1
 }
 
 function chunkSplitIndex(text: string): number {

@@ -89,7 +89,10 @@ export default function Controls(): JSX.Element {
         {/* Exportar Demo Mode */}
         {aresState !== 'thinking' && (
           <button
-            onClick={() => window.ares.demo.export().then(ok => { if (ok) alert('Apresentação exportada com sucesso!') })}
+            onClick={() => window.ares.demo.export().then(ok => {
+              if (ok) alert('Apresentação exportada com sucesso!')
+              else alert('Nenhum slide capturado. Peça ao Ares para criar uma apresentação primeiro (ex.: "faça uma apresentação sobre o projeto").')
+            })}
             className="rounded-full border border-cyan-300/20 px-3 py-1 text-xs title-track text-cyan-200/60 transition hover:border-cyan-300/60 hover:text-cyan-100"
             title="Exportar apresentação do Demo Mode (ZIP)"
           >

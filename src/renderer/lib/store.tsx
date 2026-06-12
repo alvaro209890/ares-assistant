@@ -686,6 +686,11 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
         }
       }
 
+      let staleTimer: ReturnType<typeof setTimeout> | null = null
+      const clearStaleTimer = (): void => {
+        if (staleTimer) { clearTimeout(staleTimer); staleTimer = null }
+      }
+
       const off = window.ares.chat.onDelta(({ chunk, phase: ph, kind = 'both', done }) => {
         if (ph !== phase) {
           // Fase nova (resposta pós-ferramentas): o que sobrou da fase anterior —
@@ -693,6 +698,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
           // descartado, mas a frase EM REPRODUÇÃO termina naturalmente. O corte
           // seco (clearSpeechQueue) interrompia a voz no meio da palavra a cada
           // rodada de ferramentas e dava a impressão de fala embolada/travada.
+          clearStaleTimer()
           dropPendingSentences()
           phase = ph
           display = ''
@@ -709,8 +715,22 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
         if (speak && kind !== 'display') {
           sentenceBuf += chunk
           flush(false)
+          // Stale buffer flush: when the model pauses for tool execution, text
+          // sits unspoken for 15+ seconds. Force-flush after 2.5s of silence.
+          clearStaleTimer()
+          if (sentenceBuf.trim()) {
+            staleTimer = setTimeout(() => {
+              staleTimer = null
+              if (sentenceBuf.trim()) {
+                const text = sentenceBuf.trim()
+                sentenceBuf = ''
+                if (/[\p{L}\p{N}]/u.test(text)) queueSpeech(text)
+              }
+            }, 2500)
+          }
         }
         if (done) {
+          clearStaleTimer()
           flush(true)
         }
       })
@@ -726,6 +746,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
         const result = await window.ares.chat.ask(sid, userText, voice)
         off()
         offActivity()
+        clearStaleTimer()
         setTaskProgress(null)
         flush(true) // fala o restante do buffer
         boardRef.current = result.board
@@ -799,6 +820,7 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
       } catch (e) {
         off()
         offActivity()
+        clearStaleTimer()
         setTaskProgress(null)
         clearSpeechQueue()
         setConversation((prev) => prev.filter((m) => m.id !== assistantId))
