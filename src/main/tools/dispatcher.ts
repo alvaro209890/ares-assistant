@@ -99,7 +99,8 @@ export async function dispatchCommand(
   }
 
   const beating = async <T,>(work: Promise<T>): Promise<T> => {
-    const stop = startHeartbeat(ctx.onDelta, ctx.phase)
+    // Com o rótulo, o batimento de voz diz O QUE ainda está rodando, não um genérico.
+    const stop = startHeartbeat(ctx.onDelta, ctx.phase, progressLabel)
     try {
       return await work
     } finally {

@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { interpretBusySpeech, stripWakeWord } from '../src/renderer/lib/voiceControl'
-import { HEARTBEAT_FIRST_MS, HEARTBEAT_PHRASES, HEARTBEAT_REPEAT_MS, startHeartbeat } from '../src/main/voiceCode'
+import {
+  HEARTBEAT_FIRST_MS,
+  HEARTBEAT_PHRASES,
+  HEARTBEAT_REPEAT_MS,
+  gerundFragment,
+  heartbeatPhrase,
+  startHeartbeat
+} from '../src/main/voiceCode'
 
 describe('voz durante o trabalho — interpretBusySpeech', () => {
   it('cancela com verbo curto mesmo sem a palavra de ativação', () => {
@@ -73,6 +80,32 @@ describe('voz durante o trabalho — heartbeat de tarefas longas', () => {
   it('sem onDelta (sem streaming) não agenda nada', () => {
     const stop = startHeartbeat(undefined, 1)
     vi.advanceTimersByTime(HEARTBEAT_FIRST_MS * 2)
+    stop()
+  })
+
+  it('com rótulo da tarefa, o batimento relata O QUE ainda está rodando', () => {
+    expect(heartbeatPhrase(0, 'Rodando testes...')).toBe(' Ainda rodando testes, senhor.')
+    expect(heartbeatPhrase(1, 'Terminal: npm run build')).toBe(
+      ' Sigo executando npm run build. Aviso assim que terminar.'
+    )
+    // Sem rótulo, mantém a rotação genérica clássica.
+    expect(heartbeatPhrase(0)).toBe(HEARTBEAT_PHRASES[0])
+  })
+
+  it('gerundFragment converte rótulos de progresso em fragmento encaixável', () => {
+    expect(gerundFragment('Checando tipos...')).toBe('checando tipos')
+    expect(gerundFragment('Rodando: npm test')).toBe('executando npm test')
+    expect(gerundFragment('Buscando na web: "clima amanhã"')).toBe('buscando na web')
+    expect(gerundFragment('')).toBe('')
+  })
+
+  it('startHeartbeat com rótulo fala a tarefa real no canal só-de-fala', () => {
+    const deltas: { chunk: string; kind?: string }[] = []
+    const stop = startHeartbeat((chunk, _phase, kind) => deltas.push({ chunk, kind }), 2, 'Rodando testes...')
+    vi.advanceTimersByTime(HEARTBEAT_FIRST_MS)
+    expect(deltas).toHaveLength(1)
+    expect(deltas[0].chunk).toContain('rodando testes')
+    expect(deltas[0].kind).toBe('speak')
     stop()
   })
 })

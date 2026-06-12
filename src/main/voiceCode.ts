@@ -386,22 +386,93 @@ function summarizeCodeResult(tipo: string, resultado: Record<string, unknown>, e
   }
 }
 
+// Palavras sem conteúdo para a comparação de paráfrase (artigos, preposições, etc.).
+const SPEECH_STOPWORDS = new Set([
+  'o', 'a', 'os', 'as', 'um', 'uma', 'de', 'do', 'da', 'dos', 'das', 'em', 'no', 'na',
+  'nos', 'nas', 'e', 'ou', 'que', 'com', 'para', 'por', 'ao', 'aos', 'se', 'já', 'foi',
+  'ser', 'sem', 'mais', 'como', 'seu', 'sua', 'senhor', 'tudo', 'isso', 'este', 'esta',
+  'são', 'está', 'estão', 'pelo', 'pela', 'também'
+])
+
 /**
- * Duas falas são "a mesma" quando, normalizadas (sem pontuação/acentos extras de
- * espaço, caixa baixa), uma contém a outra. Evita o Ares repetir em sequência o
- * resumo imediato da ferramenta e a conclusão do modelo quando dizem o mesmo.
+ * Duas falas são "a mesma" quando, normalizadas, uma contém a outra OU quando são
+ * paráfrases óbvias (mesmas palavras-chave em outra ordem: "Atualizei code.ts" vs
+ * "Apliquei a correção em code.ts"). Evita o Ares relatar o MESMO andamento duas
+ * vezes seguidas — o resumo imediato da ferramenta e a conclusão do modelo.
  */
 export function isDuplicateSpeech(a: string, b: string): boolean {
   const norm = (s: string): string =>
     String(s || '')
       .toLowerCase()
-      .replace(/[.,;:!?…]/g, ' ')
+      .replace(/[.,;:!?…"']/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
   const na = norm(a)
   const nb = norm(b)
   if (!na || !nb) return false
-  return na === nb || na.includes(nb) || nb.includes(na)
+  if (na === nb || na.includes(nb) || nb.includes(na)) return true
+  // Paráfrase: coeficiente de sobreposição dos tokens significativos. Frases muito
+  // curtas (menos de 3 tokens úteis) não dão confiança estatística — nunca casam.
+  const tokens = (s: string): Set<string> =>
+    new Set(s.split(' ').filter((w) => w.length > 2 && !SPEECH_STOPWORDS.has(w)))
+  const ta = tokens(na)
+  const tb = tokens(nb)
+  if (ta.size < 3 || tb.size < 3) return false
+  let common = 0
+  for (const w of ta) if (tb.has(w)) common++
+  return common / Math.min(ta.size, tb.size) >= 0.72
+}
+
+/** Frase de anúncio para UMA ação; '' quando o tipo não tem anúncio mapeado. */
+function announcePhrase(a: Acao): string {
+  const tipo = String(a?.tipo || '')
+  const file = basename(String(a?.arquivo || a?.file || ''))
+  switch (tipo) {
+    case 'codigo.testar':
+      return 'Executando os testes, senhor.'
+    case 'codigo.typecheck':
+      return 'Checando os tipos do projeto.'
+    case 'codigo.lint':
+      return 'Passando o linter no projeto.'
+    case 'codigo.formatar':
+      return 'Formatando o código.'
+    case 'codigo.diagnostico':
+      return 'Rodando o diagnóstico do projeto.'
+    case 'codigo.deps':
+      return 'Verificando as dependências.'
+    case 'codigo.editar':
+      return file ? `Aplicando a correção em ${file}.` : 'Aplicando a edição.'
+    case 'codigo.criar':
+      return file ? `Criando ${file}.` : 'Criando o arquivo.'
+    case 'codigo.patch.aplicar':
+      return 'Aplicando o patch com validação de sintaxe.'
+    case 'codigo.buscar':
+      return 'Buscando no código.'
+    case 'codigo.ler':
+      return file ? `Lendo ${file}.` : 'Lendo o arquivo.'
+    case 'codigo.explicar':
+      return file ? `Analisando ${file}.` : 'Analisando o trecho.'
+    case 'codigo.terminal':
+    case 'codigo.comando':
+    case 'codigo.confirmar': {
+      const c = String(a?.comando || a?.command || '').trim().split(/\s+/).slice(0, 3).join(' ')
+      return c ? `Executando ${c} no terminal.` : 'Executando o comando.'
+    }
+    case 'codigo.projeto':
+      return 'Acionando o coder autônomo. Acompanho os passos.'
+    case 'codigo.git':
+      return 'Consultando o estado do Git.'
+    case 'subagente.depurar':
+      return 'Passando o erro ao Prometeu para depuração.'
+    case 'subagente.pesquisar':
+      return 'Acionando a Atena.'
+    case 'subagente.construir':
+      return 'Acionando o Hefesto.'
+    case 'subagente.auditar':
+      return 'Acionando a Têmis.'
+    default:
+      return ''
+  }
 }
 
 /**
@@ -409,59 +480,24 @@ export function isDuplicateSpeech(a: string, b: string): boolean {
  * curta dita EM PARALELO com a execução (voz assíncrona, não segura o turno).
  * Cobre o silêncio das rodadas intermediárias do modo voz+código, em que a
  * resposta crua do modelo vai só para a tela — sem isto, o usuário ficava no
- * vácuo até o heartbeat dos 15 s. A primeira ação reconhecida dita o anúncio.
- * Pura e testável.
+ * vácuo até o heartbeat dos 15 s. Quando a rodada tem DUAS frentes reconhecidas
+ * (ex.: testes + typecheck em paralelo), anuncia ambas numa frase só — o relato
+ * passa a refletir o que realmente está rodando. Pura e testável.
  */
 export function voiceToolAnnouncement(actions: Acao[]): string {
+  const phrases: string[] = []
   for (const a of actions || []) {
-    const tipo = String(a?.tipo || '')
-    const file = basename(String(a?.arquivo || a?.file || ''))
-    switch (tipo) {
-      case 'codigo.testar':
-        return 'Executando os testes, senhor.'
-      case 'codigo.typecheck':
-        return 'Checando os tipos do projeto.'
-      case 'codigo.lint':
-        return 'Passando o linter no projeto.'
-      case 'codigo.formatar':
-        return 'Formatando o código.'
-      case 'codigo.diagnostico':
-        return 'Rodando o diagnóstico do projeto.'
-      case 'codigo.deps':
-        return 'Verificando as dependências.'
-      case 'codigo.editar':
-        return file ? `Aplicando a correção em ${file}.` : 'Aplicando a edição.'
-      case 'codigo.criar':
-        return file ? `Criando ${file}.` : 'Criando o arquivo.'
-      case 'codigo.patch.aplicar':
-        return 'Aplicando o patch com validação de sintaxe.'
-      case 'codigo.buscar':
-        return 'Buscando no código.'
-      case 'codigo.ler':
-        return file ? `Lendo ${file}.` : 'Lendo o arquivo.'
-      case 'codigo.explicar':
-        return file ? `Analisando ${file}.` : 'Analisando o trecho.'
-      case 'codigo.terminal':
-      case 'codigo.comando':
-      case 'codigo.confirmar': {
-        const c = String(a?.comando || a?.command || '').trim().split(/\s+/).slice(0, 3).join(' ')
-        return c ? `Executando ${c} no terminal.` : 'Executando o comando.'
-      }
-      case 'codigo.projeto':
-        return 'Acionando o coder autônomo. Acompanho os passos.'
-      case 'codigo.git':
-        return 'Consultando o estado do Git.'
-      case 'subagente.depurar':
-        return 'Passando o erro ao Prometeu para depuração.'
-      case 'subagente.pesquisar':
-        return 'Acionando a Atena.'
-      case 'subagente.construir':
-        return 'Acionando o Hefesto.'
-      case 'subagente.auditar':
-        return 'Acionando a Têmis.'
-    }
+    const p = announcePhrase(a)
+    if (p && !phrases.includes(p)) phrases.push(p)
+    if (phrases.length >= 2) break
   }
-  return ''
+  if (!phrases.length) return ''
+  // Frases com mais de um período (ex.: coder autônomo) não combinam bem.
+  if (phrases.length === 1 || phrases.some((p) => p.includes('. '))) return phrases[0]
+  const head = phrases[0].replace(/[.!]\s*$/, '').replace(/,\s*senhor$/i, '')
+  const tailRaw = phrases[1].replace(/[.!]\s*$/, '').replace(/,\s*senhor$/i, '')
+  const tail = tailRaw.charAt(0).toLowerCase() + tailRaw.slice(1)
+  return `${head} e ${tail}.`
 }
 
 export function codeVoiceProgressSummary(results: unknown[]): string {
@@ -565,17 +601,55 @@ export const HEARTBEAT_PHRASES = [
 
 type HeartbeatDelta = (chunk: string, phase: number, kind?: 'both' | 'display' | 'speak', done?: boolean) => void
 
+/**
+ * Converte o rótulo de progresso da ferramenta ("Rodando testes...", "Terminal: npm
+ * run build") num fragmento de gerúndio encaixável em frase ("rodando testes",
+ * "executando npm run build"). '' quando não há rótulo utilizável.
+ */
+export function gerundFragment(label?: string): string {
+  const clean = String(label || '').replace(/\.{2,}\s*$/, '').replace(/\s+/g, ' ').trim()
+  if (!clean) return ''
+  const colon = clean.match(/^([^:]+):\s*(.+)$/)
+  if (colon) {
+    const head = colon[1].trim()
+    const tail = colon[2].trim()
+    // "Terminal: npm run build" / "Rodando: npm test" -> "executando npm run build"
+    if (/^(terminal|rodando|comando)$/i.test(head)) return `executando ${tail}`
+    // Cabeçalho já em gerúndio ("Buscando na web: x") -> usa só o cabeçalho.
+    if (/ndo$/i.test(head.split(/\s+/)[0])) return head.charAt(0).toLowerCase() + head.slice(1)
+    // "Coder autônomo: objetivo" -> "com o coder autônomo em andamento"
+    return `com ${head.charAt(0).toLowerCase()}${head.slice(1)} em andamento`
+  }
+  return clean.charAt(0).toLowerCase() + clean.slice(1)
+}
+
+/**
+ * Frase do batimento. COM rótulo, diz o que AINDA está rodando ("Ainda rodando os
+ * testes, senhor.") — o relato de voz acompanha a tarefa real, em vez do genérico
+ * "trabalhando nisso". Sem rótulo, mantém a rotação clássica.
+ */
+export function heartbeatPhrase(index: number, label?: string): string {
+  const frag = gerundFragment(label)
+  if (!frag) return HEARTBEAT_PHRASES[index % HEARTBEAT_PHRASES.length]
+  const variants = [
+    ` Ainda ${frag}, senhor.`,
+    ` Sigo ${frag}. Aviso assim que terminar.`,
+    ` Quase lá. Continuo ${frag}.`
+  ]
+  return variants[index % variants.length]
+}
+
 let activeHeartbeats = 0
 let heartbeatTimer: ReturnType<typeof setTimeout> | null = null
 let heartbeatIndex = 0
 
-export function startHeartbeat(onDelta: HeartbeatDelta | undefined, phase: number): () => void {
+export function startHeartbeat(onDelta: HeartbeatDelta | undefined, phase: number, label?: string): () => void {
   if (!onDelta) return () => {}
   activeHeartbeats++
   if (activeHeartbeats === 1) {
     heartbeatIndex = 0
     const tick = (): void => {
-      onDelta(HEARTBEAT_PHRASES[heartbeatIndex++ % HEARTBEAT_PHRASES.length], phase, 'speak', true)
+      onDelta(heartbeatPhrase(heartbeatIndex++, label), phase, 'speak', true)
       heartbeatTimer = setTimeout(tick, HEARTBEAT_REPEAT_MS)
     }
     heartbeatTimer = setTimeout(tick, HEARTBEAT_FIRST_MS)
@@ -595,7 +669,7 @@ export function startHeartbeat(onDelta: HeartbeatDelta | undefined, phase: numbe
 export function toolResultsPrompt(results: unknown[], voice: boolean, codeMode: boolean): string {
   const base = 'Resultados das ferramentas (responda ao usuario em pt-BR, curto e falavel, sem inventar nada alem disto):'
   const voiceCode =
-    'MODO VOZ PARA CODIGO: responda em ate 2 frases; nao leia codigo, diff, JSON, stdout ou stderr; diga apenas o que foi feito, arquivos principais, status de validacao, a saude do projeto e se precisa de autorizacao. Ao reportar erro, fale so a causa raiz.'
+    'MODO VOZ PARA CODIGO: responda em ate 2 frases; nao leia codigo, diff, JSON, stdout ou stderr; diga apenas o que foi feito, arquivos principais, status de validacao, a saude do projeto e se precisa de autorizacao. Ao reportar erro, fale so a causa raiz. IMPORTANTE: o resultado bruto JA FOI anunciado em voz ao usuario; nao repita a mesma informacao com outras palavras — acrescente o que ela significa e qual o proximo passo.'
   const instruction = voice && codeMode ? `${base}\n${voiceCode}` : base
   const focused = voice && codeMode ? results.map((r) => focusErrorsForVoice(r)) : results
   const payload = voice && codeMode ? truncateForVoice(focused) : focused

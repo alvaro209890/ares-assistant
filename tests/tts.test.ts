@@ -1,5 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { clearSpeechQueue, enqueueSentence, normalizeSpeechText, speak, splitSentences, whenSpeechQueueIdle } from '../src/renderer/lib/tts'
+import {
+  PIPER_ATTEMPT_TIMEOUT_MS,
+  PIPER_FAILURE_COOLDOWN_MS,
+  SENTENCE_PAUSE_FULL_MS,
+  clearSpeechQueue,
+  dropPendingSentences,
+  enqueueSentence,
+  normalizeSpeechText,
+  speak,
+  splitSentences,
+  whenSpeechQueueIdle
+} from '../src/renderer/lib/tts'
 import { finalSpeechFallback } from '../src/renderer/lib/store'
 
 class MockUtterance {
@@ -91,9 +102,9 @@ describe('tts', () => {
     const onEnd = vi.fn()
 
     const done = speak('teste curto', { engine: 'piper', onError, onEnd })
-    await vi.advanceTimersByTimeAsync(3500)
+    await vi.advanceTimersByTimeAsync(PIPER_ATTEMPT_TIMEOUT_MS)
     await vi.advanceTimersByTimeAsync(180)
-    await vi.advanceTimersByTimeAsync(3500)
+    await vi.advanceTimersByTimeAsync(PIPER_ATTEMPT_TIMEOUT_MS)
     await vi.advanceTimersByTimeAsync(20)
     await done
 
@@ -122,10 +133,50 @@ describe('tts', () => {
     enqueueSentence('primeira frase.', { engine: 'web' })
     enqueueSentence('segunda frase.', { engine: 'web' })
     const idle = whenSpeechQueueIdle()
-    await vi.advanceTimersByTimeAsync(30)
+    // 10ms de fala + respiro entre frases + 10ms da segunda
+    await vi.advanceTimersByTimeAsync(SENTENCE_PAUSE_FULL_MS + 60)
     await idle
 
     expect(speakCalls).toEqual(['primeira frase.', 'segunda frase.'])
+  })
+
+  it('dropPendingSentences descarta as pendentes mas deixa a frase atual terminar', async () => {
+    const { speakCalls, cancel } = installSpeechMock()
+    enqueueSentence('primeira frase.', { engine: 'web' })
+    enqueueSentence('segunda frase.', { engine: 'web' })
+    enqueueSentence('terceira frase.', { engine: 'web' })
+
+    // A primeira já está tocando; a troca de fase descarta só o que ainda não falou.
+    dropPendingSentences()
+    cancel.mockClear()
+    await vi.advanceTimersByTimeAsync(SENTENCE_PAUSE_FULL_MS + 60)
+    await whenSpeechQueueIdle()
+
+    expect(speakCalls).toEqual(['primeira frase.'])
+    expect(cancel).not.toHaveBeenCalled() // nada de corte seco no meio da palavra
+  })
+
+  it('após falha transitória do Piper, a próxima frase ESPERA o cooldown e fala (não emudece)', async () => {
+    installSpeechMock()
+    const { playCalls } = installAudioMock()
+    const onError = vi.fn()
+    let calls = 0
+    window.ares.tts.synthesize = vi.fn(() => {
+      calls++
+      // 1ª chamada = prefetch da frase 2; 2ª e 3ª = tentativas da frase 1. Todas falham
+      // (CPU ocupada). Da 4ª em diante (retentativa da frase 2 pós-cooldown), funciona.
+      return calls <= 3 ? Promise.reject(new Error('cpu ocupada')) : Promise.resolve(new ArrayBuffer(44100))
+    })
+
+    enqueueSentence('primeira frase de status.', { engine: 'piper', onError })
+    enqueueSentence('segunda frase de status.', { engine: 'piper', onError })
+    const idle = whenSpeechQueueIdle()
+    await vi.advanceTimersByTimeAsync(400) // tentativas da frase 1 (retry com delay)
+    await vi.advanceTimersByTimeAsync(PIPER_FAILURE_COOLDOWN_MS + SENTENCE_PAUSE_FULL_MS + 100)
+    await idle
+
+    expect(onError).toHaveBeenCalledTimes(1) // só a primeira frase falhou
+    expect(playCalls.length).toBe(1) // a segunda tocou após a espera — não foi pulada
   })
 
   it('nao deixa a fila presa quando Web Speech nao inicia', async () => {

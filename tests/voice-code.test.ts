@@ -32,6 +32,21 @@ describe('voiceToolAnnouncement — anúncio falado não-bloqueante', () => {
     expect(voiceToolAnnouncement([{ tipo: 'clima.consultar' }])).toBe('')
     expect(voiceToolAnnouncement([])).toBe('')
   })
+
+  it('combina duas frentes da mesma rodada num só anúncio (relato fiel ao que roda)', () => {
+    expect(voiceToolAnnouncement([{ tipo: 'codigo.testar' }, { tipo: 'codigo.typecheck' }])).toBe(
+      'Executando os testes e checando os tipos do projeto.'
+    )
+    expect(
+      voiceToolAnnouncement([{ tipo: 'codigo.editar', arquivo: 'src/a.ts' }, { tipo: 'codigo.testar' }])
+    ).toBe('Aplicando a correção em a.ts e executando os testes.')
+  })
+
+  it('não combina anúncios com mais de um período (coder autônomo fala sozinho)', () => {
+    expect(voiceToolAnnouncement([{ tipo: 'codigo.projeto' }, { tipo: 'codigo.testar' }])).toBe(
+      'Acionando o coder autônomo. Acompanho os passos.'
+    )
+  })
 })
 
 describe('voz no modo programador', () => {
@@ -172,6 +187,22 @@ describe('voz no modo programador', () => {
     expect(isDuplicateSpeech('Analisei o diretório X: 3 arquivos. Estrutura em ordem.', 'Analisei o diretório X: 3 arquivos.')).toBe(true)
     expect(isDuplicateSpeech('Analisei o diretório X.', 'O projeto usa TypeScript e os testes passam.')).toBe(false)
     expect(isDuplicateSpeech('', 'qualquer coisa')).toBe(false)
+  })
+
+  it('detecta paráfrase do MESMO andamento (evita falar dois relatos do mesmo passo)', () => {
+    expect(
+      isDuplicateSpeech(
+        'Comando "npm run verify" concluido com sucesso.',
+        'O comando npm run verify foi concluido com sucesso, senhor.'
+      )
+    ).toBe(true)
+    // Relato que ACRESCENTA informação nova (próximo passo) não é duplicata.
+    expect(
+      isDuplicateSpeech(
+        'Comando "npm run verify" concluido com sucesso.',
+        'Verificação concluída. Agora vou aplicar a correção no arquivo de rotas.'
+      )
+    ).toBe(false)
   })
 
   it('resume typecheck, dependencias e pendencias de forma falavel', () => {

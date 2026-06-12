@@ -31,7 +31,8 @@ export interface PiperSynthParams {
 
 const MAX_POOL = 4
 const IDLE_KILL_MS = 90_000
-const REQUEST_TIMEOUT_MS = 6500
+// Folgado para sobreviver à CPU ocupada com build/testes (ver piper.ts).
+const REQUEST_TIMEOUT_MS = 9000
 const REAPER_INTERVAL_MS = 30_000
 
 // ---------------------------------------------------------------------------

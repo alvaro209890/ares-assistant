@@ -26,7 +26,15 @@ import type {
 } from '../../shared/types'
 import * as audio from './audio'
 import type { SpeakOptions } from './tts'
-import { cancelSpeech, loadVoices, enqueueSentence, whenSpeechQueueIdle, clearSpeechQueue, splitSentences } from './tts'
+import {
+  cancelSpeech,
+  loadVoices,
+  enqueueSentence,
+  whenSpeechQueueIdle,
+  clearSpeechQueue,
+  dropPendingSentences,
+  splitSentences
+} from './tts'
 import { interpretBusySpeech, stripWakeWord } from './voiceControl'
 
 export interface ConvMsg {
@@ -575,12 +583,12 @@ export function AresProvider({ children }: { children: React.ReactNode }): JSX.E
 
       const off = window.ares.chat.onDelta(({ chunk, phase: ph, kind = 'both', done }) => {
         if (ph !== phase) {
-          // Resposta final após ferramentas: encerra a fase anterior e recomeça.
-          flush(true)
-          // Plano 1: Cancelamento imediato de fila de fala e áudio residual na mudança de fase/passo.
-          // Isso impede que o áudio de uma fase anterior (planejamento, etc.) continue tocando
-          // quando o Ares já mudou de contexto e começou a nova fase agêntica.
-          clearSpeechQueue()
+          // Fase nova (resposta pós-ferramentas): o que sobrou da fase anterior —
+          // buffer não falado e frases pendentes na fila — fica obsoleto e é
+          // descartado, mas a frase EM REPRODUÇÃO termina naturalmente. O corte
+          // seco (clearSpeechQueue) interrompia a voz no meio da palavra a cada
+          // rodada de ferramentas e dava a impressão de fala embolada/travada.
+          dropPendingSentences()
           phase = ph
           display = ''
           sentenceBuf = ''

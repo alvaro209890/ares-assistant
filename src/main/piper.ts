@@ -20,7 +20,9 @@ const BIN_ASSET: Partial<Record<NodeJS.Platform, string>> = {
   win32: 'piper_windows_amd64.zip'
 }
 const VOICE_BASE = 'https://huggingface.co/rhasspy/piper-voices/resolve/main/pt/pt_BR'
-const PIPER_SYNTHESIS_TIMEOUT_MS = 6500
+// Folgado de propósito: durante build/testes a CPU está ocupada e a síntese demora
+// legitimamente mais — estourar cedo derrubava a voz justo quando ela mais informa.
+const PIPER_SYNTHESIS_TIMEOUT_MS = 9000
 // faber-medium: voz masculina pt-BR, grave e clara — perfil "JARVIS" profissional.
 const DEFAULT_VOICE = {
   name: 'pt_BR-faber-medium',

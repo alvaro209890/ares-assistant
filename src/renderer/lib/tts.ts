@@ -13,6 +13,17 @@ let currentWebStop: (() => void) | null = null
 let piperStatusCache: { ready: boolean; voices: string[] } | null = null
 let piperStatusAge = 0
 let piperDisabledUntil = 0
+let piperConsecutiveFailures = 0
+
+// Token de cancelamento POR FRASE. O teto rígido da fila (SENTENCE_HARD_TIMEOUT_MS)
+// abandona o speakInternal em andamento e segue para a próxima frase; sem o token, a
+// frase "zumbi" ainda podia tocar quando a síntese atrasada chegasse — POR CIMA da
+// frase seguinte (era uma das causas de vozes sobrepostas).
+type SentenceRun = { cancelled: boolean }
+
+function staleRun(generation: number, run: SentenceRun): boolean {
+  return generation !== queueGeneration || run.cancelled
+}
 
 function log(level: 'debug' | 'info' | 'warn' | 'error', message: string, err?: unknown): void {
   const formatted = `[TTS] ${message}`
@@ -30,11 +41,18 @@ const prefetched = new Map<string, Promise<ArrayBuffer>>()
 const PREFETCH_DEPTH = 2
 const PREFETCH_MAX = 4
 
-const PIPER_STATUS_TIMEOUT_MS = 1200
-const PIPER_ATTEMPT_TIMEOUT_MS = 3500
-const PIPER_TOTAL_BUDGET_MS = 8000
+const PIPER_STATUS_TIMEOUT_MS = 2000
+// Budgets de síntese folgados de propósito: o cenário crítico é falar DURANTE uma
+// tarefa pesada (build/testes comendo CPU), quando a síntese fica legitimamente mais
+// lenta. Com budget curto ela "falhava" -> cooldown -> frases puladas -> o Ares ficava
+// mudo no meio da tarefa. Exportados para os testes não duplicarem os números.
+export const PIPER_ATTEMPT_TIMEOUT_MS = 6000
+export const PIPER_TOTAL_BUDGET_MS = 14000
 const PIPER_MAX_RETRIES = 2
-const PIPER_FAILURE_COOLDOWN_MS = 5000
+export const PIPER_FAILURE_COOLDOWN_MS = 5000
+// Falhas seguidas além deste limite = Piper fora do ar de verdade; aí sim as frases
+// são puladas sem espera (não vale atrasar a fila por algo que não vai voltar sozinho).
+const PIPER_GIVEUP_FAILURES = 3
 const WEB_START_TIMEOUT_MS = 2600
 const WEB_END_BASE_TIMEOUT_MS = 5000
 const WEB_END_PER_CHAR_MS = 85
@@ -169,9 +187,10 @@ async function webSpeakOnce(
   text: string,
   opts: SpeakOptions,
   voices: SpeechSynthesisVoice[],
-  generation: number
+  generation: number,
+  run: SentenceRun
 ): Promise<'ended' | 'cancelled' | 'failed'> {
-  if (generation !== queueGeneration) return 'cancelled'
+  if (staleRun(generation, run)) return 'cancelled'
   log('debug', `webSpeakOnce: text="${text}", generation=${generation}`)
   const u = new SpeechSynthesisUtterance(text)
   u.lang = 'pt-BR'
@@ -187,7 +206,7 @@ async function webSpeakOnce(
   if (chosen) u.voice = chosen
 
   return new Promise((resolve) => {
-    if (generation !== queueGeneration) {
+    if (staleRun(generation, run)) {
       resolve('cancelled')
       return
     }
@@ -239,7 +258,12 @@ async function webSpeakOnce(
   })
 }
 
-async function webSpeak(text: string, opts: SpeakOptions, generation: number): Promise<'ok' | 'failed' | 'cancelled'> {
+async function webSpeak(
+  text: string,
+  opts: SpeakOptions,
+  generation: number,
+  run: SentenceRun
+): Promise<'ok' | 'failed' | 'cancelled'> {
   log('info', `webSpeak: starting fallback webSpeak for "${text}", generation=${generation}`)
   const synth = window.speechSynthesis
   if (!synth) {
@@ -248,19 +272,19 @@ async function webSpeak(text: string, opts: SpeakOptions, generation: number): P
     return 'failed'
   }
 
-  if (generation !== queueGeneration) return 'cancelled'
+  if (staleRun(generation, run)) return 'cancelled'
   let voices = synth.getVoices()
   if (!voices.length) {
     voices = await loadVoices()
-    if (generation !== queueGeneration) return 'cancelled'
+    if (staleRun(generation, run)) return 'cancelled'
   }
 
   for (let attempt = 0; attempt < WEB_MAX_RETRIES; attempt++) {
-    if (generation !== queueGeneration) return 'cancelled'
+    if (staleRun(generation, run)) return 'cancelled'
     log('debug', `webSpeak: attempt ${attempt + 1} of ${WEB_MAX_RETRIES}`)
     synth.cancel()
-    const result = await webSpeakOnce(synth, text, opts, voices, generation)
-    if (generation !== queueGeneration) return 'cancelled'
+    const result = await webSpeakOnce(synth, text, opts, voices, generation, run)
+    if (staleRun(generation, run)) return 'cancelled'
     if (result === 'ended') {
       opts.onEnd?.()
       return 'ok'
@@ -285,7 +309,9 @@ async function getPiperStatus(): Promise<{ ready: boolean; voices: string[] }> {
     piperStatusAge = now
     return piperStatusCache
   } catch {
-    return { ready: false, voices: [] }
+    // Sob carga (build/testes), a consulta pode estourar o timeout. Piper instalado
+    // não some de repente: usa o último status conhecido em vez de emudecer a frase.
+    return piperStatusCache ?? { ready: false, voices: [] }
   }
 }
 
@@ -342,16 +368,31 @@ async function takePrefetched(cleanText: string, opts: SpeakOptions): Promise<Ar
   }
 }
 
-async function piperSpeak(text: string, opts: SpeakOptions, generation: number, force = false): Promise<boolean> {
+async function piperSpeak(
+  text: string,
+  opts: SpeakOptions,
+  generation: number,
+  run: SentenceRun,
+  force = false
+): Promise<boolean> {
   log('debug', `piperSpeak: force=${force}, text="${text}", generation=${generation}`)
   try {
-    if (generation !== queueGeneration) return false
+    if (staleRun(generation, run)) return false
     if (!force && Date.now() < piperDisabledUntil) {
-      log('debug', `piperSpeak: Piper cooldown active, skipping Piper for now`)
-      return false
+      if (piperConsecutiveFailures >= PIPER_GIVEUP_FAILURES) {
+        log('debug', 'piperSpeak: Piper em falha persistente, pulando a frase')
+        return false
+      }
+      // Falha transitória (CPU ocupada com a tarefa): ESPERA o resto do cooldown e
+      // tenta de novo. Pular a frase deixava o Ares mudo no meio das tarefas de
+      // código; atrasar alguns segundos preserva o relato do que está acontecendo.
+      const wait = Math.min(PIPER_FAILURE_COOLDOWN_MS, Math.max(0, piperDisabledUntil - Date.now()))
+      log('debug', `piperSpeak: cooldown ativo, aguardando ${wait}ms antes de tentar de novo`)
+      await delay(wait)
+      if (staleRun(generation, run)) return false
     }
     const status = await getPiperStatus()
-    if (generation !== queueGeneration) return false
+    if (staleRun(generation, run)) return false
     if (!status.ready || !status.voices.length) {
       log('debug', `piperSpeak: Piper status is not ready or no voices, skipping Piper`)
       return false
@@ -361,8 +402,9 @@ async function piperSpeak(text: string, opts: SpeakOptions, generation: number, 
       opts._prefetchedWav ??
       (await takePrefetched(text, opts)) ??
       (await synthesizeWithRetry(text, opts.piperVoice, opts.rate))
-    
-    if (generation !== queueGeneration) return false
+
+    piperConsecutiveFailures = 0
+    if (staleRun(generation, run)) return false
     log('debug', `piperSpeak: audio data received successfully, length=${wav.byteLength}`)
     const blob = new Blob([wav], { type: 'audio/wav' })
     const url = URL.createObjectURL(blob)
@@ -371,7 +413,7 @@ async function piperSpeak(text: string, opts: SpeakOptions, generation: number, 
     audio.volume = opts.volume ?? 1
 
     const result = await new Promise<'ended' | 'cancelled'>((resolve, reject) => {
-      if (generation !== queueGeneration) {
+      if (staleRun(generation, run)) {
         URL.revokeObjectURL(url)
         resolve('cancelled')
         return
@@ -425,13 +467,15 @@ async function piperSpeak(text: string, opts: SpeakOptions, generation: number, 
       })
     })
 
-    if (generation !== queueGeneration) return false
+    if (staleRun(generation, run)) return false
     if (result === 'ended') opts.onEnd?.()
     log('debug', `piperSpeak completed for "${text}" with result: ${result}`)
     return true
   } catch (err) {
     log('warn', `piperSpeak: failed to synthesize or play "${text}"`, err)
-    // Evita repetir timeout em todas as frases do mesmo turno.
+    // Evita repetir timeout em todas as frases do mesmo turno; o contador separa
+    // falha transitória (espera e tenta) de Piper fora do ar (pula sem atrasar).
+    piperConsecutiveFailures++
     piperDisabledUntil = Date.now() + PIPER_FAILURE_COOLDOWN_MS
     return false
   }
@@ -444,7 +488,13 @@ function prefersPiper(opts: SpeakOptions): boolean {
   return opts.engine === 'piper' || (opts.engine === 'auto' && (platform === 'linux' || platform === 'win32'))
 }
 
-async function speakInternal(text: string, opts: SpeakOptions, cancelBefore: boolean, generation: number): Promise<void> {
+async function speakInternal(
+  text: string,
+  opts: SpeakOptions,
+  cancelBefore: boolean,
+  generation: number,
+  run: SentenceRun
+): Promise<void> {
   log('debug', `speakInternal: text="${text}", cancelBefore=${cancelBefore}, generation=${generation}`)
   const clean = normalizeSpeechText(text)
   if (!clean) {
@@ -453,11 +503,11 @@ async function speakInternal(text: string, opts: SpeakOptions, cancelBefore: boo
     return
   }
   if (cancelBefore) cancelSpeech()
-  if (generation !== queueGeneration) return
+  if (staleRun(generation, run)) return
   if (prefersPiper(opts)) {
     log('debug', `speakInternal: prefers Piper engine`)
-    const ok = await piperSpeak(clean, opts, generation)
-    if (generation !== queueGeneration) return
+    const ok = await piperSpeak(clean, opts, generation, run)
+    if (staleRun(generation, run)) return
     if (ok) return
     log('warn', `speakInternal: Piper failed; keeping configured neural voice and not falling back to Web Speech`)
     opts.onError?.('Voz neural Piper falhou nesta frase. Mantive a voz atual e liberei o Ares.')
@@ -465,8 +515,8 @@ async function speakInternal(text: string, opts: SpeakOptions, cancelBefore: boo
     return
   }
   log('debug', `speakInternal: prefers Web Speech engine`)
-  const webResult = await webSpeak(clean, opts, generation)
-  if (generation !== queueGeneration) return
+  const webResult = await webSpeak(clean, opts, generation, run)
+  if (staleRun(generation, run)) return
   if (webResult === 'ok' || webResult === 'cancelled') return
   opts.onEnd?.()
 }
@@ -480,7 +530,7 @@ export async function speak(text: string, opts: SpeakOptions = {}): Promise<void
   draining = false
   const generation = queueGeneration
   try {
-    await speakInternal(text, opts, true, generation)
+    await speakInternal(text, opts, true, generation, { cancelled: false })
   } catch (err) {
     log('error', `speak: uncaught speech error for "${text}"`, err)
     opts.onError?.('Falha inesperada na fala.')
@@ -504,6 +554,14 @@ let draining = false
 let idleWaiters: (() => void)[] = []
 let queueGeneration = 0
 let drainRunId = 0
+
+// Pausa audível ENTRE frases (o WAV do Piper chega aparado, então o respiro é este).
+export const SENTENCE_PAUSE_FULL_MS = 160
+export const SENTENCE_PAUSE_SOFT_MS = 70
+
+function interSentencePauseMs(prev: string): number {
+  return /[.!?…]["')\]]*\s*$/.test(prev) ? SENTENCE_PAUSE_FULL_MS : SENTENCE_PAUSE_SOFT_MS
+}
 
 function resolveIdle(): void {
   const waiters = idleWaiters
@@ -529,11 +587,16 @@ async function drainQueue(): Promise<void> {
     for (let i = 0; i < PREFETCH_DEPTH && i < sentenceQueue.length; i++) {
       startPrefetch(sentenceQueue[i].text, sentenceQueue[i].opts)
     }
+    const run: SentenceRun = { cancelled: false }
+    let spokeWithoutError = true
     try {
-      await withTimeout(speakInternal(text, opts, false, generation), SENTENCE_HARD_TIMEOUT_MS, 'sentence')
+      await withTimeout(speakInternal(text, opts, false, generation, run), SENTENCE_HARD_TIMEOUT_MS, 'sentence')
     } catch (err) {
+      spokeWithoutError = false
       log('error', `drainQueue: uncaught speech error for "${text}"`, err)
-      // Se foi o teto rígido, derruba qualquer áudio pendurado antes de seguir a fila.
+      // Teto rígido: marca a frase como cancelada (o token impede a versão "zumbi"
+      // de tocar mais tarde por cima da próxima) e derruba qualquer áudio pendurado.
+      run.cancelled = true
       if (err instanceof Error && err.message.includes('sentence timeout')) cancelSpeech()
       opts.onError?.('Falha inesperada na fala.')
       opts.onEnd?.()
@@ -541,6 +604,12 @@ async function drainQueue(): Promise<void> {
     if (generation !== queueGeneration) {
       log('debug', 'drainQueue: generation changed, breaking')
       break
+    }
+    // Respiro curto entre frases: com o WAV aparado e o prefetch, as frases emendavam
+    // rápido demais ("metralhadora"). Pontuação final ganha pausa um pouco maior;
+    // cortes soft (vírgula/chunk) seguem quase direto. Em erro, a fila anda na hora.
+    if (spokeWithoutError && sentenceQueue.length) {
+      await delay(interSentencePauseMs(text))
     }
   }
   if (generation !== queueGeneration || runId !== drainRunId) {
@@ -572,11 +641,26 @@ export function clearSpeechQueue(): void {
   // Reset hard do subsistema de fala (barge-in / novo turno): zera também o "cooldown" do
   // Piper para não carregar penalidade transitória de um turno anterior ao começar outro.
   piperDisabledUntil = 0
+  piperConsecutiveFailures = 0
   queueGeneration++
   drainRunId++
   cancelSpeech()
   draining = false
   resolveIdle()
+}
+
+/**
+ * Descarta as frases AINDA NÃO faladas (e os prefetches), deixando a frase em
+ * reprodução TERMINAR naturalmente. É o cancelamento "suave" usado na troca de fase
+ * do streaming: o conteúdo pendente da fase anterior fica obsoleto, mas cortar o
+ * áudio no meio da palavra (clearSpeechQueue) soava robótico e, no Windows, ainda
+ * podia vazar sobreposição de vozes ao emendar o cancel com a fala seguinte.
+ * As frases da fase nova entram ATRÁS da atual na mesma fila — sem overlap.
+ */
+export function dropPendingSentences(): void {
+  log('info', `dropPendingSentences: dropping ${sentenceQueue.length} pending sentences`)
+  sentenceQueue = []
+  prefetched.clear()
 }
 
 const SENTENCE_PLACEHOLDER_PREFIX = '\uE000'
