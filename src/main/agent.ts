@@ -777,12 +777,16 @@ export async function runTurn(
 }
 
 // Controle de contexto: quando a sessão fica longa, resume o histórico antigo.
-async function summarizeIfNeeded(sessionId: string): Promise<void> {
+export async function summarizeIfNeeded(sessionId: string, force = false): Promise<boolean> {
   const s = getSession(sessionId)
-  if (!s || s.messages.length <= 24) return
+  if (!s) return false
+  if (!force && s.messages.length <= 24) return false
+  if (force && s.messages.length <= 4) return false // nothing to compact really
   try {
     const cfg = readConfig()
-    const old = s.messages.slice(0, -10)
+    const keepCount = force ? 2 : 10
+    const old = s.messages.slice(0, -keepCount)
+    if (old.length === 0) return false
     const text = old.map((m) => `${m.role === 'user' ? 'Usuário' : 'ARES'}: ${m.content}`).join('\n')
     const resumo = await chatJSON(
       cfg,
@@ -792,10 +796,32 @@ async function summarizeIfNeeded(sessionId: string): Promise<void> {
       ],
       false
     )
-    if (resumo.trim()) setSessionSummary(sessionId, resumo.trim(), 10)
+    if (resumo.trim()) {
+      setSessionSummary(sessionId, resumo.trim(), keepCount)
+      return true
+    }
+    return false
   } catch {
-    /* resumo é melhoria opcional; ignora falhas */
+    return false
   }
+}
+
+export function getContextMetrics(sessionId: string): { chars: number; limit: number; pct: number } {
+  const s = getSession(sessionId)
+  const cfg = readConfig()
+  
+  // Approximate char limit based on model
+  let limit = 128000
+  if (cfg.nineRouter.model.includes('deepseek-chat')) limit = 200000
+  else if (cfg.nineRouter.model.includes('deepseek-reasoner')) limit = 200000
+  else if (cfg.nineRouter.model.includes('llama')) limit = 32000
+  
+  let chars = s?.summary ? s.summary.length + 50 : 0
+  if (s) {
+    for (const m of s.messages) chars += m.content.length + 20
+  }
+  
+  return { chars, limit, pct: Math.min(100, Math.round((chars / limit) * 100)) }
 }
 
 /**

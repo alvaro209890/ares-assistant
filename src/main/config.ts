@@ -49,12 +49,10 @@ const CONFIG_RESET_VERSION = '0.20.0'
 
 const DEFAULT_CONFIG: AppConfig = {
   nineRouter: {
-    // Cérebro padrão: OpenRouter via login OAuth (botão "Entrar com OpenRouter").
-    // Não usamos mais o 9 Router local por padrão — quem quiser auto-hospedar
-    // escolhe o provedor "Local (avançado)" nas configurações.
-    baseUrl: 'https://openrouter.ai/api/v1',
-    apiKey: '', // preenchida automaticamente pelo login OAuth.
-    model: 'openai/gpt-5.5',
+    // Cérebro padrão: DeepSeek
+    baseUrl: 'https://api.deepseek.com/v1',
+    apiKey: '',
+    model: 'deepseek-chat',
     reasoning: 'medio' // baixo | medio | alto (reasoning_effort low/medium/high)
   },
   grog: {

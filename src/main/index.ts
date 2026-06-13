@@ -3,7 +3,7 @@ import { join } from 'path'
 import { ensureConfig, readConfig, updateConfig } from './config'
 import { loadBoard, saveBoard } from './tasks'
 import { transcribe } from './grog'
-import { runTurn, extractFacts } from './agent'
+import { runTurn, extractFacts, summarizeIfNeeded, getContextMetrics } from './agent'
 import { chatJSON } from './ninerouter'
 import { cancelSession } from './running'
 import { killAllBackgroundProcesses } from './exec'
@@ -13,7 +13,6 @@ import { initOverlay, toggleOverlay, setOverlayState, focusMain, requestListen }
 import { setupTray, destroyTray, registerGlobalShortcut, setAutostart } from './desktop'
 import { exportData, importData } from './backup'
 import { getSystemMetrics, readClipboard } from './system'
-import { openRouterOAuth } from './oauth'
 import { getProvider } from '../shared/providers'
 import { startReminders } from './notify'
 import { synthesize, listPiperVoices, isPiperReady, ensurePiper } from './piper'
@@ -273,6 +272,10 @@ function registerIpc(): void {
       }
     )
   })
+  
+  ipcMain.handle('chat:compact', async (_e, sessionId: string) => summarizeIfNeeded(sessionId, true))
+  ipcMain.handle('chat:getContextMetrics', (_e, sessionId: string) => getContextMetrics(sessionId))
+
   // Cancela comandos/coder em execução na sessão (ex.: parar um build travado pelo Esc).
   ipcMain.handle('code:cancel', (_e, sessionId: string): number => cancelSession(sessionId))
 
@@ -425,33 +428,5 @@ function registerIpc(): void {
       }
     }
   )
-
-  // Login OAuth de provedor (hoje: OpenRouter). Em caso de sucesso, grava a chave
-  // e aponta o cérebro para o provedor, devolvendo a config já atualizada.
-  ipcMain.handle(
-    'provider:oauth',
-    async (_e, id: string): Promise<{ ok: boolean; config?: AppConfig; error?: string }> => {
-      const preset = getProvider(id)
-      if (!preset || preset.oauth !== 'openrouter') {
-        return { ok: false, error: 'Provedor sem login OAuth disponível.' }
-      }
-      try {
-        const key = await openRouterOAuth()
-        const current = readConfig()
-        const keepModel = current.nineRouter.model && current.nineRouter.baseUrl === preset.baseUrl
-        const config = updateConfig({
-          nineRouter: {
-            baseUrl: preset.baseUrl,
-            apiKey: key,
-            model: keepModel ? current.nineRouter.model : preset.defaultModel
-          }
-        })
-        return { ok: true, config }
-      } catch (e: any) {
-        return { ok: false, error: e?.message || String(e) }
-      }
-    }
-  )
-
 
 }

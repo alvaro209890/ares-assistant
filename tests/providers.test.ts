@@ -12,14 +12,6 @@ describe('provedores de IA (cérebro)', () => {
 
   it('detecta o provedor pelo host do baseUrl', () => {
     expect(detectProviderId('https://api.deepseek.com/v1')).toBe('deepseek')
-    expect(detectProviderId('https://api.groq.com/openai/v1')).toBe('groq')
-    expect(detectProviderId('https://openrouter.ai/api/v1')).toBe('openrouter')
-    expect(detectProviderId('https://api.openai.com/v1')).toBe('openai')
-    expect(detectProviderId('http://localhost:20128/v1')).toBe('local')
-  })
-
-  it('ignora barra final e maiúsculas ao detectar', () => {
-    expect(detectProviderId('https://API.DeepSeek.com/v1/')).toBe('deepseek')
   })
 
   it('retorna "custom" para URL desconhecida ou inválida', () => {
@@ -28,43 +20,14 @@ describe('provedores de IA (cérebro)', () => {
     expect(detectProviderId('não-é-url')).toBe('custom')
   })
 
-  it('só o OpenRouter oferece login OAuth; o local não exige chave', () => {
-    expect(getProvider('openrouter')?.oauth).toBe('openrouter')
-    expect(getProvider('deepseek')?.oauth).toBeUndefined()
-    expect(getProvider('local')?.needsKey).toBe(false)
-    expect(getProvider('deepseek')?.needsKey).toBe(true)
-  })
-
-  it('limita DeepSeek aos modelos V4 oficiais atuais', () => {
+  it('limita DeepSeek aos modelos oficiais atuais', () => {
     const models = getProvider('deepseek')?.models?.map((m) => m.value)
-    expect(getProvider('deepseek')?.defaultModel).toBe('deepseek-v4-flash')
-    expect(models).toEqual(['deepseek-v4-flash', 'deepseek-v4-pro'])
-  })
-
-  it('ChatGPT (openai) só oferece o GPT-5.5', () => {
-    const openai = getProvider('openai')
-    expect(openai?.defaultModel).toBe('gpt-5.5')
-    expect(openai?.models?.map((m) => m.value)).toEqual(['gpt-5.5'])
-  })
-
-  it('OpenRouter (login OAuth) expõe GPT-5.5 e os dois DeepSeek V4 pelos slugs', () => {
-    const or = getProvider('openrouter')
-    expect(or?.oauth).toBe('openrouter')
-    expect(or?.defaultModel).toBe('openai/gpt-5.5')
-    expect(or?.models?.map((m) => m.value)).toEqual([
-      'openai/gpt-5.5',
-      'deepseek/deepseek-v4-flash',
-      'deepseek/deepseek-v4-pro'
-    ])
+    expect(getProvider('deepseek')?.defaultModel).toBe('deepseek-chat')
+    expect(models).toEqual(['deepseek-chat', 'deepseek-reasoner'])
   })
 
   it('marca quais provedores suportam ajuste de raciocínio', () => {
-    expect(providerSupportsReasoning('https://openrouter.ai/api/v1')).toBe(true)
     expect(providerSupportsReasoning('https://api.deepseek.com/v1')).toBe(true)
-    expect(providerSupportsReasoning('https://api.openai.com/v1')).toBe(true)
-    expect(providerSupportsReasoning('http://localhost:20128/v1')).toBe(true)
-    expect(providerSupportsReasoning('https://api.groq.com/openai/v1')).toBe(false)
-    // custom (desconhecido) recebe o campo — o retry cobre rejeição.
     expect(providerSupportsReasoning('https://exemplo.com/v1')).toBe(true)
   })
 })

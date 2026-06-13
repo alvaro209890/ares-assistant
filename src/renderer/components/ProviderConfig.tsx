@@ -6,9 +6,6 @@ import Select, { type SelectOption } from './Select'
 // Ícone e cor de borda por provedor (visual distinto sem dependências externas).
 const PROVIDER_STYLE: Record<string, { icon: string; border: string; glow: string }> = {
   deepseek: { icon: '🧠', border: 'border-blue-400/45 hover:border-blue-300/70 focus:border-blue-300/80', glow: 'hover:shadow-[0_0_14px_rgba(96,165,250,0.16)] focus:shadow-[0_0_16px_rgba(96,165,250,0.22)]' },
-  groq: { icon: '⚡', border: 'border-orange-400/45 hover:border-orange-300/70 focus:border-orange-300/80', glow: 'hover:shadow-[0_0_14px_rgba(251,146,60,0.16)] focus:shadow-[0_0_16px_rgba(251,146,60,0.22)]' },
-  openrouter: { icon: '🔀', border: 'border-purple-400/45 hover:border-purple-300/70 focus:border-purple-300/80', glow: 'hover:shadow-[0_0_14px_rgba(192,132,252,0.16)] focus:shadow-[0_0_16px_rgba(192,132,252,0.22)]' },
-  openai: { icon: '🤖', border: 'border-emerald-400/45 hover:border-emerald-300/70 focus:border-emerald-300/80', glow: 'hover:shadow-[0_0_14px_rgba(52,211,153,0.16)] focus:shadow-[0_0_16px_rgba(52,211,153,0.22)]' },
   local: { icon: '💻', border: 'border-cyan-300/40 hover:border-cyan-200/70 focus:border-cyan-200/80', glow: 'hover:shadow-[0_0_14px_rgba(56,225,255,0.14)] focus:shadow-[0_0_16px_rgba(56,225,255,0.2)]' }
 }
 
@@ -18,7 +15,7 @@ const fallbackStyle = { icon: '🔧', border: 'border-cyan-300/40 hover:border-c
 // Configurações. Troca baseUrl/modelo/chave por presets, faz login OAuth do
 // OpenRouter e testa a conexão. Toda a config vive em config.nineRouter.
 export default function ProviderConfig({ compact = false }: { compact?: boolean }): JSX.Element | null {
-  const { config, saveConfig, testBrain, connectOpenRouter } = useAres()
+  const { config, saveConfig, testBrain } = useAres()
   const [test, setTest] = useState('')
   const [busy, setBusy] = useState(false)
   const [advanced, setAdvanced] = useState(false)
@@ -74,16 +71,7 @@ export default function ProviderConfig({ compact = false }: { compact?: boolean 
     }
   }
 
-  const doOAuth = async (): Promise<void> => {
-    setBusy(true)
-    setTest('aguardando login no navegador…')
-    try {
-      const r = await connectOpenRouter()
-      setTest(r.ok ? '✓ conectado ao OpenRouter' : '✕ ' + (r.error || 'falhou'))
-    } finally {
-      setBusy(false)
-    }
-  }
+  // OAuth logic removed
 
   return (
     <div className="flex flex-col gap-3">
@@ -101,11 +89,7 @@ export default function ProviderConfig({ compact = false }: { compact?: boolean 
 
       {preset && <p className="-mt-1 text-[11px] text-cyan-200/45">{preset.hint}</p>}
 
-      {preset?.oauth === 'openrouter' && (
-        <button onClick={doOAuth} disabled={busy} className="btn-ghost justify-center disabled:opacity-50">
-          ENTRAR COM OPENROUTER
-        </button>
-      )}
+
 
       {/* Chave de API com toggle de visibilidade */}
       {(preset?.needsKey ?? true) && (

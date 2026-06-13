@@ -114,7 +114,9 @@ const api = {
       const listener = (_e: unknown, event: TaskProgressEvent) => cb(event)
       ipcRenderer.on('agent:task-progress', listener)
       return () => ipcRenderer.removeListener('agent:task-progress', listener)
-    }
+    },
+    compact: (sessionId: string): Promise<boolean> => ipcRenderer.invoke('chat:compact', sessionId),
+    getContextMetrics: (sessionId: string): Promise<{ chars: number; limit: number; pct: number }> => ipcRenderer.invoke('chat:getContextMetrics', sessionId)
   },
   code: {
     // Cancela comandos/coder em execução na sessão. Retorna quantos foram abortados.
@@ -206,9 +208,6 @@ const api = {
     }
   },
   provider: {
-    // Login OAuth de provedor (OpenRouter). Devolve a config já atualizada com a chave.
-    oauth: (id: string): Promise<{ ok: boolean; config?: AppConfig; error?: string }> =>
-      ipcRenderer.invoke('provider:oauth', id)
   },
   overlay: {
     // Liga/desliga a mini-orbe flutuante; devolve a config atualizada.

@@ -5,10 +5,7 @@ import Select, { type SelectOption } from './Select'
 import ReasoningSelect from './ReasoningSelect'
 
 const PROVIDER_ICON: Record<string, string> = {
-  openrouter: '🔀',
   deepseek: '🧠',
-  openai: '🤖',
-  groq: '⚡',
   local: '💻'
 }
 
@@ -17,7 +14,7 @@ const PROVIDER_ICON: Record<string, string> = {
 export default function ModelBar(): JSX.Element | null {
   const { config, saveConfig, navigate } = useAres()
   const nr = config?.nineRouter
-  const currentId = nr ? detectProviderId(nr.baseUrl) : 'openrouter'
+  const currentId = nr ? detectProviderId(nr.baseUrl) : 'deepseek'
   const preset = getProvider(currentId)
 
   const providerOptions: SelectOption[] = useMemo(() => {
