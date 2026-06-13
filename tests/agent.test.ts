@@ -42,7 +42,7 @@ vi.mock('../src/main/tools', async (importOriginal) => {
   }
 })
 
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AgentActivityEvent } from '../src/shared/types'
 import { chatJSON, streamChat } from '../src/main/ninerouter'
@@ -346,6 +346,57 @@ describe('agent — runTurn (orquestração do cérebro)', () => {
     expect(r.fala).toBeTruthy()
   })
 
+  it('modo programador tem limite maior e registra ações pendentes no limite', async () => {
+    updateConfig({ integrations: { code: { workspaceRoot: TMP, allowedRoots: [TMP] } } })
+    const sid = createSession().id
+    brain.mockResolvedValue(
+      JSON.stringify({ fala: 'Mais uma análise.', acoes: [{ tipo: 'codigo.workspace', path: TMP }] })
+    )
+
+    const r = await runTurn(sid, 'analise o código para sempre')
+
+    // 1 chamada inicial + 6 respostas pós-ferramenta do modo programador.
+    expect(brain).toHaveBeenCalledTimes(7)
+    expect(r.notes.some((n) => /limite de 6 rodadas/i.test(n))).toBe(true)
+    expect(r.fala).toMatch(/Não concluí|limite de 6 rodadas/i)
+  })
+
+  it('converte promessa de programacao sem ação em ferramenta real antes de concluir', async () => {
+    updateConfig({
+      integrations: {
+        code: {
+          workspaceRoot: TMP,
+          allowedRoots: [TMP],
+          allowPatchApply: true
+        }
+      }
+    })
+    const sid = createSession().id
+    nextEnvelope('Vou criar o arquivo agora.', [])
+    nextEnvelope('Criando com a ferramenta correta.', [
+      { tipo: 'codigo.criar', arquivo: 'site.txt', conteudo: 'feito' }
+    ])
+    nextEnvelope('Criei site.txt.', [])
+
+    const r = await runTurn(sid, 'crie um arquivo de código chamado site.txt')
+
+    expect(brain).toHaveBeenCalledTimes(3)
+    expect(existsSync(join(TMP, 'site.txt'))).toBe(true)
+    expect(readFileSync(join(TMP, 'site.txt'), 'utf8')).toBe('feito')
+    expect(r.fala).toContain('Criei site.txt')
+    expect(r.notes.some((n) => /promessa convertida/i.test(n))).toBe(true)
+  })
+
+  it('não mantém fala que afirma programação feita sem evidência real', async () => {
+    const sid = createSession().id
+    nextEnvelope('Implementei o site e rodei os testes.', [])
+
+    const r = await runTurn(sid, 'desenvolva um site')
+
+    expect(r.fala).toContain('Ainda não executei nenhuma ação real')
+    expect(r.notes.some((n) => /evidências reais/i.test(n))).toBe(true)
+  })
+
   it('emite atividades ao ler arquivo no modo programador', async () => {
     updateConfig({ integrations: { code: { workspaceRoot: TMP, allowedRoots: [TMP] } } })
     writeFileSync(join(TMP, 'a.ts'), 'export const a = 1\n', 'utf8')
@@ -450,4 +501,3 @@ describe('agent — runTurn (orquestração do cérebro)', () => {
     expect(hasTask(r)).toBe(false)
   })
 })
-

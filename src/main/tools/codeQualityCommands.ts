@@ -123,7 +123,8 @@ export const codeQualityCommands: ToolCommand[] = [
             objetivo: String(a.objetivo || a.tarefa || a.descricao || a.texto || ''),
             root: String(a.path || a.raiz || a.destino || a.onde || a.nome || ''),
             passos: Number(a.passos || a.steps || 0) || undefined,
-            signal
+            signal,
+            onProgress: reportProgress
           })
         )
       )

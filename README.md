@@ -17,7 +17,7 @@ Ares e um assistente desktop em Electron, React e TypeScript, feito para uso loc
 - **Skills de teste e qualidade**: `codigo.testar` detecta o runner do projeto (script `test`, vitest/jest/pytest/go) e responde por voz quantos testes passaram/falharam; `codigo.lint` (eslint/ruff) conta os problemas; `codigo.formatar` (prettier/ruff/gofmt) formata o codigo. Deteccao e parsing puros em `src/main/devtools.ts`; execucao assincrona, com timeout e cancelavel por Esc.
 - **Chat lateral acompanha o PC**: enquanto o Ares trabalha, a conversa mostra leitura de arquivos, buscas, edicoes, comandos, git, diagnostico, testes, lint, formatacao e saidas recentes em tempo real.
 - **Edicao por voz no codigo**: entende caminhos ditados como "src barra main ponto ts" e termos tecnicos ("funcao seta" -> arrow function, "tente e capture" -> try catch); evita ler codigo, diffs ou logs em voz alta. Resultados grandes sao truncados para voz e comandos lentos retornam resumo curto.
-- **Stream de voz profissional no modo programador**: a fala acompanha o que o Ares realmente esta fazendo — ferramenta, arquivo, comando, subagente e resultado. Atena, Hefesto, Têmis e Prometeu sao narrados por nome a partir dos blocos reais dos relatorios (`[RESUMO]`, `[ESCOPO]`, `[VEREDITO]`, `[CAUSA RAIZ]`), sem ler relatorios inteiros.
+- **Stream de voz profissional no modo programador**: a fala acompanha o que o Ares realmente esta fazendo — ferramenta, arquivo, comando, subagente, passo do coder e resultado. Um ledger interno impede afirmar que alterou/testou/validou sem evidência real; se faltar autorização, contexto ou rodadas, ele relata o bloqueio em vez de fingir conclusão.
 - **Voz mais viva (JARVIS)**: siglas tecnicas pronunciadas certo (API, JSON, TS, JS), fala mais continua e ritmo que muda com o conteudo (erro direto e rapido, sucesso calmo e elegante).
 - **Engenheiro proativo**: apos editar/aplicar patch sugere validar com o teste/build do projeto, reporta a saude do projeto, avisa "iniciando a tarefa, senhor" em comandos longos, lembra do ultimo arquivo/comando e respeita as preferencias de codigo do usuario.
 - **Interface HUD refinada**: selects da memoria usam seta SVG, foco com glow cyan e hover claro; o seletor de provedor mostra icones por IA e chave de API com toggle de visibilidade.
@@ -128,7 +128,7 @@ O Ares nao depende de servico externo para editar codigo. As ferramentas nativas
 - `codigo.patch.preview`: valida e resume patches antes de aplicar.
 - `codigo.patch.aplicar`: aplica diff Git ou operacoes textuais.
 - `codigo.scaffold`: cria projetos simples a partir de templates locais.
-- `codigo.projeto`: planeja e executa tarefas maiores com escrita e validacao.
+- `codigo.projeto`: planeja e executa tarefas maiores com escrita, progresso por passo, validação segura e bloqueio explícito se não conseguir concluir.
 - `codigo.comando`: roda comandos de desenvolvimento permitidos sem shell.
 - `codigo.terminal`: usa shell real com classificacao `allowed`, `confirm` ou `blocked`.
 - `codigo.diagnostico`: roda typecheck, lint, teste e build quando houver scripts permitidos.
@@ -143,8 +143,9 @@ No Windows, o terminal nativo usa PowerShell. No Linux e macOS, usa Bash. Comand
 ### Proatividade de engenheiro (estilo JARVIS)
 
 - **Validacao automatica**: ao concluir um `codigo.criar`, `codigo.scaffold` ou `codigo.patch.aplicar` com sucesso, o Ares detecta o script de validacao do `package.json` (preferindo `test`, depois `build`/`typecheck`/`verify`) e oferece roda-lo numa frase curta. Veja `proactiveValidationCommand` em `src/main/code.ts`.
+- **Conclusão honesta**: o orquestrador mantém evidências do turno (ferramentas executadas, arquivos escritos, comandos, validações, autorizações pendentes e bloqueios). A fala final é aterrada nessas evidências; promessa sem ação vira correção automática ou bloqueio explícito.
 - **Saude do projeto**: `codigo.workspace` agora traz um campo `health` com avaliacao estrutural rapida (alteracoes sem commit, ausencia de teste/lockfile), sem rodar comandos; `codigo.diagnostico` reporta a saude apos rodar typecheck/lint/test (`tudo verde` ou `atencao: ... falharam`). Funcoes `structuralHealth` e `assessDiagnosisHealth`.
-- **Tarefas longas**: antes de bloquear em um comando demorado (instalar/build/test), o Ares fala "Iniciando a tarefa, senhor. Um momento." para nao deixar o usuario no vacuo. A deteccao e `isLongRunningCommand`; o aviso so ocorre quando o comando vai de fato rodar (autorizado ou seguro).
+- **Tarefas longas**: comandos, testes, subagentes e coder autônomo reportam o rótulo atual ao HUD e ao heartbeat. Em tarefas paralelas, a voz acompanha a frente ativa mais recente e volta para a remanescente quando uma termina.
 - **Memoria de sessao curta**: o ultimo arquivo editado e o ultimo comando de terminal bem-sucedido sao persistidos (`session-context.json`) e injetados no prompt, para o Ares retomar o trabalho sem pedir o caminho de novo. Veja `setLastEditedFile`/`setLastTerminalCommand`/`sessionContextSummary` em `src/main/data.ts`.
 - **Memoria longa estilo Hermes**: preferencias e fatos duradouros sao sanitizados, deduplicados, separados entre perfil do usuario e notas do agente, e injetados no prompt dentro de `<memory-context>`. Conversas antigas podem ser recuperadas por `memoria.buscar`. Veja `docs/MEMORIA.md` e `src/main/memory.ts`.
 - **Pilulas de contexto (estilo de codigo)**: preferencias de codificacao guardadas na memoria (ex.: "sempre use aspas simples", "prefira funcoes nomeadas") sao filtradas e injetadas na secao de Programacao do prompt, para o Ares respeitar o estilo do usuario ao escrever/editar. Veja `src/main/preferences.ts` e `codingPreferencesSummary`.
@@ -174,14 +175,14 @@ Comandos `blocked` (catastroficos/elevacao) nunca rodam, nem com confirmacao. Pi
 
 Quando a entrada vem do microfone, o agente adiciona uma interpretacao auxiliar para termos comuns de desenvolvimento: "barra" vira `/`, "ponto ts" vira `.ts`, "traço" vira `-`, "underline" vira `_`, "npm rum" vira `npm run` e "git estado" vira `git status`. O dicionario tambem cobre termos tecnicos ditados: "funcao seta" vira `arrow function`, "assincrono com await" vira `async await`, "tente e capture" vira `try catch` e "funcao de retorno" vira `callback`. A resposta final de ferramentas `codigo.*` nao e transmitida em streaming bruto; ela e gerada, filtrada e so entao falada para evitar que o Ares leia codigo, JSON, diffs ou logs longos. A fala deve ficar em ate duas frases com o arquivo principal, o que mudou, se a validacao passou e qual autorizacao falta.
 
-A narracao de programacao e deterministica antes de passar pelo modelo: `voiceToolAnnouncement` anuncia ate duas frentes reais da rodada, `startHeartbeat` fala o passo atual reportado pela ferramenta, `codeVoiceProgressSummary` resume resultados objetivos e `isDuplicateSpeech` impede repetir a mesma conclusao. Para subagentes, o Ares sintetiza os blocos tagueados reais: Atena usa `[RESUMO]`, Hefesto usa `[ESCOPO]` e `[VALIDAR]`, Têmis usa `[VEREDITO]`/`[PROBLEMAS]` e Prometeu usa `[CAUSA RAIZ]`/`[VALIDAR]`.
+A narracao de programacao e deterministica antes de passar pelo modelo: `voiceToolAnnouncement` anuncia ate duas frentes reais da rodada, `startHeartbeat` fala o passo atual reportado pela ferramenta, `codeVoiceProgressSummary` resume resultados objetivos e `isDuplicateSpeech` impede repetir a mesma conclusao. `groundCodeSpeech` confere a fala final contra as evidências reais do turno, então o Ares não diz que fez algo sem ter executado a ferramenta correspondente. Para subagentes, o Ares sintetiza os blocos tagueados reais: Atena usa `[RESUMO]`, Hefesto usa `[ESCOPO]` e `[VALIDAR]`, Têmis usa `[VEREDITO]`/`[PROBLEMAS]` e Prometeu usa `[CAUSA RAIZ]`/`[VALIDAR]`.
 
 ### Interação por voz em segundo plano e Heartbeat
 
 Durante tarefas longas de programação ou execução de terminal, o microfone contínuo permanece ativo para receber comandos:
 - **Parada e Cancelamento**: Dizer `"para"`, `"cancela"` ou `"pode parar"` interrompe instantaneamente a execução do processo e o áudio da resposta (sem precisar de wake word).
 - **Fila de Execução**: Comandos precedidos pela wake word (ex: "Ares, depois rode os testes") são colocados em fila para execução sequencial posterior.
-- **Heartbeat**: Atualizações rápidas a cada 30 segundos citam a tarefa atual ("Ainda executando suite de testes", "Continuo compilando relatório da Têmis"), em vez de usar mensagens genéricas.
+- **Heartbeat**: Atualizações rápidas a cada 30 segundos citam a tarefa ativa atual ("Ainda executando suite de testes", "Continuo compilando relatório da Têmis"). Quando há ferramentas paralelas, o rótulo muda para a frente mais recente e retorna para a que ainda está em execução.
 
 Ao reportar erros de terminal, o Ares fala apenas a **causa raiz** (a primeira linha que descreve o problema), ignorando o stack trace e os code frames. Veja `rootCauseError` em `src/main/voiceCode.ts`.
 

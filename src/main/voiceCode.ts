@@ -2,7 +2,24 @@ import type { Acao } from '../shared/types'
 import { parseReportTags } from './subagents'
 
 const CODE_HINT_RE =
-  /\b(c[oó]digo|programa[cç][aã]o|arquivo|pasta|projeto|workspace|src|npm|npx|git|guit|patch|diff|terminal|linha|fun[cç][aã]o|classe|componente|m[eé]todo|vari[aá]vel|build|teste|test|typecheck|commit|push|callback|call back|async|await|ass[ií]ncron|arrow|promise|promessa|lambda|try|catch)\b/i
+  /\b(c[oó]digo|programa[cç][aã]o|desenvolv\w*|implement\w*|corrig\w*|bug|site|app|p[aá]gina|arquivo|pasta|projeto|workspace|src|npm|npx|git|guit|patch|diff|terminal|linha|fun[cç][aã]o|classe|componente|m[eé]todo|vari[aá]vel|build|teste|test|typecheck|commit|push|callback|call back|async|await|ass[ií]ncron|arrow|promise|promessa|lambda|try|catch)\b/i
+
+const CODE_PROMISE_RE =
+  /\b(vou|irei|deixa\s+eu|posso|preciso|agora\s+vou)\s+(?:\w+\s+){0,4}?(alterar|editar|criar|implementar|corrigir|ajustar|rodar|executar|validar|testar|chamar|acionar|aplicar|desenvolver|construir)\b/i
+
+const CODE_EXECUTION_CLAIM_RE =
+  /\b(alterei|editei|atualizei|criei|apliquei|corrigi|ajustei|rodei|executei|testei|validei|implementei|constru[ií]|desenvolvi|conclu[ií]|finalizei|commitei|pushei)\b/i
+
+const VALIDATION_CLAIM_RE = /\b(rodei|executei|testei|validei|verifiquei|testes?\s+pass\w*|typecheck\s+pass\w*|build\s+pass\w*)\b/i
+
+export interface CodeSpeechEvidence {
+  actionsRun?: number
+  wroteFiles?: string[]
+  ranCommands?: string[]
+  validations?: string[]
+  pendingApprovals?: string[]
+  blockers?: string[]
+}
 
 // Termos técnicos ditados por voz -> forma canônica que o LLM entende melhor. Aplicados
 // antes da limpeza de pontuação. Só geram efeito se o usuário falar a variante em pt-BR
@@ -54,6 +71,49 @@ export function isCodeActionType(tipo: unknown): boolean {
 
 export function hasCodeAction(actions: Acao[]): boolean {
   return actions.some((a) => isCodeActionType(a.tipo))
+}
+
+export function hasCodeIntent(input: string): boolean {
+  return CODE_HINT_RE.test(String(input || ''))
+}
+
+export function hasCodePromise(input: string): boolean {
+  return CODE_PROMISE_RE.test(String(input || ''))
+}
+
+export function hasCodeExecutionClaim(input: string): boolean {
+  return CODE_EXECUTION_CLAIM_RE.test(String(input || ''))
+}
+
+export function groundCodeSpeech(input: string, evidence: CodeSpeechEvidence): { text: string; adjusted: boolean } {
+  const text = String(input || '').replace(/\s+/g, ' ').trim()
+  const blockers = (evidence.blockers || []).filter(Boolean)
+  const pending = (evidence.pendingApprovals || []).filter(Boolean)
+  const wroteFiles = (evidence.wroteFiles || []).filter(Boolean)
+  const ranCommands = (evidence.ranCommands || []).filter(Boolean)
+  const validations = (evidence.validations || []).filter(Boolean)
+  const actionsRun = evidence.actionsRun || 0
+  const hasEvidence = actionsRun > 0 || wroteFiles.length > 0 || ranCommands.length > 0 || validations.length > 0
+
+  if (blockers.length) {
+    return { text: `Não concluí a tarefa: ${cleanOneLine(blockers[0], 260)}`, adjusted: true }
+  }
+  if (pending.length) {
+    return { text: `Preciso da sua autorização para continuar: ${cleanOneLine(pending[0], 260)}`, adjusted: true }
+  }
+  if ((hasCodeExecutionClaim(text) || hasCodePromise(text)) && !hasEvidence) {
+    return {
+      text: 'Ainda não executei nenhuma ação real de programação neste turno; preciso continuar com ferramentas antes de afirmar conclusão.',
+      adjusted: true
+    }
+  }
+  if (VALIDATION_CLAIM_RE.test(text) && !validations.length && !ranCommands.length) {
+    return {
+      text: compactSpeech([text, 'Observação: não há validação executada registrada neste turno'], 420),
+      adjusted: true
+    }
+  }
+  return { text, adjusted: false }
 }
 
 export function voiceCodeInterpretation(input: string): string | null {
@@ -422,10 +482,22 @@ function summarizeCodeResult(tipo: string, resultado: Record<string, unknown>, e
       const done = resultado.done === true || resultado.ok === true
       const steps = num(resultado.steps)
       const summary = str(resultado.summary)
+      const blocked = str(resultado.blockedReason)
+      const changedFiles = arr(resultado.changedFiles).map(str).filter(Boolean)
+      const validated = resultado.validated === true
+      const validationSummary = str(resultado.validationSummary)
       const transcript = arr(resultado.transcript).map(obj)
       const failures = transcript.flatMap((t) => arr(t.ran).map(obj).filter((r) => r.ran && !r.ok))
+      if (blocked) {
+        return `O coder autônomo não concluiu: ${blocked}.`
+      }
       if (ok) {
-        return summary || 'Coder autônomo concluiu o objetivo com sucesso.'
+        return compactSpeech([
+          summary || `Coder autônomo concluiu o objetivo${changedFiles.length ? ` alterando ${oneOrMany(changedFiles.length, 'arquivo', 'arquivos')}` : ''}`,
+          validated
+            ? (validationSummary ? `Validação: ${validationSummary}` : 'Validação executada com sucesso')
+            : 'Sem validação automática executada'
+        ], 360)
       }
       if (failures.length > 0) {
         const failedCmds = failures.map((r) => `"${str(r.command)}"`).join(', ')
@@ -708,22 +780,37 @@ export function heartbeatPhrase(index: number, label?: string): string {
 let activeHeartbeats = 0
 let heartbeatTimer: ReturnType<typeof setTimeout> | null = null
 let heartbeatIndex = 0
+let heartbeatSeq = 0
+const heartbeatEntries = new Map<number, { onDelta: HeartbeatDelta; phase: number; label?: HeartbeatLabel }>()
+
+function resolveHeartbeatLabel(label?: HeartbeatLabel): string | undefined {
+  return typeof label === 'function' ? label() : label
+}
+
+function latestHeartbeatEntry(): { onDelta: HeartbeatDelta; phase: number; label?: HeartbeatLabel } | undefined {
+  let latest: { onDelta: HeartbeatDelta; phase: number; label?: HeartbeatLabel } | undefined
+  for (const entry of heartbeatEntries.values()) latest = entry
+  return latest
+}
 
 export function startHeartbeat(onDelta: HeartbeatDelta | undefined, phase: number, label?: HeartbeatLabel): () => void {
   if (!onDelta) return () => {}
-  activeHeartbeats++
+  const id = ++heartbeatSeq
+  heartbeatEntries.set(id, { onDelta, phase, label })
+  activeHeartbeats = heartbeatEntries.size
   if (activeHeartbeats === 1) {
     heartbeatIndex = 0
-    const currentLabel = (): string | undefined =>
-      typeof label === 'function' ? label() : label
     const tick = (): void => {
-      onDelta(heartbeatPhrase(heartbeatIndex++, currentLabel()), phase, 'both', true)
+      const entry = latestHeartbeatEntry()
+      if (!entry) return
+      entry.onDelta(heartbeatPhrase(heartbeatIndex++, resolveHeartbeatLabel(entry.label)), entry.phase, 'both', true)
       heartbeatTimer = setTimeout(tick, HEARTBEAT_REPEAT_MS)
     }
     heartbeatTimer = setTimeout(tick, HEARTBEAT_FIRST_MS)
   }
   return () => {
-    activeHeartbeats--
+    heartbeatEntries.delete(id)
+    activeHeartbeats = heartbeatEntries.size
     if (activeHeartbeats <= 0) {
       activeHeartbeats = 0
       if (heartbeatTimer) {
@@ -737,7 +824,7 @@ export function startHeartbeat(onDelta: HeartbeatDelta | undefined, phase: numbe
 export function toolResultsPrompt(results: unknown[], voice: boolean, codeMode: boolean): string {
   const base = 'Resultados das ferramentas (responda ao usuario em pt-BR, curto e falavel, sem inventar nada alem disto):'
   const voiceCode =
-    'MODO VOZ PARA CODIGO: responda em ate 2 frases; nao leia codigo, diff, JSON, stdout ou stderr; diga apenas o que foi feito, arquivos principais, status de validacao, a saude do projeto e se precisa de autorizacao. Ao reportar erro, fale so a causa raiz. Se houver subagentes, cite o nome e sintetize o bloco tagueado real ([RESUMO], [CAUSA RAIZ], [ESCOPO] ou [VEREDITO]); nunca leia o relatorio inteiro. IMPORTANTE: o resultado bruto JA apareceu no chat e foi falado ao usuario; nao repita a mesma informacao com outras palavras; acrescente o que ela significa e qual o proximo passo.'
+    'MODO VOZ PARA CODIGO: responda em ate 2 frases; nao leia codigo, diff, JSON, stdout ou stderr; diga apenas o que foi feito, arquivos principais, status de validacao, a saude do projeto e se precisa de autorizacao. Ao reportar erro, fale so a causa raiz. Se houver subagentes, cite o nome e sintetize o bloco tagueado real ([RESUMO], [CAUSA RAIZ], [ESCOPO] ou [VEREDITO]); nunca leia o relatorio inteiro. Se ainda precisa agir, inclua as proximas acoes JSON em vez de prometer. Nunca diga que alterou, testou ou validou algo que nao esteja nos resultados. IMPORTANTE: o resultado bruto JA apareceu no chat e foi falado ao usuario; nao repita a mesma informacao com outras palavras; acrescente o que ela significa e qual o proximo passo.'
   const instruction = voice && codeMode ? `${base}\n${voiceCode}` : base
   const focused = voice && codeMode ? results.map((r) => focusErrorsForVoice(r)) : results
   const payload = voice && codeMode ? truncateForVoice(focused) : focused

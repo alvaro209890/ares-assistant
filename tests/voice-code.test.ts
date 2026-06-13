@@ -3,6 +3,9 @@ import {
   HEARTBEAT_FIRST_MS,
   HEARTBEAT_REPEAT_MS,
   codeVoiceProgressSummary,
+  groundCodeSpeech,
+  hasCodeExecutionClaim,
+  hasCodePromise,
   isDuplicateSpeech,
   rootCauseError,
   sanitizeVoiceCodeFala,
@@ -65,6 +68,22 @@ describe('voiceToolAnnouncement — anúncio falado não-bloqueante', () => {
 })
 
 describe('voz no modo programador', () => {
+  it('detecta promessa e alegacao de execucao para aterrar a fala em evidencias', () => {
+    expect(hasCodePromise('Vou alterar o arquivo agora.')).toBe(true)
+    expect(hasCodeExecutionClaim('Implementei o site e rodei os testes.')).toBe(true)
+
+    const grounded = groundCodeSpeech('Implementei o site.', {})
+    expect(grounded.adjusted).toBe(true)
+    expect(grounded.text).toContain('Ainda não executei')
+
+    const ok = groundCodeSpeech('Atualizei src/app.ts.', { actionsRun: 1, wroteFiles: ['src/app.ts'] })
+    expect(ok.adjusted).toBe(false)
+
+    const blocked = groundCodeSpeech('Pronto.', { blockers: ['validação falhou em "npm test"'] })
+    expect(blocked.adjusted).toBe(true)
+    expect(blocked.text).toContain('Não concluí')
+  })
+
   it('interpreta caminhos e extensoes ditados por voz', () => {
     expect(voiceCodeInterpretation('leia o arquivo src barra main barra code ponto ts linha 10')).toBe(
       'leia o arquivo src/main/code.ts linha 10'
@@ -385,6 +404,30 @@ describe('voz no modo programador', () => {
       expect(chunks[1]).toContain('compilando relatório da Têmis')
 
       stop()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('heartbeat em tarefas paralelas usa a tarefa ativa mais recente e volta para a remanescente', () => {
+    vi.useFakeTimers()
+    try {
+      const chunks: string[] = []
+      let first = 'Rodando testes...'
+      let second = 'Rodando lint...'
+      const stopFirst = startHeartbeat((chunk) => chunks.push(chunk), 2, () => first)
+      const stopSecond = startHeartbeat((chunk) => chunks.push(chunk), 2, () => second)
+
+      vi.advanceTimersByTime(HEARTBEAT_FIRST_MS)
+      expect(chunks[0]).toContain('rodando lint')
+
+      stopSecond()
+      first = 'Executando suite de testes...'
+      second = 'não deve ser usado'
+      vi.advanceTimersByTime(HEARTBEAT_REPEAT_MS)
+      expect(chunks[1]).toContain('executando suite de testes')
+
+      stopFirst()
     } finally {
       vi.useRealTimers()
     }

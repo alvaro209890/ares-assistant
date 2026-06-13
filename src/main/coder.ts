@@ -56,8 +56,13 @@ export interface CoderResult {
   root: string
   objective: string
   steps: number
+  done: boolean
   ok: boolean
   summary: string
+  changedFiles: string[]
+  validated: boolean
+  validationSummary?: string
+  blockedReason?: string
   transcript: CoderStepReport[]
 }
 
@@ -153,21 +158,25 @@ export async function applyCoderStep(
   cfg: AppConfig,
   root: string,
   step: CoderStep,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onProgress?: (label: string, percent?: number) => void
 ): Promise<CoderStepResult> {
   const written: string[] = []
   const skipped: string[] = []
-  for (const f of step.files) {
+  step.files.forEach((f, idx) => {
     try {
+      onProgress?.(`Escrevendo ${f.path}...`, step.files.length ? Math.round(((idx + 1) / step.files.length) * 35) : undefined)
       const w = writeCodeFile(cfg, { root, file: f.path, content: f.content, overwrite: true })
       written.push(w.file)
     } catch (e) {
       skipped.push(`${f.path}: ${e instanceof Error ? e.message : String(e)}`)
     }
-  }
+  })
 
   const ran: CoderRun[] = []
-  for (const command of step.run) {
+  for (let i = 0; i < step.run.length; i++) {
+    const command = step.run[i]
+    onProgress?.(`Rodando validação: ${command}`, 40 + Math.round(((i + 1) / Math.max(1, step.run.length)) * 45))
     const cls = classifyCommand(cfg, command)
     if (cls.tier !== 'allowed') {
       ran.push({ command, ok: false, ran: false, code: null, summary: `pulado (${cls.tier}: precisa de você)` })
@@ -210,7 +219,13 @@ function buildCoderPrompt(objective: string, fileTree: string[], lastResult: str
 /** Executa a tarefa de forma autônoma: planeja → escreve → roda → itera. */
 export async function runCoderTask(
   cfg: AppConfig,
-  opts: { objetivo: string; root?: string; passos?: number; signal?: AbortSignal }
+  opts: {
+    objetivo: string
+    root?: string
+    passos?: number
+    signal?: AbortSignal
+    onProgress?: (label: string, percent?: number) => void
+  }
 ): Promise<CoderResult> {
   const objective = String(opts.objetivo || '').trim()
   if (!objective) throw new Error('Diga o objetivo do projeto.')
@@ -218,21 +233,26 @@ export async function runCoderTask(
     throw new Error('Coder autônomo desativado. Ligue "Permitir aplicar patches" nas Configurações.')
   }
   const root = resolveCodeWorkspace(cfg, opts.root)
-  const maxSteps = Math.max(1, Math.min(Number(opts.passos) || 4, 8))
+  const maxSteps = Math.max(1, Math.min(Number(opts.passos) || 6, 10))
   const transcript: CoderStepReport[] = []
   let lastResult = ''
   let done = false
+  let blockedReason = ''
+  let parseErrors = 0
+  let noActionStalls = 0
 
   for (let i = 0; i < maxSteps; i++) {
     // Cancelamento (Esc/IPC): sem esta checagem, um erro de parse em loop ainda
     // disparava novas chamadas ao LLM depois de o usuário abortar a tarefa.
     if (opts.signal?.aborted) {
-      transcript.push({ written: [], skipped: [], ran: [], summary: 'tarefa cancelada pelo usuário', done: false })
+      blockedReason = 'tarefa cancelada pelo usuário'
+      transcript.push({ written: [], skipped: [], ran: [], summary: blockedReason, done: false })
       break
     }
     const ws = summarizeCodeWorkspace(cfg, root)
     let raw = ''
     try {
+      opts.onProgress?.(`Coder autônomo: planejando passo ${i + 1}/${maxSteps}...`, Math.round((i / maxSteps) * 90))
       raw = await chatJSON(
         cfg,
         [
@@ -243,11 +263,13 @@ export async function runCoderTask(
         { signal: opts.signal }
       )
     } catch (e) {
-      transcript.push({ written: [], skipped: [], ran: [], summary: `falha ao planejar: ${e instanceof Error ? e.message : e}`, done: false })
+      blockedReason = `falha ao planejar: ${e instanceof Error ? e.message : e}`
+      transcript.push({ written: [], skipped: [], ran: [], summary: blockedReason, done: false })
       break
     }
     const step = parseCoderStep(raw)
     if (step.parseError) {
+      parseErrors++
       const errorMsg = `Erro de formatação no passo ${i + 1}: a resposta não pôde ser analisada como JSON válido. Detalhe: ${step.parseError}. Certifique-se de responder APENAS o JSON no formato exigido, sem markdown extra ou explicações.`
       transcript.push({
         written: [],
@@ -257,26 +279,89 @@ export async function runCoderTask(
         done: false
       })
       lastResult = errorMsg
+      if (parseErrors >= 2) {
+        blockedReason = 'o coder autônomo devolveu JSON inválido repetidamente'
+        break
+      }
       continue
     }
-    const applied = await applyCoderStep(cfg, root, step, opts.signal)
-    transcript.push({ ...applied, summary: step.summary || step.thought || '(sem resumo)', done: step.done })
+    parseErrors = 0
+    opts.onProgress?.(
+      step.files.length
+        ? `Coder autônomo: escrevendo ${step.files.length} arquivo(s)...`
+        : step.run.length
+          ? 'Coder autônomo: validando a alteração...'
+          : 'Coder autônomo: conferindo conclusão...',
+      Math.round((i / maxSteps) * 90)
+    )
+    const applied = await applyCoderStep(cfg, root, step, opts.signal, opts.onProgress)
+    const stepEvidence = applied.written.length > 0 || applied.ran.some((r) => r.ran)
+    const totalEvidence =
+      transcript.some((t) => t.written.length > 0 || t.ran.some((r) => r.ran)) || stepEvidence
+    const skippedApproval = applied.ran.find((r) => !r.ran && /precisa de você/i.test(r.summary))
+    const stepDone = step.done && totalEvidence && !skippedApproval
+    transcript.push({ ...applied, summary: step.summary || step.thought || '(sem resumo)', done: stepDone })
     lastResult = JSON.stringify(applied)
-    if (step.done || (step.files.length === 0 && step.run.length === 0)) {
-      done = step.done
+
+    if (skippedApproval) {
+      blockedReason = `o comando "${skippedApproval.command}" precisa da sua autorização`
+      break
+    }
+
+    if (step.done && !totalEvidence) {
+      noActionStalls++
+      lastResult =
+        'Você marcou done=true sem escrever arquivo nem rodar comando. Continue com uma ação real em files/run ou explique bloqueio no summary.'
+      if (noActionStalls >= 2) {
+        blockedReason = 'o coder marcou conclusão sem executar nenhuma ação real'
+        break
+      }
+      continue
+    }
+
+    if (step.files.length === 0 && step.run.length === 0 && !step.done) {
+      noActionStalls++
+      lastResult =
+        'O passo não trouxe arquivos nem comandos. Continue com uma ação executável ou marque done=true somente se já houver evidência real.'
+      if (noActionStalls >= 2) {
+        blockedReason = 'o coder não forneceu nenhuma ação executável'
+        break
+      }
+      continue
+    }
+
+    noActionStalls = 0
+    if (stepDone) {
+      done = true
       break
     }
   }
 
-  const failures = transcript.flatMap((t) => t.ran.filter((r) => r.ran && !r.ok))
-  const ok = done && failures.length === 0
+  const lastByCommand = new Map<string, CoderRun>()
+  for (const r of transcript.flatMap((t) => t.ran).filter((r) => r.ran)) lastByCommand.set(r.command, r)
+  const failures = Array.from(lastByCommand.values()).filter((r) => !r.ok)
+  const changedFiles = Array.from(new Set(transcript.flatMap((t) => t.written)))
+  const validation = Array.from(lastByCommand.values()).at(-1)
+  const validated = !!validation
+  if (!blockedReason && failures.length) {
+    blockedReason = `validação falhou em ${failures.map((r) => `"${r.command}"`).join(', ')}`
+  } else if (!blockedReason && !done) {
+    blockedReason = `limite de ${maxSteps} passos atingido antes da conclusão`
+  }
+  const ok = done && failures.length === 0 && !blockedReason
   const last = transcript[transcript.length - 1]
+  opts.onProgress?.(ok ? 'Coder autônomo: objetivo concluído.' : `Coder autônomo: ${blockedReason}`, 100)
   return {
     root,
     objective,
     steps: transcript.length,
+    done,
     ok,
-    summary: last?.summary || 'sem alterações',
+    summary: blockedReason || last?.summary || 'sem alterações',
+    changedFiles,
+    validated,
+    ...(validation ? { validationSummary: `${validation.command}: ${validation.summary}` } : {}),
+    ...(blockedReason ? { blockedReason } : {}),
     transcript
   }
 }

@@ -16,7 +16,7 @@ O modo programador do Ares e nativo. Ele trabalha diretamente no workspace permi
 - `codigo.patch.preview {path?, diff?, patches?}`: valida patch antes de aplicar.
 - `codigo.patch.aplicar {path?, diff?, patches?}`: aplica diff Git ou patches textuais.
 - `codigo.scaffold {nome, tipo_projeto?, path?}`: cria projeto simples usando templates locais.
-- `codigo.projeto {objetivo, path?, passos?}`: planeja, altera arquivos e valida uma tarefa maior.
+- `codigo.projeto {objetivo, path?, passos?}`: planeja, altera arquivos, reporta progresso por passo, valida com comandos seguros e retorna bloqueio explícito se não conseguir concluir.
 - `codigo.comando {path?, comando}`: executa comando de desenvolvimento permitido, sem shell.
 - `codigo.terminal {path?, comando, confirmado?}`: executa shell real com classificacao de risco.
 - `codigo.confirmar {}`: executa comando pendente apos o usuario autorizar.
@@ -52,6 +52,12 @@ Caminhos sensiveis como `.git`, `.ssh`, `.env` e chaves SSH sao bloqueados para 
 
 O preview de patch continua recomendado antes de aplicar mudancas grandes. O agente deve explicar quais arquivos serao alterados e validar o projeto depois da escrita sempre que houver comando permitido.
 
+## Execução confiável e conclusão honesta
+
+O modo programador não deve finalizar uma tarefa em silêncio. O orquestrador mantém um ledger por turno com ferramentas executadas, arquivos escritos, comandos rodados, validações, autorizações pendentes e bloqueios. Antes de gravar a fala final, `groundCodeSpeech` confere esse ledger: se o Ares disser que alterou, criou, rodou testes ou validou sem evidência real, a fala é substituída por um bloqueio honesto.
+
+Promessas também são tratadas como compromisso operacional. Se o modelo responder "vou alterar", "vou rodar" ou "vou chamar o Prometeu" sem emitir ações `codigo.*`/`subagente.*`, o runtime faz uma rodada corretiva pedindo ações reais ou uma explicação de bloqueio. O modo programador tem limite maior de rodadas encadeadas que conversas comuns; se o limite for atingido com ferramentas pendentes, isso entra nas notas e na fala final em vez de ser descartado.
+
 ## Terminal
 
 O terminal nativo tem tres camadas:
@@ -76,9 +82,9 @@ Quando o comando vem do microfone, o Ares cria uma interpretacao auxiliar para t
 ### Interação Contínua, Cancelamento e Heartbeats
 
 Durante execuções longas (como builds, testes ou escrita contínua pelo coder autônomo), o microfone de conversação contínua permanece ativo:
-- **Interrupção e Cancelamento**: Caso o usuário fale palavras curtas de parada no início da frase, como `"para"`, `"cancela"`, `"aborta"`, `"esquece"`, `"pode parar"` ou `"stop"`, a tarefa atual é abortada imediatamente (enviando SIGTERM/SIGKILL para o processo) e a resposta de voz é silenciada na hora. A palavra de ativação não é exigida para comandos de cancelamento curtos (até 4 palavras). Além disso, na mudança de fases/passos do turn agêntico, a fila de falas e áudios residuais da fase anterior é imediatamente descartada por segurança para evitar sobreposição ou narrações obsoletas.
+- **Interrupção e Cancelamento**: Caso o usuário fale palavras curtas de parada no início da frase, como `"para"`, `"cancela"`, `"aborta"`, `"esquece"`, `"pode parar"` ou `"stop"`, a tarefa atual é abortada imediatamente (enviando SIGTERM/SIGKILL para o processo) e a resposta de voz é silenciada na hora. A palavra de ativação não é exigida para comandos de cancelamento curtos (até 4 palavras). Em mudanças de fase do turno, o transcript falado continua unificado; o que muda é a fila pendente obsoleta, para evitar repetição ou narração antiga por cima do passo atual.
 - **Fila de Comandos**: Comandos ditos durante a execução precedidos pela palavra de ativação (ex: "Ares, depois rode os testes") são enfileirados e executados automaticamente na sequência. Falas ou conversas paralelas sem a palavra de ativação e sem verbos de cancelamento são ignoradas por segurança.
-- **Batimento Cardíaco (Heartbeats)**: Se um comando de terminal, build ou teste demorar mais do que 15 segundos, o Ares emitirá avisos de voz breves a cada 30 segundos (com fraseados dinâmicos e variados) para atualizar o usuário sobre o progresso e certificar que a execução não travou.
+- **Batimento Cardíaco (Heartbeats)**: Se um comando de terminal, build, teste, subagente ou coder demorar mais do que 15 segundos, o Ares emitirá avisos de voz breves a cada 30 segundos. Em execução paralela, o heartbeat usa a frente ativa mais recente e retorna para a tarefa remanescente quando outra termina.
 
 Em respostas faladas normais, o Ares nao deve ler codigo, diffs, JSON, `stdout` ou `stderr`. Para ferramentas `codigo.*`, a resposta final e gerada primeiro, sanitizada e enviada ao TTS so depois. O formato ideal da fala e: arquivo principal, acao feita, validacao e proximo passo em uma ou duas frases.
 

@@ -25,10 +25,12 @@ Regra de ouro: **nunca chame Hefesto E `codigo.projeto` com o mesmo objetivo**. 
 1. O Ares identifica a necessidade: informação externa, decisão de projeto ou auditoria.
 2. O Ares chama o subagente correto e mostra o status na aba Escritório via `agent:hive-update`.
 3. O subagente devolve relatório técnico para o Ares, nunca diretamente para o usuário.
-4. O Ares sintetiza a resposta final citando o especialista:
+4. O Ares usa o relatório para agir ou bloquear explicitamente:
    - Atena: achado principal, datas, fontes e incertezas.
    - Hefesto: escopo, arquivos, validação; decide entre aplicar passo-a-passo ou delegar ao coder autônomo.
    - Têmis: veredito, problemas reais, gravidade e correção sugerida.
+   - Prometeu: causa raiz, correção mínima e comando de validação.
+5. Se o Ares prometer usar um especialista mas não emitir a ação JSON, o runtime força uma rodada corretiva. Se ainda não houver ação real, a fala final declara o bloqueio em vez de afirmar execução.
 
 ## EvidencePackage (pacotes de evidência tipados)
 
@@ -61,7 +63,7 @@ Cada perfil declara `requiredTags` — os blocos que o relatório PRECISA conter
 
 ### Relato falado (modo voz)
 
-Em voz+código, o resumo imediato falado usa o conteúdo REAL do relatório: Atena fala o `[RESUMO]` ("Atena concluiu: ..."), e Têmis reprovada adianta o primeiro problema de gravidade alta — em vez dos genéricos "concluiu a pesquisa"/"reprovou as alterações".
+Em voz+código, o resumo imediato falado usa o conteúdo REAL do relatório: Atena fala o `[RESUMO]`, Hefesto fala `[ESCOPO]` e `[VALIDAR]`, Prometeu fala `[CAUSA RAIZ]` e Têmis reprovada adianta o primeiro problema de gravidade alta — em vez dos genéricos "concluiu a pesquisa"/"reprovou as alterações". A fala final passa pelo ledger de evidências do turno, então o Ares não diz que aplicou ou validou uma recomendação sem ferramenta executada.
 
 ## Guarda determinística de delegação
 
@@ -83,6 +85,8 @@ Faltando qualquer um dos três, a inferência é descartada. Verbos de leitura g
 ## Higiene de despacho
 
 Ações de consulta EXATAMENTE duplicadas na mesma rodada (o modelo às vezes emite o mesmo `subagente.*` duas vezes) são removidas por `dedupeActions` antes do despacho — uma chamada de Colmeia duplicada custa uma rodada inteira de LLM sem ganho.
+
+Ações independentes podem ser despachadas em paralelo na mesma rodada. O heartbeat global usa o rótulo da frente ativa mais recente e mantém a voz viva enquanto subagentes, testes e leituras rodam juntos. O modo programador também tem limite maior de rodadas encadeadas que conversa comum; ao atingir o limite com ferramentas pendentes, o Ares registra o bloqueio e relata o que faltou, sem descartar ações em silêncio.
 
 ## Regras de segurança
 

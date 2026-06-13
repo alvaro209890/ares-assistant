@@ -1,9 +1,17 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppConfig } from '../src/shared/types'
-import { applyCoderStep, parseCoderStep } from '../src/main/coder'
+
+vi.mock('../src/main/ninerouter', () => ({
+  chatJSON: vi.fn()
+}))
+
+import { chatJSON } from '../src/main/ninerouter'
+import { applyCoderStep, parseCoderStep, runCoderTask } from '../src/main/coder'
+
+const brain = vi.mocked(chatJSON)
 
 describe('coder — parseCoderStep', () => {
   it('lê um passo válido', () => {
@@ -60,6 +68,7 @@ const cfg = (): AppConfig =>
 describe('coder — applyCoderStep', () => {
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'ares-coder-'))
+    brain.mockReset()
   })
   afterEach(() => rmSync(root, { recursive: true, force: true }))
 
@@ -99,5 +108,50 @@ describe('coder — applyCoderStep', () => {
     const res = await applyCoderStep(c, root, { files: [{ path: 'x.txt', content: 'y' }], run: [], done: true, summary: '' })
     expect(res.written).toHaveLength(0)
     expect(res.skipped.length).toBeGreaterThan(0)
+  })
+})
+
+describe('coder — runCoderTask', () => {
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'ares-coder-'))
+    brain.mockReset()
+  })
+  afterEach(() => rmSync(root, { recursive: true, force: true }))
+
+  it('não aceita done=true sem arquivo, comando ou evidência real', async () => {
+    brain.mockResolvedValue(JSON.stringify({ files: [], run: [], done: true, summary: 'pronto' }))
+
+    const res = await runCoderTask(cfg(), { objetivo: 'crie um site simples', passos: 2 })
+
+    expect(res.ok).toBe(false)
+    expect(res.done).toBe(false)
+    expect(res.blockedReason).toMatch(/sem executar nenhuma ação real/)
+  })
+
+  it('emite progresso, escreve arquivo e marca validação executada', async () => {
+    brain.mockResolvedValueOnce(
+      JSON.stringify({
+        thought: 'criar arquivo',
+        files: [{ path: 'index.html', content: '<h1>Ares</h1>' }],
+        run: ['echo ok'],
+        done: true,
+        summary: 'Site criado'
+      })
+    )
+    const progress: string[] = []
+
+    const res = await runCoderTask(cfg(), {
+      objetivo: 'crie um site simples',
+      onProgress: (label) => progress.push(label)
+    })
+
+    expect(res.ok).toBe(true)
+    expect(res.done).toBe(true)
+    expect(res.changedFiles).toContain('index.html')
+    expect(res.validated).toBe(true)
+    expect(res.validationSummary).toContain('echo ok')
+    expect(progress.some((p) => /planejando passo/i.test(p))).toBe(true)
+    expect(progress.some((p) => /Escrevendo index.html/i.test(p))).toBe(true)
+    expect(progress.some((p) => /Rodando validação: echo ok/i.test(p))).toBe(true)
   })
 })

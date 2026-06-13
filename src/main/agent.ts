@@ -67,7 +67,10 @@ import { registerRun } from './running'
 import { getPendingSentinelDebug, clearPendingSentinelDebug } from './sentinel'
 import {
   codeVoiceProgressSummary,
+  groundCodeSpeech,
   hasCodeAction,
+  hasCodeIntent,
+  hasCodePromise,
   isDuplicateSpeech,
   sanitizeVoiceCodeFala,
   toolResultsPrompt,
@@ -89,7 +92,7 @@ import {
   proactiveCodeFollowup
 } from './agent/hive'
 import { runQuery } from './agent/router'
-import { isToolErr } from './agent/types'
+import { isToolErr, type ToolResult } from './agent/types'
 import { dedupeActions, streamTurn, validateActions, classifyProviderError } from './agent/stream'
 import { createTrace, nullTrace } from './agent/trace'
 import { uid } from './agent/activity'
@@ -208,6 +211,151 @@ function memoryFallback(userText: string, acoes: Acao[]): Acao[] {
 
 // Máximo de rodadas de ferramentas encadeadas por turno (buscar -> ler -> validar...).
 const MAX_TOOL_ROUNDS = 3
+const MAX_CODE_TOOL_ROUNDS = 6
+
+interface CodeTurnLedger {
+  actionsRun: number
+  wroteFiles: Set<string>
+  ranCommands: string[]
+  validations: string[]
+  pendingApprovals: string[]
+  blockers: string[]
+}
+
+const CODE_WRITE_TOOLS = new Set([
+  'codigo.criar',
+  'codigo.editar',
+  'codigo.scaffold',
+  'codigo.substituir',
+  'codigo.patch.aplicar',
+  'codigo.formatar',
+  'codigo.projeto'
+])
+
+const CODE_VALIDATION_TOOLS = new Set([
+  'codigo.comando',
+  'codigo.terminal',
+  'codigo.diagnostico',
+  'codigo.testar',
+  'codigo.lint',
+  'codigo.typecheck'
+])
+
+function createCodeTurnLedger(): CodeTurnLedger {
+  return {
+    actionsRun: 0,
+    wroteFiles: new Set(),
+    ranCommands: [],
+    validations: [],
+    pendingApprovals: [],
+    blockers: []
+  }
+}
+
+function resultObj(result: ToolResult): Record<string, unknown> {
+  return result.resultado && typeof result.resultado === 'object' && !Array.isArray(result.resultado)
+    ? (result.resultado as Record<string, unknown>)
+    : {}
+}
+
+function resultString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function resultArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : []
+}
+
+function recordCodeResult(ledger: CodeTurnLedger, result: ToolResult): void {
+  const tipo = String(result.tipo || '')
+  if (!tipo.startsWith('codigo.') && !tipo.startsWith('subagente.')) return
+  ledger.actionsRun++
+
+  if (isToolErr(result)) {
+    ledger.blockers.push(`${tipo}: ${result.erro}`)
+    return
+  }
+
+  const o = resultObj(result)
+  const command = resultString(o.command) || resultString(o.comando)
+  if (command) ledger.ranCommands.push(command)
+  if (o.requiresApproval === true) {
+    ledger.pendingApprovals.push(command || `${tipo} precisa de autorização`)
+  }
+  if (resultString(o.blockedReason)) ledger.blockers.push(resultString(o.blockedReason))
+  if (resultString(o.erro) || resultString(o.error)) ledger.blockers.push(resultString(o.erro) || resultString(o.error))
+  if (o.ok === false && (CODE_VALIDATION_TOOLS.has(tipo) || tipo === 'codigo.projeto')) {
+    const why = resultString(o.summary) || resultString(o.stderr) || resultString(o.stdout) || `${tipo} retornou falha`
+    ledger.blockers.push(why)
+  }
+
+  const file = resultString(o.file)
+  if (file && (CODE_WRITE_TOOLS.has(tipo) || o.changed === true || o.applied === true)) ledger.wroteFiles.add(file)
+  for (const f of resultArray(o.changedFiles).map(resultString).filter(Boolean)) ledger.wroteFiles.add(f)
+  for (const f of resultArray(o.created).map(resultString).filter(Boolean)) ledger.wroteFiles.add(f)
+  for (const f of resultArray(o.files).map((v) => {
+    if (typeof v === 'string') return v
+    if (v && typeof v === 'object') return resultString((v as Record<string, unknown>).file)
+    return ''
+  }).filter(Boolean)) {
+    if (CODE_WRITE_TOOLS.has(tipo) && (o.applied === true || o.changed === true || tipo === 'codigo.scaffold')) ledger.wroteFiles.add(f)
+  }
+
+  const summary = resultString(o.summary)
+  const validationSummary = resultString(o.validationSummary)
+  if (CODE_VALIDATION_TOOLS.has(tipo) && (summary || command)) {
+    ledger.validations.push(summary || command)
+  }
+  if (validationSummary) ledger.validations.push(validationSummary)
+}
+
+function recordCodeResults(ledger: CodeTurnLedger, results: ToolResult[]): void {
+  for (const result of results) recordCodeResult(ledger, result)
+}
+
+function ledgerEvidence(ledger: CodeTurnLedger) {
+  return {
+    actionsRun: ledger.actionsRun,
+    wroteFiles: Array.from(ledger.wroteFiles),
+    ranCommands: ledger.ranCommands,
+    validations: ledger.validations,
+    pendingApprovals: ledger.pendingApprovals,
+    blockers: ledger.blockers
+  }
+}
+
+function needsPromisedCodeCorrection(userText: string, fala: string, actions: Acao[], codeSeen: boolean): boolean {
+  if (hasCodeAction(actions)) return false
+  if (!hasCodePromise(fala)) return false
+  return codeSeen || hasCodeIntent(userText)
+}
+
+async function correctPromisedCodeActions(
+  cfg: AppConfig,
+  messages: ChatMessage[],
+  currentEnvelope: { fala: string; acoes: Acao[] },
+  signal?: AbortSignal
+): Promise<{ fala: string; acoes: Acao[] } | null> {
+  const raw = await chatJSON(
+    cfg,
+    [
+      ...messages,
+      { role: 'assistant', content: JSON.stringify(currentEnvelope) },
+      {
+        role: 'system',
+        content:
+          'Você prometeu executar uma tarefa de programação, mas não emitiu nenhuma ação codigo.* ou subagente.*. ' +
+          'Responda AGORA apenas no envelope JSON. Se for possível continuar, inclua ações reais em "acoes" para executar. ' +
+          'Se não for possível, deixe "acoes" vazio e explique o bloqueio real em uma frase curta. ' +
+          'Não afirme que alterou, criou, rodou ou validou algo sem ação correspondente.'
+      }
+    ],
+    true,
+    { signal }
+  )
+  const corrected = parseEnvelope(raw)
+  return corrected.fala || corrected.acoes.length ? corrected : null
+}
 
 /** Executa um turno completo de conversa + ações, com fala transmitida em streaming. */
 export async function runTurn(
@@ -367,11 +515,23 @@ export async function runTurn(
     let fala = _finalFala(env.fala, suppressGreeting)
     let falaVoz: string | undefined
     const allNotes: string[] = []
+    const codeLedger = createCodeTurnLedger()
     const inferredHive = inferPromisedHiveAction(fala, userText, env.acoes)
     if (inferredHive) {
       env.acoes = [...env.acoes, inferredHive]
       allNotes.push('colmeia corrigida: promessa convertida em ação real')
       trace.emit('hive:inferred', { tipo: inferredHive.tipo })
+    }
+    let codeTurnSeen = hasCodeIntent(userText) || hasCodeAction(env.acoes)
+    if (needsPromisedCodeCorrection(userText, fala, env.acoes, codeTurnSeen)) {
+      const corrected = await correctPromisedCodeActions(cfg, messages, { fala, acoes: env.acoes }, signal)
+      if (corrected) {
+        fala = _finalFala(corrected.fala || fala, suppressGreeting)
+        env.acoes = corrected.acoes
+        codeTurnSeen = codeTurnSeen || hasCodeAction(env.acoes)
+        allNotes.push('programação corrigida: promessa convertida em ação real ou bloqueio explícito')
+        trace.emit('code:corrected', { actions: env.acoes.length })
+      }
     }
     let mutations = env.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo))
     let queries = dedupeActions(env.acoes.filter((a) => QUERY_TOOLS.has(a.tipo)))
@@ -388,7 +548,17 @@ export async function runTurn(
     // nunca entrar em ciclo; na última rodada o LLM é instruído a concluir.
     let convo: ChatMessage[] = messages
     let phase = 1
-    for (let round = 0; queries.length && round < MAX_TOOL_ROUNDS; round++) {
+    for (let round = 0; queries.length; round++) {
+      if (hasCodeAction(queries)) codeTurnSeen = true
+      const maxRounds = codeTurnSeen ? MAX_CODE_TOOL_ROUNDS : MAX_TOOL_ROUNDS
+      if (round >= maxRounds) {
+        const pending = queries.map((q) => q.tipo).join(', ')
+        const blocker = `limite de ${maxRounds} rodadas atingido com ações pendentes: ${pending}`
+        codeLedger.blockers.push(blocker)
+        allNotes.push(blocker)
+        trace.emit('tool:limit', { maxRounds, pending: queries.length })
+        break
+      }
       // Voz assíncrona NÃO-BLOQUEANTE: anuncia em uma frase curta o que vai rodar
       // agora, em paralelo com a execução (a fala toca enquanto as ferramentas
       // trabalham). Na primeira rodada o próprio modelo já anunciou via streaming;
@@ -402,10 +572,12 @@ export async function runTurn(
       const results = await Promise.all(
         queries.map((q) => runQuery(q, { cfg, sessionId, phase, signal, onDelta: emitDelta, onActivity, onHive, onProgress, trace }))
       )
+      recordCodeResults(codeLedger, results)
       const codeMode = hasCodeAction(queries)
+      if (codeMode) codeTurnSeen = true
       const proactive = proactiveCodeFollowup(cfg, results)
       if (proactive) allNotes.push(proactive.note)
-      const lastRound = round === MAX_TOOL_ROUNDS - 1
+      const lastRound = round === maxRounds - 1
       convo = [
         ...convo,
         { role: 'assistant', content: fala || '...' },
@@ -437,7 +609,7 @@ export async function runTurn(
         }
         const beforeFinal = visibleTranscript.length
         const raw = await streamTurn(cfg, convo, phase, emitDelta, 'both', voiceCodeTransform, signal)
-        const envN = parseEnvelope(raw)
+        let envN = parseEnvelope(raw)
         if (envN.fala) {
           const modelFala = _finalFala(envN.fala, suppressGreeting)
           const spoken = sanitizeVoiceCodeFala(modelFala) || 'Analise concluida. Os detalhes principais estao nas atividades.'
@@ -455,6 +627,15 @@ export async function runTurn(
         } else {
           fala = currentVisibleTranscript() || immediateSpoken
         }
+
+        if (!lastRound && needsPromisedCodeCorrection(userText, envN.fala || fala, envN.acoes, codeTurnSeen)) {
+          const corrected = await correctPromisedCodeActions(cfg, convo, { fala: envN.fala || fala, acoes: envN.acoes }, signal)
+          if (corrected) {
+            envN = corrected
+            allNotes.push('programação corrigida: promessa convertida em ação real ou bloqueio explícito')
+            trace.emit('code:corrected', { actions: envN.acoes.length })
+          }
+        }
         
         const inferredHiveN = inferPromisedHiveAction(fala, userText, envN.acoes)
         if (inferredHiveN) {
@@ -464,11 +645,28 @@ export async function runTurn(
         }
 
         mutations = mutations.concat(envN.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo)))
-        queries = lastRound ? [] : dedupeActions(envN.acoes.filter((a) => QUERY_TOOLS.has(a.tipo)))
+        const nextQueries = dedupeActions(envN.acoes.filter((a) => QUERY_TOOLS.has(a.tipo)))
+        if (lastRound && nextQueries.length) {
+          const blocker = `limite de ${maxRounds} rodadas atingido antes de executar: ${nextQueries.map((q) => q.tipo).join(', ')}`
+          codeLedger.blockers.push(blocker)
+          allNotes.push(blocker)
+          trace.emit('tool:limit', { maxRounds, pending: nextQueries.length })
+        }
+        queries = lastRound ? [] : nextQueries
       } else {
         const raw = await streamTurn(cfg, convo, phase, emitDelta, 'both', deltaTransform, signal)
-        const envN = parseEnvelope(raw)
+        let envN = parseEnvelope(raw)
         if (envN.fala) fala = _finalFala(envN.fala, suppressGreeting)
+
+        if (!lastRound && needsPromisedCodeCorrection(userText, fala, envN.acoes, codeTurnSeen)) {
+          const corrected = await correctPromisedCodeActions(cfg, convo, { fala, acoes: envN.acoes }, signal)
+          if (corrected) {
+            fala = _finalFala(corrected.fala || fala, suppressGreeting)
+            envN = corrected
+            allNotes.push('programação corrigida: promessa convertida em ação real ou bloqueio explícito')
+            trace.emit('code:corrected', { actions: envN.acoes.length })
+          }
+        }
         
         const inferredHiveN = inferPromisedHiveAction(fala, userText, envN.acoes)
         if (inferredHiveN) {
@@ -478,7 +676,14 @@ export async function runTurn(
         }
 
         mutations = mutations.concat(envN.acoes.filter((a) => !QUERY_TOOLS.has(a.tipo)))
-        queries = lastRound ? [] : dedupeActions(envN.acoes.filter((a) => QUERY_TOOLS.has(a.tipo)))
+        const nextQueries = dedupeActions(envN.acoes.filter((a) => QUERY_TOOLS.has(a.tipo)))
+        if (lastRound && nextQueries.length) {
+          const blocker = `limite de ${maxRounds} rodadas atingido antes de executar: ${nextQueries.map((q) => q.tipo).join(', ')}`
+          codeLedger.blockers.push(blocker)
+          allNotes.push(blocker)
+          trace.emit('tool:limit', { maxRounds, pending: nextQueries.length })
+        }
+        queries = lastRound ? [] : nextQueries
       }
     }
 
@@ -529,6 +734,14 @@ export async function runTurn(
       if (transcript) {
         fala = transcript
         falaVoz = transcript
+      }
+    }
+    if (codeTurnSeen || codeLedger.actionsRun > 0) {
+      const grounded = groundCodeSpeech(fala, ledgerEvidence(codeLedger))
+      if (grounded.adjusted) {
+        fala = grounded.text
+        falaVoz = grounded.text
+        allNotes.push('fala final ajustada com base em evidências reais do turno')
       }
     }
 
