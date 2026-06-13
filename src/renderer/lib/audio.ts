@@ -26,7 +26,7 @@ function micAlive(): boolean {
   if (!stream || !audioCtx || !analyser) return false
   if (!stream.active || audioCtx.state === 'closed') return false
   const track = stream.getAudioTracks()[0]
-  return !!track && track.readyState === 'live'
+  return !!track && track.readyState === 'live' && !track.muted
 }
 
 /** Garante acesso ao microfone e prepara o analisador. Pode lançar (permissão negada). */
@@ -49,7 +49,12 @@ export async function ensureMic(): Promise<void> {
   // echoCancellation reduz o áudio da própria voz do Ares no microfone, o que
   // torna o barge-in (interromper falando) confiável e melhora a captação geral.
   stream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+    audio: { 
+      echoCancellation: true, 
+      noiseSuppression: true, 
+      autoGainControl: true,
+      channelCount: 1 
+    }
   })
   // O AudioContext é compartilhado com o analisador de playback (orbe): só cria
   // um novo se não existir ou se o atual foi fechado.
