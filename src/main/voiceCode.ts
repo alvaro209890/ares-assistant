@@ -178,6 +178,34 @@ function addPeriod(text: string): string {
   return /[.!?]$/.test(t) ? t : `${t}.`
 }
 
+function cleanOneLine(text: string, maxLen = 180): string {
+  let out = String(text || '')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s:;,.—–-]+/, '')
+    .trim()
+  if (out.length <= maxLen) return out
+  out = out.slice(0, maxLen - 3).replace(/\s+\S*$/, '').trim()
+  return out ? `${out}...` : ''
+}
+
+function stripRootCauseLead(text: string): string {
+  return cleanOneLine(text)
+    .replace(/^(?:a\s+)?causa\s+raiz\s+(?:é|foi|est[aá]\s+em|fica\s+em|est[aá]\s+no|est[aá]\s+na)\s+/i, '')
+    .replace(/^o\s+problema\s+(?:é|foi|est[aá]\s+em)\s+/i, '')
+    .trim()
+}
+
+function actionTopic(a: Acao, maxLen = 90): string {
+  return cleanOneLine(
+    String(a?.objetivo || a?.tarefa || a?.consulta || a?.query || a?.texto || a?.arquivo || a?.file || ''),
+    maxLen
+  )
+}
+
+function phraseWithTopic(base: string, topic: string, preposition = 'para'): string {
+  return topic ? `${base} ${preposition} ${topic}.` : `${base}.`
+}
+
 function compactSpeech(parts: string[], maxLen = 360): string {
   let text = parts.map(addPeriod).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()
   if (text.length <= maxLen) return text
@@ -228,8 +256,11 @@ function summarizeCodeResult(tipo: string, resultado: Record<string, unknown>, e
       if (!ok) return 'O depurador Prometeu falhou ao rodar.'
       const report = String(resultado.relatorio || '')
       const tags = parseReportTags(report)
-      const cause = tags.rootCause || 'Diagnóstico concluído.'
-      return `Prometeu identificou a causa raiz: ${cause}`
+      const cause = stripRootCauseLead(tags.rootCause || tags.summary || 'diagnóstico concluído')
+      return compactSpeech([
+        `Prometeu identificou a causa raiz: ${cause}`,
+        tags.validateCmd ? `Validação sugerida: ${tags.validateCmd}` : ''
+      ], 360)
     }
     case 'subagente.pesquisar': {
       const ok = resultado.ok === true
@@ -237,28 +268,39 @@ function summarizeCodeResult(tipo: string, resultado: Record<string, unknown>, e
       const report = String(resultado.relatorio || '')
       const tags = parseReportTags(report)
       // Fala o achado real ([RESUMO]) em vez do genérico "concluiu a pesquisa".
-      return tags.summary ? `Atena concluiu: ${tags.summary}` : 'Atena concluiu a pesquisa das fontes.'
+      return tags.summary ? `Atena confirmou: ${cleanOneLine(tags.summary, 260)}` : 'Atena concluiu a pesquisa das fontes.'
     }
     case 'subagente.construir': {
       const ok = resultado.ok === true
       if (!ok) return 'O planejamento do Hefesto falhou.'
       const report = String(resultado.relatorio || '')
       const tags = parseReportTags(report)
-      const scope = tags.scope || 'Planejamento concluído.'
-      return `Hefesto elaborou o plano: ${scope}`
+      const scope = cleanOneLine(tags.scope || tags.summary || 'planejamento concluído', 240)
+      return compactSpeech([
+        `Hefesto definiu o plano: ${scope}`,
+        tags.validateCmd ? `Validar com ${tags.validateCmd}` : ''
+      ], 360)
     }
     case 'subagente.auditar': {
       const ok = resultado.ok === true
       if (!ok) return 'A auditoria da Têmis falhou.'
       const report = String(resultado.relatorio || '')
       const tags = parseReportTags(report)
-      const verdict = tags.verdict === 'APROVADO' ? 'aprovou as alterações' : 'reprovou as alterações'
+      const summary = cleanOneLine(tags.summary || '', 220)
       // Em reprovação, adianta o primeiro problema de gravidade alta — é o que o
       // usuário vai querer saber antes de qualquer outra coisa.
-      const worst = tags.verdict === 'REPROVADO' ? tags.problems?.find((p) => /alta/i.test(p.severity)) : undefined
-      return worst
-        ? `Têmis reprovou as alterações: ${worst.desc}`
-        : `Têmis concluiu a auditoria e ${verdict}`
+      const worst = tags.verdict === 'REPROVADO'
+        ? (tags.problems?.find((p) => /alta/i.test(p.severity)) || tags.problems?.[0])
+        : undefined
+      if (worst) {
+        const where = worst.file ? `${worst.file}${worst.line ? `:${worst.line}` : ''}` : ''
+        const desc = cleanOneLine(worst.desc || summary || 'há um problema real a corrigir', 220)
+        return `Têmis reprovou as alterações: ${where ? `${where}, ` : ''}${desc}`
+      }
+      if (tags.verdict === 'REPROVADO') {
+        return summary ? `Têmis reprovou as alterações: ${summary}` : 'Têmis reprovou as alterações por falta de evidência suficiente.'
+      }
+      return summary ? `Têmis aprovou as alterações: ${summary}` : 'Têmis aprovou as alterações.'
     }
     case 'codigo.workspace': {
       if (resultado.exists === false) return `Nao encontrei o workspace ${str(resultado.root) || 'solicitado'}`
@@ -440,7 +482,11 @@ export function isDuplicateSpeech(a: string, b: string): boolean {
 function announcePhrase(a: Acao): string {
   const tipo = String(a?.tipo || '')
   const file = basename(String(a?.arquivo || a?.file || ''))
+  const path = basename(String(a?.path || a?.raiz || a?.workspace || ''))
+  const topic = actionTopic(a)
   switch (tipo) {
+    case 'codigo.workspace':
+      return path ? `Analisando o workspace ${path}.` : 'Analisando o workspace.'
     case 'codigo.testar':
       return 'Executando os testes, senhor.'
     case 'codigo.typecheck':
@@ -460,9 +506,15 @@ function announcePhrase(a: Acao): string {
     case 'codigo.patch.aplicar':
       return 'Aplicando o patch com validação de sintaxe.'
     case 'codigo.buscar':
-      return 'Buscando no código.'
+      return topic ? `Buscando "${topic}" no código.` : 'Buscando no código.'
+    case 'codigo.listar':
+      return path ? `Listando arquivos em ${path}.` : 'Listando arquivos do projeto.'
     case 'codigo.ler':
       return file ? `Lendo ${file}.` : 'Lendo o arquivo.'
+    case 'codigo.esboco':
+      return file ? `Mapeando ${file}.` : 'Mapeando o arquivo.'
+    case 'codigo.referencias':
+      return topic ? `Procurando referências de ${topic}.` : 'Procurando referências no projeto.'
     case 'codigo.explicar':
       return file ? `Analisando ${file}.` : 'Analisando o trecho.'
     case 'codigo.terminal':
@@ -476,13 +528,13 @@ function announcePhrase(a: Acao): string {
     case 'codigo.git':
       return 'Consultando o estado do Git.'
     case 'subagente.depurar':
-      return 'Passando o erro ao Prometeu para depuração.'
+      return phraseWithTopic('Passando o erro ao Prometeu', topic || 'depuração', 'para')
     case 'subagente.pesquisar':
-      return 'Acionando a Atena.'
+      return phraseWithTopic('Acionando a Atena', topic || 'investigar as fontes', 'para')
     case 'subagente.construir':
-      return 'Acionando o Hefesto.'
+      return phraseWithTopic('Acionando o Hefesto', topic || 'planejar a mudança', 'para')
     case 'subagente.auditar':
-      return 'Acionando a Têmis.'
+      return phraseWithTopic('Acionando a Têmis', topic || 'auditar as alterações', 'para')
     default:
       return ''
   }
@@ -613,6 +665,7 @@ export const HEARTBEAT_PHRASES = [
 ]
 
 type HeartbeatDelta = (chunk: string, phase: number, kind?: 'both' | 'display' | 'speak', done?: boolean) => void
+type HeartbeatLabel = string | (() => string | undefined)
 
 /**
  * Converte o rótulo de progresso da ferramenta ("Rodando testes...", "Terminal: npm
@@ -656,13 +709,15 @@ let activeHeartbeats = 0
 let heartbeatTimer: ReturnType<typeof setTimeout> | null = null
 let heartbeatIndex = 0
 
-export function startHeartbeat(onDelta: HeartbeatDelta | undefined, phase: number, label?: string): () => void {
+export function startHeartbeat(onDelta: HeartbeatDelta | undefined, phase: number, label?: HeartbeatLabel): () => void {
   if (!onDelta) return () => {}
   activeHeartbeats++
   if (activeHeartbeats === 1) {
     heartbeatIndex = 0
+    const currentLabel = (): string | undefined =>
+      typeof label === 'function' ? label() : label
     const tick = (): void => {
-      onDelta(heartbeatPhrase(heartbeatIndex++, label), phase, 'both', true)
+      onDelta(heartbeatPhrase(heartbeatIndex++, currentLabel()), phase, 'both', true)
       heartbeatTimer = setTimeout(tick, HEARTBEAT_REPEAT_MS)
     }
     heartbeatTimer = setTimeout(tick, HEARTBEAT_FIRST_MS)
@@ -682,7 +737,7 @@ export function startHeartbeat(onDelta: HeartbeatDelta | undefined, phase: numbe
 export function toolResultsPrompt(results: unknown[], voice: boolean, codeMode: boolean): string {
   const base = 'Resultados das ferramentas (responda ao usuario em pt-BR, curto e falavel, sem inventar nada alem disto):'
   const voiceCode =
-    'MODO VOZ PARA CODIGO: responda em ate 2 frases; nao leia codigo, diff, JSON, stdout ou stderr; diga apenas o que foi feito, arquivos principais, status de validacao, a saude do projeto e se precisa de autorizacao. Ao reportar erro, fale so a causa raiz. IMPORTANTE: o resultado bruto JA apareceu no chat e foi falado ao usuario; nao repita a mesma informacao com outras palavras; acrescente o que ela significa e qual o proximo passo.'
+    'MODO VOZ PARA CODIGO: responda em ate 2 frases; nao leia codigo, diff, JSON, stdout ou stderr; diga apenas o que foi feito, arquivos principais, status de validacao, a saude do projeto e se precisa de autorizacao. Ao reportar erro, fale so a causa raiz. Se houver subagentes, cite o nome e sintetize o bloco tagueado real ([RESUMO], [CAUSA RAIZ], [ESCOPO] ou [VEREDITO]); nunca leia o relatorio inteiro. IMPORTANTE: o resultado bruto JA apareceu no chat e foi falado ao usuario; nao repita a mesma informacao com outras palavras; acrescente o que ela significa e qual o proximo passo.'
   const instruction = voice && codeMode ? `${base}\n${voiceCode}` : base
   const focused = voice && codeMode ? results.map((r) => focusErrorsForVoice(r)) : results
   const payload = voice && codeMode ? truncateForVoice(focused) : focused

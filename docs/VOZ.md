@@ -50,7 +50,7 @@ Mapa do pipeline de voz do Ares: como ele OUVE o usuário, como FALA (Piper neur
 - **Dois níveis de cancelamento**:
   - `clearSpeechQueue()` — corte duro (novo turno, barge-in, push-to-talk): derruba o áudio atual e zera tudo, inclusive cooldown do Piper.
   - `dropPendingSentences()` — corte suave legado: ainda existe para usos pontuais da fila, mas o stream principal de programação não descarta texto visível ao trocar de fase.
-- **Resiliência do Piper sob carga**: budgets folgados (tentativa 6 s, total 14 s) porque a síntese fica legitimamente lenta com build/testes comendo CPU. Falha transitória ativa cooldown de 5 s — a próxima frase **espera e tenta de novo** em vez de ser pulada; após 3 falhas seguidas (Piper fora do ar de verdade), passa a pular sem atrasar. O status do Piper usa o último valor conhecido quando a consulta estoura o timeout.
+- **Resiliência do Piper sob carga**: budgets folgados (tentativa 6 s, total 14 s) porque a síntese fica legitimamente lenta com build/testes comendo CPU. Falha transitória ativa cooldown de 5 s — a próxima frase **espera e tenta de novo** em vez de ser pulada; após 3 falhas seguidas (Piper fora do ar de verdade), passa a pular sem atrasar. No Linux/Windows, `auto` mantém Piper como voz neural estrita: não rebaixa para Web Speech quando o Piper falha; em vez disso registra erro, chama `onEnd` e libera a fila.
 
 ### Síntese neural (`src/main/piper.ts`, `piperEngine.ts`, `speech.ts`)
 
@@ -58,14 +58,16 @@ Mapa do pipeline de voz do Ares: como ele OUVE o usuário, como FALA (Piper neur
 - `prepareText` normaliza números/moeda/hora/versões por extenso, soletra siglas técnicas, aplica dicionário de pronúncia para termos estrangeiros e ajusta pontuação para prosódia.
 - Tom dinâmico (`detectTone`): erro = mais direto; sucesso = mais calmo; pergunta = mais melódica (length_scale e noise por tom).
 - O silêncio residual do WAV é aparado (`tightenWavSilence`) — a pausa audível entre frases é a da fila, não a do vocoder.
+- Web Speech é motor explícito (`tts.engine=web`) ou caminho de plataformas sem Piper, como macOS. Não é fallback automático da voz neural no Linux/Windows.
 
 ## Voz durante tarefas de programação
 
 - **Regra de texto único**: no modo programador por voz, tudo que entra na fila de fala entra também no chat pelo canal `both`, na mesma ordem. Se não está visível no transcript principal, não é falado. Logs, stdout/stderr, diffs e trechos de código ficam nos cartões de atividade/terminal.
 - **Fases**: cada rodada de ferramentas ainda abre uma fase nova de streaming, mas a fase nova continua o mesmo transcript em vez de apagar a tela ou descartar fala pendente.
-- **Anúncio pré-execução** (`voiceToolAnnouncement`): frase curta exibida e falada em paralelo com as ferramentas ("Executando os testes e checando os tipos do projeto."); combina até duas frentes da rodada.
-- **Heartbeat** (`startHeartbeat`): tarefas com mais de 15 s geram atualização exibida e falada a cada 30 s, citando a tarefa real pelo rótulo de progresso ("Ainda rodando os testes, senhor.").
+- **Anúncio pré-execução** (`voiceToolAnnouncement`): frase curta exibida e falada em paralelo com as ferramentas ("Executando os testes e checando os tipos do projeto."); combina até duas frentes da rodada e inclui alvo real quando houver (arquivo, busca, workspace ou objetivo do subagente).
+- **Heartbeat** (`startHeartbeat`): tarefas com mais de 15 s geram atualização exibida e falada a cada 30 s. O rótulo é dinâmico: quando a ferramenta muda de "Rodando testes..." para "Executando suite de testes..." ou "Têmis elaborando relatório...", a próxima fala acompanha esse passo real.
 - **Resumo imediato** (`codeVoiceProgressSummary`): assim que as ferramentas terminam, o resultado entra no mesmo transcript visível/falado. A conclusão do modelo é sanitizada para ser curta e falável, sem ler código, diff, JSON, stdout ou stderr.
+- **Subagentes com precisão**: Atena, Hefesto, Têmis e Prometeu nunca falam diretamente; o Ares narra os blocos tagueados reais do relatório (`[RESUMO]`, `[ESCOPO]`, `[VEREDITO]`, `[PROBLEMAS]`, `[CAUSA RAIZ]`, `[VALIDAR]`) e ignora o restante para não despejar relatório técnico em voz.
 - **Anti-repetição**: `isDuplicateSpeech` detecta paráfrases (sobreposição de tokens) entre o resumo imediato e a conclusão do modelo; o prompt de voz instrui o modelo a acrescentar significado/próximo passo em vez de repetir o resultado.
 
 ## Diagnóstico: "ele não está me escutando"
@@ -88,4 +90,4 @@ Mapa do pipeline de voz do Ares: como ele OUVE o usuário, como FALA (Piper neur
 
 ## Testes
 
-`tests/tts.test.ts`, `tests/speech.test.ts`, `tests/voice-code.test.ts`, `tests/voice-control.test.ts`, `tests/piper-engine.test.ts` cobrem fila, normalização, anúncios, heartbeat, limiares e o pool do Piper. Gate: `npm run verify`.
+`tests/tts.test.ts`, `tests/speech.test.ts`, `tests/voice-code.test.ts`, `tests/voice-control.test.ts`, `tests/piper-engine.test.ts`, `tests/subagents.test.ts` e `tests/agent.test.ts` cobrem fila, normalização, anúncios, heartbeat dinâmico, limiares, pool do Piper, parsing de relatórios e o contrato de transcript único em voz+programação. Gate: `npm run verify`.

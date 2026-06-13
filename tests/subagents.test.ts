@@ -157,6 +157,18 @@ describe('colmeia — summarizeReport', () => {
   })
 })
 
+describe('colmeia — parseReportTags', () => {
+  it('aceita quebras de linha reais e escapadas em relatórios de subagente', () => {
+    const real = parseReportTags('[CAUSA RAIZ] Import inválido.\n[VALIDAR]\nnpm run test')
+    expect(real.rootCause).toBe('Import inválido.')
+    expect(real.validateCmd).toBe('npm run test')
+
+    const escaped = parseReportTags('[CAUSA RAIZ] Import inválido.\\n[VALIDAR]\\nnpm run test')
+    expect(escaped.rootCause).toBe('Import inválido.')
+    expect(escaped.validateCmd).toBe('npm run test')
+  })
+})
+
 describe('colmeia — EvidencePackage (renderer e helpers)', () => {
   it('truncateSmart preserva fronteira de linha quando possível', () => {
     const text = 'linha A\nlinha B\nlinha C\nlinha D\nlinha E\nlinha F'

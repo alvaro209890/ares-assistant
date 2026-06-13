@@ -67,6 +67,7 @@ export async function dispatchCommand(
   // Canal HUD: só emite start/end quando o command opta por reportsProgress.
   const taskId = `tp-${uid('task')}`
   const progressLabel = cmd.progressLabel?.(a) || activity?.title || a.tipo
+  let currentProgressLabel = progressLabel
   if (cmd.reportsProgress) {
     ctx.onProgress?.({
       id: taskId,
@@ -78,6 +79,7 @@ export async function dispatchCommand(
   }
   const reportProgress = (label: string, percent?: number): void => {
     if (!cmd.reportsProgress) return
+    currentProgressLabel = label || currentProgressLabel
     ctx.onProgress?.({
       id: taskId,
       tool: a.tipo,
@@ -101,7 +103,7 @@ export async function dispatchCommand(
 
   const beating = async <T,>(work: Promise<T>): Promise<T> => {
     // Com o rótulo, o batimento de voz diz O QUE ainda está rodando, não um genérico.
-    const stop = startHeartbeat(ctx.onDelta, ctx.phase, progressLabel)
+    const stop = startHeartbeat(ctx.onDelta, ctx.phase, () => currentProgressLabel)
     try {
       return await work
     } finally {

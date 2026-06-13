@@ -1,9 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
+  HEARTBEAT_FIRST_MS,
+  HEARTBEAT_REPEAT_MS,
   codeVoiceProgressSummary,
   isDuplicateSpeech,
   rootCauseError,
   sanitizeVoiceCodeFala,
+  startHeartbeat,
   toolResultsPrompt,
   voiceCodeInterpretation,
   voiceAwareUserContent,
@@ -15,6 +18,18 @@ describe('voiceToolAnnouncement — anúncio falado não-bloqueante', () => {
     expect(voiceToolAnnouncement([{ tipo: 'codigo.testar' }])).toMatch(/testes/i)
     expect(voiceToolAnnouncement([{ tipo: 'codigo.typecheck' }])).toMatch(/tipos/i)
     expect(voiceToolAnnouncement([{ tipo: 'subagente.depurar' }])).toMatch(/Prometeu/)
+  })
+
+  it('inclui objetivo real em workspace, busca e subagentes quando disponível', () => {
+    expect(voiceToolAnnouncement([{ tipo: 'codigo.workspace', path: '/home/acer/Documentos/Ares' }])).toBe(
+      'Analisando o workspace Ares.'
+    )
+    expect(voiceToolAnnouncement([{ tipo: 'codigo.buscar', consulta: 'synthesizeWithRetry' }])).toBe(
+      'Buscando "synthesizeWithRetry" no código.'
+    )
+    expect(voiceToolAnnouncement([{ tipo: 'subagente.pesquisar', objetivo: 'comparar Piper e Web Speech' }])).toBe(
+      'Acionando a Atena para comparar Piper e Web Speech.'
+    )
   })
 
   it('inclui o nome curto do arquivo em edições e leituras', () => {
@@ -157,7 +172,8 @@ describe('voz no modo programador', () => {
         }
       }
     ])
-    expect(depurar).toContain('Prometeu identificou a causa raiz: A causa raiz é um import inválido em file.ts:12.')
+    expect(depurar).toContain('Prometeu identificou a causa raiz: um import inválido em file.ts:12.')
+    expect(depurar).toContain('Validação sugerida: npm run test')
 
     const construir = codeVoiceProgressSummary([
       {
@@ -168,7 +184,7 @@ describe('voz no modo programador', () => {
         }
       }
     ])
-    expect(construir).toContain('Hefesto elaborou o plano: Refatorar a classe A.')
+    expect(construir).toContain('Hefesto definiu o plano: Refatorar a classe A.')
 
     const auditar = codeVoiceProgressSummary([
       {
@@ -179,7 +195,7 @@ describe('voz no modo programador', () => {
         }
       }
     ])
-    expect(auditar).toContain('Têmis concluiu a auditoria e aprovou as alterações')
+    expect(auditar).toContain('Têmis aprovou as alterações: Mudanças em ordem.')
   })
 
   it('fala o RESUMO real da Atena e o problema de gravidade alta da Têmis reprovada', () => {
@@ -189,7 +205,7 @@ describe('voz no modo programador', () => {
         resultado: { ok: true, relatorio: '[RESUMO] O modelo X foi lançado em maio.\n[FONTES]\n- url' }
       }
     ])
-    expect(pesquisa).toContain('Atena concluiu: O modelo X foi lançado em maio.')
+    expect(pesquisa).toContain('Atena confirmou: O modelo X foi lançado em maio.')
 
     const reprovada = codeVoiceProgressSummary([
       {
@@ -201,6 +217,7 @@ describe('voz no modo programador', () => {
       }
     ])
     expect(reprovada).toContain('Têmis reprovou')
+    expect(reprovada).toContain('src/a.ts:10')
     expect(reprovada).toContain('foo retorna undefined')
   })
 
@@ -350,5 +367,26 @@ describe('voz no modo programador', () => {
     const prompt = toolResultsPrompt(result, true, true)
     expect(prompt).toContain('ENOENT: no such file or directory')
     expect(prompt).not.toContain('Object.openSync')
+  })
+
+  it('heartbeat usa o rótulo de progresso atual da ferramenta', () => {
+    vi.useFakeTimers()
+    try {
+      const chunks: string[] = []
+      let label = 'Rodando testes...'
+      const stop = startHeartbeat((chunk) => chunks.push(chunk), 2, () => label)
+
+      label = 'Executando suite de testes...'
+      vi.advanceTimersByTime(HEARTBEAT_FIRST_MS)
+      expect(chunks[0]).toContain('executando suite de testes')
+
+      label = 'Compilando relatório da Têmis...'
+      vi.advanceTimersByTime(HEARTBEAT_REPEAT_MS)
+      expect(chunks[1]).toContain('compilando relatório da Têmis')
+
+      stop()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

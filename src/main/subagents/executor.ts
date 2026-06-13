@@ -162,7 +162,7 @@ export function summarizeReport(report: string): string {
  */
 export function parseReportTags(report: string): SubagentReportTags {
   const tags: SubagentReportTags = {}
-  const text = String(report || '')
+  const text = String(report || '').replace(/\\r\\n|\\n/g, '\n')
 
   const verdictMatch = text.match(/\[?\s*VEREDITO\s*\]?\s*[:\-]?\s*(APROVADO|REPROVADO)/i)
   if (verdictMatch) tags.verdict = verdictMatch[1].toUpperCase() as 'APROVADO' | 'REPROVADO'

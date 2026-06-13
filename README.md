@@ -8,7 +8,7 @@ Ares e um assistente desktop em Electron, React e TypeScript, feito para uso loc
 - **Troca de modelo de IA na hora**: uma barra na tela principal (sobre a orbe) e uma aba dedicada **"Modelos de IA"** deixam escolher provedor (OpenRouter por login, DeepSeek, ChatGPT, Groq, Local), modelo (DeepSeek V4 Flash/Pro, GPT-5.5) e o **nivel de raciocinio** (baixo/medio/alto). A conexao padrao e o **login OAuth do OpenRouter** (o mesmo dos instaladores) — nao usa mais o 9 Router por padrao. DeepSeek e ChatGPT continuam com chave propria; ChatGPT oferece somente o GPT-5.5.
 - **Groq apenas para audio**: a chave Groq e usada somente no STT (fala -> texto). O cerebro continua sendo o provedor/modelo escolhido no onboarding ou na aba Modelos. Em Configuracoes, a transcricao mostra apenas a chave; URL e modelo Whisper ficam internos.
 - **Nivel de raciocinio que funciona e por voz**: baixo/medio/alto viram `reasoning_effort` low/medium/high na chamada (com fallback se o provedor recusar). Ajustavel por voz: "diminua o seu nivel de raciocinio para baixo", "raciocinio no maximo", e tambem "use o DeepSeek Pro" / "troca pro ChatGPT". A aba Modelos tem **"Testar todos os niveis"**, que mede a latencia de cada nivel no modelo conectado.
-- **Voz neural (Linux e Windows)**: usa o Piper local — voz masculina pt-BR grave e humana, estilo JARVIS. O binario e baixado em background no primeiro uso; ate ficar pronto (e no macOS) usa a Web Speech do Chromium como fallback, priorizando vozes Natural/Neural/Online.
+- **Voz neural (Linux e Windows)**: usa o Piper local — voz masculina pt-BR grave e humana, estilo JARVIS. No Linux/Windows o modo `auto` mantem a voz neural como caminho estrito: se o Piper falhar, a fila destrava e mostra o erro sem rebaixar a voz para Web Speech. No macOS ou com `tts.engine=web`, usa a Web Speech do Chromium.
 - **Responde por voz tambem ao texto**: mensagens digitadas no chat sao faladas quando o TTS esta ligado, nao so os comandos de microfone.
 - **Voz de analise mais precisa**: respostas faladas limpam markdown, listas, bullets e links antes do TTS, usam resumo falavel para analise de pastas/projetos e evitam repetir saudacao dentro do mesmo chat.
 - **Memoria estilo Hermes Agent**: fatos duradouros agora têm alvo, limite de contexto, evidencia, confianca e revisao. O Ares deduplica fatos parecidos, coloca contradicoes em pendente, bloqueia memoria suspeita e busca conversas antigas com `memoria.buscar`.
@@ -17,6 +17,7 @@ Ares e um assistente desktop em Electron, React e TypeScript, feito para uso loc
 - **Skills de teste e qualidade**: `codigo.testar` detecta o runner do projeto (script `test`, vitest/jest/pytest/go) e responde por voz quantos testes passaram/falharam; `codigo.lint` (eslint/ruff) conta os problemas; `codigo.formatar` (prettier/ruff/gofmt) formata o codigo. Deteccao e parsing puros em `src/main/devtools.ts`; execucao assincrona, com timeout e cancelavel por Esc.
 - **Chat lateral acompanha o PC**: enquanto o Ares trabalha, a conversa mostra leitura de arquivos, buscas, edicoes, comandos, git, diagnostico, testes, lint, formatacao e saidas recentes em tempo real.
 - **Edicao por voz no codigo**: entende caminhos ditados como "src barra main ponto ts" e termos tecnicos ("funcao seta" -> arrow function, "tente e capture" -> try catch); evita ler codigo, diffs ou logs em voz alta. Resultados grandes sao truncados para voz e comandos lentos retornam resumo curto.
+- **Stream de voz profissional no modo programador**: a fala acompanha o que o Ares realmente esta fazendo — ferramenta, arquivo, comando, subagente e resultado. Atena, Hefesto, Têmis e Prometeu sao narrados por nome a partir dos blocos reais dos relatorios (`[RESUMO]`, `[ESCOPO]`, `[VEREDITO]`, `[CAUSA RAIZ]`), sem ler relatorios inteiros.
 - **Voz mais viva (JARVIS)**: siglas tecnicas pronunciadas certo (API, JSON, TS, JS), fala mais continua e ritmo que muda com o conteudo (erro direto e rapido, sucesso calmo e elegante).
 - **Engenheiro proativo**: apos editar/aplicar patch sugere validar com o teste/build do projeto, reporta a saude do projeto, avisa "iniciando a tarefa, senhor" em comandos longos, lembra do ultimo arquivo/comando e respeita as preferencias de codigo do usuario.
 - **Interface HUD refinada**: selects da memoria usam seta SVG, foco com glow cyan e hover claro; o seletor de provedor mostra icones por IA e chave de API com toggle de visibilidade.
@@ -97,7 +98,7 @@ Campos importantes:
 | `nineRouter.baseUrl` | endpoint OpenAI-compatible do cerebro (padrao: OpenRouter) |
 | `nineRouter.model` | modelo de texto selecionado |
 | `nineRouter.reasoning` | nivel de raciocinio `baixo`/`medio`/`alto` (vira `reasoning_effort` low/medium/high) |
-| `tts.engine` | `auto` (Piper neural primeiro no Linux e no Windows, Web Speech como fallback; macOS usa Web Speech), `piper` ou `web` |
+| `tts.engine` | `auto` (Piper neural estrito no Linux e no Windows; macOS usa Web Speech), `piper` ou `web` |
 | `tts.piperVoice` | voz neural do Piper (padrao `pt_BR-faber-medium`) |
 | `tts.webVoiceURI` | voz do sistema usada no fallback Web Speech |
 | `tts.rate` | velocidade da fala; o padrao novo e mais conservador para priorizar clareza |
@@ -173,18 +174,20 @@ Comandos `blocked` (catastroficos/elevacao) nunca rodam, nem com confirmacao. Pi
 
 Quando a entrada vem do microfone, o agente adiciona uma interpretacao auxiliar para termos comuns de desenvolvimento: "barra" vira `/`, "ponto ts" vira `.ts`, "traço" vira `-`, "underline" vira `_`, "npm rum" vira `npm run` e "git estado" vira `git status`. O dicionario tambem cobre termos tecnicos ditados: "funcao seta" vira `arrow function`, "assincrono com await" vira `async await`, "tente e capture" vira `try catch` e "funcao de retorno" vira `callback`. A resposta final de ferramentas `codigo.*` nao e transmitida em streaming bruto; ela e gerada, filtrada e so entao falada para evitar que o Ares leia codigo, JSON, diffs ou logs longos. A fala deve ficar em ate duas frases com o arquivo principal, o que mudou, se a validacao passou e qual autorizacao falta.
 
+A narracao de programacao e deterministica antes de passar pelo modelo: `voiceToolAnnouncement` anuncia ate duas frentes reais da rodada, `startHeartbeat` fala o passo atual reportado pela ferramenta, `codeVoiceProgressSummary` resume resultados objetivos e `isDuplicateSpeech` impede repetir a mesma conclusao. Para subagentes, o Ares sintetiza os blocos tagueados reais: Atena usa `[RESUMO]`, Hefesto usa `[ESCOPO]` e `[VALIDAR]`, Têmis usa `[VEREDITO]`/`[PROBLEMAS]` e Prometeu usa `[CAUSA RAIZ]`/`[VALIDAR]`.
+
 ### Interação por voz em segundo plano e Heartbeat
 
 Durante tarefas longas de programação ou execução de terminal, o microfone contínuo permanece ativo para receber comandos:
 - **Parada e Cancelamento**: Dizer `"para"`, `"cancela"` ou `"pode parar"` interrompe instantaneamente a execução do processo e o áudio da resposta (sem precisar de wake word).
 - **Fila de Execução**: Comandos precedidos pela wake word (ex: "Ares, depois rode os testes") são colocados em fila para execução sequencial posterior.
-- **Heartbeat**: Atualizações rápidas a cada 30 segundos ajudam a saber se a tarefa ainda está rodando.
+- **Heartbeat**: Atualizações rápidas a cada 30 segundos citam a tarefa atual ("Ainda executando suite de testes", "Continuo compilando relatório da Têmis"), em vez de usar mensagens genéricas.
 
 Ao reportar erros de terminal, o Ares fala apenas a **causa raiz** (a primeira linha que descreve o problema), ignorando o stack trace e os code frames. Veja `rootCauseError` em `src/main/voiceCode.ts`.
 
 O modo de voz tambem limita explicitamente resultados de ferramentas de codigo antes de enviar ao LLM. Conteudos como `content`, `stdout`, `stderr`, diffs e listas grandes recebem o marcador `[...resultado truncado para voz...]`. A sintese Piper tem retry com orcamento total de 14s (folgado de proposito: durante build/testes a CPU esta ocupada e a sintese demora mais); falha transitoria ativa um cooldown curto em que a proxima frase ESPERA e tenta de novo em vez de ser pulada — o Ares mantem a voz neural configurada e nao rebaixa para Web Speech. Ao iniciar um novo turno, apertar push-to-talk ou detectar barge-in, a fala anterior e cancelada junto com a fila pendente; na troca de fase do streaming o cancelamento e suave (a frase em curso termina, so as pendentes sao descartadas). O pipeline completo de escuta e fala esta documentado em `docs/VOZ.md`.
 
-O TTS tem watchdogs para evitar silencio preso: o processo Piper e encerrado em timeout, a reproducao do WAV tem limite de duracao e o Web Speech tenta de novo quando nao dispara `onstart`. A partir da v0.24 o modo `auto` usa o **Piper neural como primeira tentativa tanto no Linux quanto no Windows** (a voz neural e muito mais natural que as vozes SAPI do sistema); o Web Speech entra como reserva, e o macOS, sem binario do Piper, continua usando Web Speech. Se o streaming nao enviar deltas de fala, o Ares ainda enfileira a resposta final (`result.fala`) para nao ficar mudo.
+O TTS tem watchdogs para evitar silencio preso: o processo Piper e encerrado em timeout, a reproducao do WAV tem limite de duracao e o Web Speech tenta de novo quando nao dispara `onstart` apenas quando esse motor esta selecionado. No Linux/Windows, o modo `auto` usa o **Piper neural como caminho estrito**; se a sintese falhar, a frase e encerrada com erro visivel e a fila segue, sem trocar para Web Speech. No macOS, sem binario do Piper, a Web Speech continua sendo o motor usado. Se o streaming nao enviar deltas de fala, o Ares ainda enfileira a resposta final (`result.fala`) para nao ficar mudo.
 
 ### Voz muito melhor (v0.24)
 
@@ -204,7 +207,7 @@ As ferramentas de codigo tambem usam orcamento de tempo em varreduras de pasta. 
 - **Timeline no chat**: cada resposta pode exibir o que o Ares esta fazendo no computador, com etapas de leitura, busca, escrita e comandos.
 - **Provedor de IA**: o cadastro mostra icones por provedor (`DeepSeek`, `Groq`, `OpenRouter`, `OpenAI`, `Local`) e borda colorida sutil conforme o provedor selecionado.
 - **Chave de API**: o campo tem icone de chave e botao para mostrar/ocultar a senha sem trocar de tela.
-- **Voz em programacao**: Piper responde rapido (processo quente + frase seguinte ja sintetizada em paralelo), cai para Web Speech no timeout, preserva virgulas como pausa natural e cancela fala antiga quando entra uma nova resposta ou interrupcao.
+- **Voz em programacao**: Piper responde rapido (processo quente + frase seguinte ja sintetizada em paralelo), preserva virgulas como pausa natural, nao rebaixa para Web Speech no Linux/Windows e cancela fala antiga quando entra uma nova resposta ou interrupcao.
 - **Escala compacta**: novas instalacoes abrem com texto em 92% e janela menor. Em instalacoes existentes, ajuste em **Configuracoes > Acessibilidade > Tamanho do texto**.
 - **Perfil de voz mais humano**: use `tts.rate` perto de `1.08` e `tts.pitch` perto de `0.78` para uma voz mais grave, fluida e menos robotica.
 
