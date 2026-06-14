@@ -628,8 +628,8 @@ export async function runTurn(
           fala = currentVisibleTranscript() || immediateSpoken
         }
 
-        if (!lastRound && needsPromisedCodeCorrection(userText, envN.fala || fala, envN.acoes, codeTurnSeen)) {
-          const corrected = await correctPromisedCodeActions(cfg, convo, { fala: envN.fala || fala, acoes: envN.acoes }, signal)
+        if (!lastRound && needsPromisedCodeCorrection(userText, envN.fala || '', envN.acoes, codeTurnSeen)) {
+          const corrected = await correctPromisedCodeActions(cfg, convo, { fala: envN.fala || '', acoes: envN.acoes }, signal)
           if (corrected) {
             envN = corrected
             allNotes.push('programação corrigida: promessa convertida em ação real ou bloqueio explícito')
@@ -637,7 +637,7 @@ export async function runTurn(
           }
         }
         
-        const inferredHiveN = inferPromisedHiveAction(fala, userText, envN.acoes)
+        const inferredHiveN = inferPromisedHiveAction(envN.fala || '', userText, envN.acoes)
         if (inferredHiveN) {
           envN.acoes = [...envN.acoes, inferredHiveN]
           allNotes.push('colmeia corrigida: promessa convertida em ação real')
@@ -658,17 +658,17 @@ export async function runTurn(
         let envN = parseEnvelope(raw)
         if (envN.fala) fala = _finalFala(envN.fala, suppressGreeting)
 
-        if (!lastRound && needsPromisedCodeCorrection(userText, fala, envN.acoes, codeTurnSeen)) {
-          const corrected = await correctPromisedCodeActions(cfg, convo, { fala, acoes: envN.acoes }, signal)
+        if (!lastRound && needsPromisedCodeCorrection(userText, envN.fala || '', envN.acoes, codeTurnSeen)) {
+          const corrected = await correctPromisedCodeActions(cfg, convo, { fala: envN.fala || '', acoes: envN.acoes }, signal)
           if (corrected) {
-            fala = _finalFala(corrected.fala || fala, suppressGreeting)
+            fala = _finalFala(corrected.fala || envN.fala || '', suppressGreeting)
             envN = corrected
             allNotes.push('programação corrigida: promessa convertida em ação real ou bloqueio explícito')
             trace.emit('code:corrected', { actions: envN.acoes.length })
           }
         }
         
-        const inferredHiveN = inferPromisedHiveAction(fala, userText, envN.acoes)
+        const inferredHiveN = inferPromisedHiveAction(envN.fala || '', userText, envN.acoes)
         if (inferredHiveN) {
           envN.acoes = [...envN.acoes, inferredHiveN]
           allNotes.push('colmeia corrigida: promessa convertida em ação real')

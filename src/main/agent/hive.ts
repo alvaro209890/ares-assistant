@@ -539,7 +539,7 @@ export const compactSubagentContext = buildTaskContext
 // Verbos de DELEGAÇÃO (separados dos verbos de DOMÍNIO) — só consideramos que o
 // Ares prometeu chamar a Colmeia quando ele sinaliza encaminhamento explícito.
 const DELEGATION_RE =
-  /(?:\bvou\s+(?:pedir|chamar|acionar|consultar|encaminhar|delegar|passar)|\bpeç[oa]\s+(?:para|à|ao)|\bdeixe?\s+(?:com|que)\s+(?:a|o)\s+|\bacionar\s+(?:a|o)\s+|\bdelegar\s+(?:para|à|ao)|\bencaminhar\s+(?:para|à|ao)|\bagora\s+com\s+(?:a|o)\s+|\bfica\s+com\s+(?:a|o)\s+|\bhefesto\s+(?:vai|projeta|desenh)|\bt[eê]mis\s+(?:fará|vai|audita)|\batena\s+(?:vai|investiga|pesquisa)|\bprometeu\s+(?:vai|depura|investiga|analisa))/iu
+  /(?:\bvou\s+(?:pedir|chamar|acionar|consultar|encaminhar|delegar|passar)\b|\bpeç[oa]\s+(?:para|à|ao)\b|\bdeixe?\s+(?:com|que)\s+(?:a|o)\s+|\bacionar\s+(?:a|o)\s+|\bdelegar\s+(?:para|à|ao)\b|\bencaminhar\s+(?:para|à|ao)\b|\bagora\s+com\s+(?:a|o)\s+|\bfica\s+com\s+(?:a|o)\s+|\bhefesto\s+(?:vai|projeta|desenh)\b|\bt[eê]mis\s+(?:fará|vai|audita)\b|\batena\s+(?:vai|investiga|pesquisa)\b|\bprometeu\s+(?:vai|depura|investiga|analisa)\b)/iu
 
 /**
  * Guarda determinística para a Colmeia: se o modelo PROMETE chamar um

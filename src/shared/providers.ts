@@ -62,5 +62,8 @@ export function getProvider(id: string): ProviderPreset | undefined {
  * Provedores personalizados (custom) recebem o campo — o fallback de retry cobre rejeições.
  */
 export function providerSupportsReasoning(baseUrl: string): boolean {
+  const h = baseUrl.toLowerCase()
+  // Groq não suporta reasoning_effort e responde 400.
+  if (h.includes('groq.com')) return false
   return true
 }
